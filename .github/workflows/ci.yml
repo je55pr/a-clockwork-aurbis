@@ -1,0 +1,39 @@
+name: Build
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: .NET / Godot C# build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Verify redistributable source only
+        shell: pwsh
+        run: |
+          $blocked = git ls-files | Where-Object {
+            $_ -match '(^|/)(\.research|\.godot|bin|obj|node_modules)/' -or
+            $_ -match '\.(dll|exe|pdb|dat|mnf|gr2|dds|hkx|bk2|pfx|pem|key)$'
+          }
+          if ($blocked) { $blocked; throw "Proprietary/generated/binary files must not be committed" }
+      - name: Build Godot C# project
+        run: dotnet build EsoTest.csproj --configuration Debug --nologo
+      - name: Build geometry helper
+        run: dotnet build tools/ModelGeometry/ModelGeometry.csproj --configuration Debug --nologo
+      - name: Build model indexer
+        run: dotnet build tools/ModelNameIndexer/ModelNameIndexer.csproj --configuration Debug --nologo
+      - name: Verify indexer help without game data
+        run: dotnet run --no-build --project tools/ModelNameIndexer/ModelNameIndexer.csproj -- --help

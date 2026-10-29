@@ -1,0 +1,13 @@
+<Project Sdk="Godot.NET.Sdk/4.7.2">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>EsoTest</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The CLI uses original archives but is not part of the Godot assembly. -->
+    <Compile Remove="tools/**/*.cs" />
+  </ItemGroup>
+</Project>

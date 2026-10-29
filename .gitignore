@@ -1,0 +1,12 @@
+.godot/
+bin/
+obj/
+.research/
+*.log
+*.dat
+*.mnf
+*.gr2
+*.dds
+*.hkx
+*.bk2
+*.lang

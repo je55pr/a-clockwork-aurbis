@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\scripts\EsoArchive.cs" Link="EsoArchive.cs" />
+    <Compile Include="..\..\scripts\OodleDecoder.cs" Link="OodleDecoder.cs" />
+    <Compile Include="..\..\scripts\DepotMetadataContainer.cs" Link="DepotMetadataContainer.cs" />
+    <Compile Include="..\..\scripts\EsoModelNameIndex.cs" Link="EsoModelNameIndex.cs" />
+  </ItemGroup>
+</Project>
