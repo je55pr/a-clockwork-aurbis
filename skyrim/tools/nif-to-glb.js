@@ -35,6 +35,137 @@ function halfToFloat(h){
  return sign*Math.pow(2,exp-15)*(1+m/1024);
 }
 
+
+function legacyTreeShape(blocks, block, index){
+ const d=block.data;
+ if(d.length<96)throw Error('Short NiTriShape record');
+ const geomId=d.readInt32LE(72),shaderId=d.readInt32LE(89);
+ const data=blocks[geomId];
+ if(!data||data.type!=='NiTriShapeData')throw Error('Missing NiTriShapeData at '+geomId);
+ const buf=data.data,n=buf.readUInt32LE(4);
+ if(n<=0||n>65535||buf.readUInt8(8)!==1)throw Error('Invalid legacy vertex count');
+ let at=9;
+ const positions=[],normals=[],tangents=[],bitangents=[],uv=[],colors=[],indices=[];
+ const convert=(x,y,z)=>[x*0.01,z*0.01,-y*0.01];
+ const vec3=(p)=>[buf.readFloatLE(p),buf.readFloatLE(p+4),buf.readFloatLE(p+8)];
+ for(let v=0;v<n;v++,at+=12){const [x,y,z]=vec3(at);positions.push(...convert(x,y,z))}
+ if(buf.readUInt8(at)!==1||buf.readUInt32LE(at+1)!==16||buf.readUInt8(at+5)!==0||buf.readUInt8(at+6)!==1)
+  throw Error('Unsupported legacy normal flags '+buf.subarray(at,at+7).toString('hex'));
+ at+=7;
+ // NiTriShapeData stores full precision normals/tangents/bitangents.
+ for(const target of [normals,tangents,bitangents]){
+  for(let v=0;v<n;v++,at+=12){const [x,y,z]=vec3(at);target.push(x,z,-y)}
+ }
+ at+=16; // bounding sphere in Skyrim coordinates
+ if(buf.readUInt8(at++)!==1)throw Error('Unsupported legacy tree vertex colors');
+ for(let v=0;v<n;v++){for(let k=0;k<4;k++,at+=4)colors.push(buf.readFloatLE(at))}
+ for(let v=0;v<n;v++){uv.push(buf.readFloatLE(at),buf.readFloatLE(at+4));at+=8}
+ // Skyrim 20.2.0.7 legacy geometry data: consistency flags + shape triangles.
+ if(buf.readUInt16LE(at)!==0x4000||buf.readUInt32LE(at+2)!==0xffffffff)
+  throw Error('Unknown legacy tree UV/consistency flag at '+at+':'+buf.subarray(at,at+6).toString('hex'));
+ at+=6;
+ const tris=buf.readUInt16LE(at),points=buf.readUInt32LE(at+2),hasTriangles=buf.readUInt8(at+6);
+ at+=7;
+ if(tris<1||points!==tris*3||hasTriangles!==1||at+tris*6+2!==buf.length)
+  throw Error('Invalid legacy triangle data '+n+' '+tris+' at '+at+' of '+buf.length);
+ for(let i=0;i<tris*3;i++){
+  const v=buf.readUInt16LE(at+i*2);
+  if(v>=n)throw Error('Legacy triangle index '+v+' >= '+n);
+  indices.push(v);
+ }
+ if(buf.readUInt16LE(at+tris*6)!==0)throw Error('Legacy match groups unsupported');
+ const shader=blocks[shaderId];
+ let maps=null;
+ if(shader?.type==='BSLightingShaderProperty' && shader.data.length>=44){
+  const texId=shader.data.readInt32LE(40),set=blocks[texId];
+  if(set?.type==='BSShaderTextureSet'){
+   let p=4;const paths=[];
+   for(let i=0;i<Math.min(12,set.data.readUInt32LE(0));i++){
+    if(p+4>set.data.length)break;
+    const len=set.data.readUInt32LE(p);p+=4;
+    if(p+len>set.data.length)break;
+    paths.push(set.data.toString('latin1',p,p+len).replace(/^skyrimhd[\\/]build[\\/]pc[\\/]data[\\/]/i,''));
+    p+=len;
+   }
+   maps={diffuse:paths[0]||null,normal:paths[1]||null};
+  }
+ }
+ return {
+  name:block.name[d.readInt32LE(0)]||'NiTriShape_'+index,positions,uv,colors,
+  sourceNormals:normals,sourceTangents:tangents,sourceBitangents:bitangents,
+  texture:maps?.diffuse||null,normalTexture:maps?.normal||null,
+  alphaTest:maps?.diffuse?true:false,indices,vertices:n,tris,block:index
+ };
+}
+
+
+function skinnedTreeShape(blocks,block,index){
+ const d=block.data;
+ if(d.length<120)throw Error('Short skinned BSTriShape');
+ const skinId=d.readInt32LE(88),skin=blocks[skinId];
+ if(!skin || skin.type!=='NiSkinInstance')throw Error('No skin instance');
+ const partitionId=skin.data.readInt32LE(4),partition=blocks[partitionId];
+ if(!partition||partition.type!=='NiSkinPartition')throw Error('No skin partition');
+ const b=partition.data,parts=b.readUInt32LE(0),bytes=b.readUInt32LE(4),stride=b.readUInt32LE(8),descriptor=b.readBigUInt64LE(12);
+ if(parts<1||parts>150||stride<28||stride>64||bytes<=0||bytes%stride!==0||20+bytes>b.length)throw Error('Invalid SSE skin vertex stream');
+ const count=bytes/stride,positions=[],uv=[],colors=[],indices=[];
+ const uvOffset=Number((descriptor>>8n)&0xfn)*4;
+ if(uvOffset!==16)throw Error('Unsupported skinned UV offset '+uvOffset);
+ for(let i=0;i<count;i++){
+  const off=20+i*stride,xyz=[b.readFloatLE(off),b.readFloatLE(off+4),b.readFloatLE(off+8)];
+  if(!xyz.every(Number.isFinite))throw Error('Invalid skinned position');
+  positions.push(xyz[0]*0.01,xyz[2]*0.01,-xyz[1]*0.01);
+  uv.push(halfToFloat(b.readUInt16LE(off+uvOffset)),halfToFloat(b.readUInt16LE(off+uvOffset+2)));
+  // The source's packed RGBA attribute starts immediately before skin weights.
+  colors.push(b[off+28]/255,b[off+29]/255,b[off+30]/255,b[off+31]/255);
+ }
+ let at=20+bytes,triCount=0;
+ for(let p=0;p<parts;p++){
+  if(at+10>b.length)throw Error('Truncated SSE skin partition');
+  const nv=b.readUInt16LE(at),nt=b.readUInt16LE(at+2),nb=b.readUInt16LE(at+4),ns=b.readUInt16LE(at+6),nw=b.readUInt16LE(at+8);
+  at+=10;
+  if(nv>count||nb>100||ns!==0||nw!==4)throw Error('Unsupported SSE bone partition counts');
+  at+=nb*2;
+  if(b[at++]!==1)throw Error('Missing SSE vertex map');
+  at+=nv*2;
+  if(b[at++]!==1)throw Error('Missing SSE vertex weights');
+  at+=nv*nw*4;
+  if(b[at++]!==1)throw Error('Missing SSE triangles');
+  at+=nt*6;
+  if(b[at++]!==1)throw Error('Missing SSE bone index list');
+  at+=nv*nw;
+  if(at+10+nt*6>b.length)throw Error('Truncated SSE global triangle list');
+  const partFlag=b.readUInt16LE(at),partDescriptor=b.readBigUInt64LE(at+2);
+  if(partDescriptor!==descriptor)throw Error('Mismatched SSE vertex descriptors');
+  at+=10;
+  for(let j=0;j<nt*3;j++){
+   const v=b.readUInt16LE(at+j*2);
+   if(v>=count)throw Error('SSE global triangle index '+v+' >= '+count);
+   indices.push(v);
+  }
+  at+=nt*6;triCount+=nt;
+ }
+ if(at!==b.length || !indices.length)throw Error('SSE skin partition payload mismatch '+at+'/'+b.length);
+ const maps=(()=>{
+  const shader=blocks[d.readInt32LE(92)];
+  if(shader?.type!=='BSLightingShaderProperty')return null;
+  const set=blocks[shader.data.readInt32LE(40)];
+  if(set?.type!=='BSShaderTextureSet')return null;
+  let offset=4;const paths=[];
+  for(let i=0;i<Math.min(12,set.data.readUInt32LE(0));i++){
+   if(offset+4>set.data.length)break;
+   const len=set.data.readUInt32LE(offset);offset+=4;
+   if(offset+len>set.data.length)break;
+   paths.push(set.data.toString('latin1',offset,offset+len).replace(/^skyrimhd[\\/]build[\\/]pc[\\/]data[\\/]/i,''));offset+=len;
+  }
+  return paths;
+ })();
+ return {name:blocks[skinId]?.name[d.readInt32LE(0)]||'SkinnedTree_'+index,
+  positions,uv,colors,texture:maps?.[0]||null,normalTexture:maps?.[1]||null,
+  alphaTest:!!maps?.[0]&&/branch|leaf|needle/i.test(maps[0]),
+  indices,vertices:count,tris:triCount,block:index,skinned:true};
+}
+
 function getShapes(nif){
  const bs=parseNif(nif),shapes=[],skips={};
 
@@ -63,7 +194,10 @@ function getShapes(nif){
   const desc=d.readBigUInt64LE(100);
   const stride=Number(desc&0xfn)*4;
   const triCount=d.readUInt16LE(108),vertCount=d.readUInt16LE(110),dataSize=d.readUInt32LE(112);
-  if(!vertCount||!triCount){skips.empty=(skips.empty||0)+1;continue;}
+  if(!vertCount||!triCount){
+   try{shapes.push(skinnedTreeShape(bs,blk,id));skips.skinned=(skips.skinned||0)+1;}catch(e){skips.empty=(skips.empty||0)+1;skips.skinnedErrors=(skips.skinnedErrors||[]);if(bs.some(b=>b.type==='BSTreeNode'))skips.skinnedErrors.push('block '+id+': '+e.message);}
+   continue;
+  }
   if(stride<16||stride>80||vertCount*stride+triCount*6!==dataSize||116+dataSize>d.length){
    console.log('UNSUPPORTED block',id,blk.type,vertCount,triCount,stride,dataSize,d.length);
    skips.layout=(skips.layout||0)+1;continue;
@@ -90,6 +224,11 @@ function getShapes(nif){
   // preserve native packed geometry for diagnostic reconstruction first.
   const maps=sourceTextures(d);
   shapes.push({name:blk.name[d.readUInt32LE(0)]||'shape_'+id,positions:pos,uv,texture:maps?.diffuse||null,normalTexture:maps?.normal||null,indices:index,vertices:vertCount,tris:triCount,block:id});
+ }
+ if(!shapes.some(shape=>shape.skinned)) {
+ for(const [i,block] of bs.entries())if(block.type==='NiTriShape'){
+  try{shapes.push(legacyTreeShape(bs,block,i))}catch(e){skips.legacy=(skips.legacy||[]);skips.legacy.push('block '+i+': '+e.message)}
+ }
  }
  return {shapes,skips};
 }
@@ -137,6 +276,29 @@ function meshBasis(shape){
  return {normal:outN,tangent:outT};
 }
 
+function sourceBasis(shape){
+ const n=shape.vertices,normal=new Float32Array(n*3),tangent=new Float32Array(n*4);
+ for(let i=0;i<n;i++){
+  const p=i*3,q=i*4;
+  let [nx,ny,nz]=shape.sourceNormals.slice(p,p+3);
+  let len=Math.hypot(nx,ny,nz);
+  if(len<1e-10)throw Error('Zero source normal');
+  nx/=len;ny/=len;nz/=len;
+  normal.set([nx,ny,nz],p);
+  let [tx,ty,tz]=shape.sourceTangents.slice(p,p+3);
+  const dot=nx*tx+ny*ty+nz*tz;
+  tx-=nx*dot;ty-=ny*dot;tz-=nz*dot;
+  len=Math.hypot(tx,ty,tz);
+  if(len<1e-10)throw Error('Zero source tangent');
+  tx/=len;ty/=len;tz/=len;
+  const [bx,by,bz]=shape.sourceBitangents.slice(p,p+3);
+  const cross=[ny*tz-nz*ty,nz*tx-nx*tz,nx*ty-ny*tx];
+  const sign=cross[0]*bx+cross[1]*by+cross[2]*bz<0?-1:1;
+  tangent.set([tx,ty,tz,sign],q);
+ }
+ return {normal,tangent};
+}
+
 function buildGlb(shapes,sourcePath){
  const views=[],accessors=[],meshes=[],nodes=[],buffers=[],materials=[],images=[],textures=[];
  const textureMap=new Map();
@@ -152,7 +314,7 @@ function buildGlb(shapes,sourcePath){
   return views.length-1;
  }
  for(const shape of shapes){
-  const basis=meshBasis(shape);
+  const basis=shape.sourceNormals?sourceBasis(shape):meshBasis(shape);
   const vb=Buffer.alloc(shape.positions.length*4);
   for(let i=0;i<shape.positions.length;i++)vb.writeFloatLE(shape.positions[i],i*4);
   const ib=Buffer.alloc(shape.indices.length*2);
@@ -188,6 +350,9 @@ function buildGlb(shapes,sourcePath){
     matInfo.pbrMetallicRoughness.baseColorTexture={index:textureMap.get(texturePath)};
    }
   }
+  if(shape.alphaTest && matInfo.pbrMetallicRoughness.baseColorTexture){
+   matInfo.alphaMode='MASK';matInfo.alphaCutoff=0.45;
+  }
   const mat=materials.push(matInfo)-1;
   if(shape.normalTexture && uvAccessor!==undefined){
    const file=shape.normalTexture.replace(/\\/g,'/').replace(/^textures\//i,'').replace(/\.dds$/i,'.png').toLowerCase();
@@ -203,6 +368,11 @@ function buildGlb(shapes,sourcePath){
   }
   const attributes={POSITION:pi,NORMAL:normalAccessor,TANGENT:tangentAccessor};
   if(uvAccessor!==undefined)attributes.TEXCOORD_0=uvAccessor;
+  if(shape.colors?.length===shape.vertices*4){
+   const colors=Buffer.alloc(shape.colors.length*4);
+   for(let i=0;i<shape.colors.length;i++)colors.writeFloatLE(shape.colors[i],i*4);
+   attributes.COLOR_0=accessors.push({bufferView:addBuffer(colors,34962),componentType:5126,count:shape.vertices,type:'VEC4'})-1;
+  }
   const mi=meshes.push({name:shape.name,primitives:[{attributes,indices:ii,mode:4,material:mat}]})-1;
   nodes.push({mesh:mi,name:shape.name});
  }

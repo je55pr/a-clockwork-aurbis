@@ -34,5 +34,5 @@ for(const item of Object.values(indexed.models)){
  }
  modelTypes++;shapes+=j.meshes.length;
 }
-if(modelTypes!==118||normalMaterials<120||terrainNormals!==25)throw Error('Incomplete normal map coverage '+JSON.stringify({modelTypes,normalMaterials,terrainNormals}));
+if(modelTypes<133||normalMaterials<350||terrainNormals!==25)throw Error('Incomplete normal map coverage '+JSON.stringify({modelTypes,normalMaterials,terrainNormals}));
 console.log(JSON.stringify({terrainNormals,landscapeSources:landscape.decoded,propModels:modelTypes,propShapes:shapes,propNormalMaterials:normalMaterials,propWithoutNormal:missingMaterials,uniquePropNormalTextures:referenced.size,errors:0},null,2));
