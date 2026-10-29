@@ -9,11 +9,13 @@ const archiveNames=Array.from({length:9},(_,i)=>'Skyrim - Textures'+i+'.bsa');
 const archives=archiveNames.map(open),SIZE=1024,TEXTURE_SIZE=256;
 const work=path.join(root,'landscape-work');fs.mkdirSync(work,{recursive:true});
 const cache=new Map(),missing=new Set(),stats={sourceTextures:Object.keys(source.landscapeTextures).length,decoded:0,missing:0,tiles:0,overlays:0};
-function texture(ref){
+function texture(ref,channel='diffuse') {
  if(!ref)return null;
  const def=source.landscapeTextures[ref];
  if(!def)throw Error('Unresolved LAND texture ref: '+ref);
- const name='textures\\'+def.diffuse.replace(/\//g,'\\').toLowerCase();
+ const sourcePath=channel==='normal'?def.normal:def.diffuse;
+ if(!sourcePath)return null;
+ const name='textures\\'+sourcePath.replace(/\//g,'\\').toLowerCase();
  if(cache.has(name))return cache.get(name);
  let bytes;
  for(const a of archives){bytes=a.get(name);if(bytes)break}
@@ -35,13 +37,13 @@ function masksFor(cell){
  const quadrants=[[],[],[],[]],bases=Array(4).fill(null);
  for(const layer of cell.base){
   if(layer.quadrant<0||layer.quadrant>3)throw Error('Invalid BTXT quadrant '+layer.quadrant);
-  bases[layer.quadrant]=texture(layer.texture);
+  bases[layer.quadrant]={pixels:texture(layer.texture),normal:texture(layer.texture,'normal')};
  }
  for(const layer of cell.alpha){
   if(layer.quadrant<0||layer.quadrant>3)throw Error('Invalid ATXT quadrant '+layer.quadrant);
-  const pixels=texture(layer.texture),weights=new Float32Array(17*17);
+  const pixels=texture(layer.texture),normal=texture(layer.texture,'normal'),weights=new Float32Array(17*17);
   for(const [pos,weight] of layer.weights){if(pos<0||pos>=289)throw Error('Invalid VTXT index');weights[pos]=weight}
-  quadrants[layer.quadrant].push({order:layer.layer,pixels,weights});
+  quadrants[layer.quadrant].push({order:layer.layer,pixels,normal,weights});
  }
  for(const q of quadrants)q.sort((a,b)=>a.order-b.order);
  return {quadrants,bases};
@@ -59,7 +61,7 @@ function bilinear(weights,x,y){
 }
 fs.mkdirSync(path.join(root,'landscape'),{recursive:true});
 for(const cell of source.terrain){
- const {quadrants,bases}=masksFor(cell),buf=Buffer.allocUnsafe(SIZE*SIZE*4);
+ const {quadrants,bases}=masksFor(cell),buf=Buffer.allocUnsafe(SIZE*SIZE*4),normalBuf=Buffer.allocUnsafe(SIZE*SIZE*4);
  const wx0=cell.x*4096,wy0=cell.y*4096;
  for(let py=0;py<SIZE;py++){
   const y=(py+0.5)*32/SIZE,qy=y>=16?1:0,localY=y-qy*16;
@@ -69,9 +71,11 @@ for(const cell of source.terrain){
    const x=(px+0.5)*32/SIZE,qx=x>=16?1:0,localX=x-qx*16,q=qx+qy*2;
    const u=((wx0+(px+0.5)*4096/SIZE)/512)%1;
    const b=bases[q],at=(py*SIZE+px)*4;
-   if(b){
-    const idx=sampleRgba(b,u,v);
-    buf[at]=b[idx];buf[at+1]=b[idx+1];buf[at+2]=b[idx+2];buf[at+3]=255;
+   let nr=128,ng=128,nb=255;
+   if(b&&b.pixels){
+    const idx=sampleRgba(b.pixels,u,v);
+    buf[at]=b.pixels[idx];buf[at+1]=b.pixels[idx+1];buf[at+2]=b.pixels[idx+2];buf[at+3]=255;
+    if(b.normal){const ni=sampleRgba(b.normal,u,v);nr=b.normal[ni];ng=b.normal[ni+1];nb=b.normal[ni+2];}
    }else{
     // No BTXT is a genuine authoring case. Tint remains driven by VCLR.
     buf[at]=195;buf[at+1]=195;buf[at+2]=195;buf[at+3]=255;
@@ -84,7 +88,15 @@ for(const cell of source.terrain){
     buf[at]=Math.round(mix(buf[at],layer.pixels[id],weight));
     buf[at+1]=Math.round(mix(buf[at+1],layer.pixels[id+1],weight));
     buf[at+2]=Math.round(mix(buf[at+2],layer.pixels[id+2],weight));
+    if(layer.normal){const ni=sampleRgba(layer.normal,u,v);nr=mix(nr,layer.normal[ni],weight);ng=mix(ng,layer.normal[ni+1],weight);nb=mix(nb,layer.normal[ni+2],weight);}
    }
+   // Skyrim DDS normals are DirectX tangent-space: flip green for Godot.
+   let nx=nr/127.5-1,ny=-(ng/127.5-1),nz=nb/127.5-1;
+   const length=Math.max(0.00001,Math.hypot(nx,ny,nz));
+   nx/=length;ny/=length;nz/=length;
+   normalBuf[at]=Math.round(127.5*(nx+1));
+   normalBuf[at+1]=Math.round(127.5*(ny+1));
+   normalBuf[at+2]=Math.round(127.5*(nz+1));normalBuf[at+3]=255;
   }
  }
  const outfile=path.join(root,'landscape','cell_'+cell.x+'_'+cell.y+'.png');
@@ -92,6 +104,11 @@ for(const cell of source.terrain){
  const ff=cp.spawnSync('ffmpeg',['-hide_banner','-loglevel','error','-y','-f','rawvideo','-pixel_format','rgba','-video_size',SIZE+'x'+SIZE,'-i',rawFile,'-frames:v','1',outfile],{timeout:30000});
  fs.rmSync(rawFile);
  if(ff.status!==0)throw Error('Failed writing '+outfile+': '+ff.stderr.toString().slice(0,300));
+ const normalfile=path.join(root,'landscape','cell_'+cell.x+'_'+cell.y+'_normal.png');
+ fs.writeFileSync(rawFile,normalBuf);
+ const nf=cp.spawnSync('ffmpeg',['-hide_banner','-loglevel','error','-y','-f','rawvideo','-pixel_format','rgba','-video_size',SIZE+'x'+SIZE,'-i',rawFile,'-frames:v','1',normalfile],{timeout:30000});
+ fs.rmSync(rawFile);
+ if(nf.status!==0)throw Error('Failed writing normal '+normalfile+': '+nf.stderr.toString().slice(0,300));
  stats.tiles++;stats.overlays+=cell.alpha.length;
  console.log('BAKED LAND',cell.x,cell.y,'layers',cell.alpha.length);
 }

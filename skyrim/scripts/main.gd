@@ -106,6 +106,8 @@ func _build_landscape() -> void:
         arrays.resize(Mesh.ARRAY_MAX)
         var points := PackedVector3Array()
         var colors := PackedColorArray()
+        var normals := PackedVector3Array()
+        var tangents := PackedFloat32Array()
         var uvs := PackedVector2Array()
         var indices := PackedInt32Array()
         var heights: Array = tile["heights"]
@@ -121,6 +123,17 @@ func _build_landscape() -> void:
                 var py := cy * 4096.0 + j * 128.0
                 points.append(_world(px, py, float(heights[idx])))
                 uvs.append(Vector2(float(i) / 32.0, float(j) / 32.0))
+                # Source LAND heights are in Skyrim Z-up. +Skyrim Y becomes
+                # -Godot Z, so the normal's Z gradient has the opposite sign.
+                var left: int = maxi(i - 1, 0)
+                var right: int = mini(i + 1, 32)
+                var south: int = maxi(j - 1, 0)
+                var north: int = mini(j + 1, 32)
+                var slope_x: float = (float(heights[j * 33 + right]) - float(heights[j * 33 + left])) / (128.0 * (right - left))
+                var slope_y: float = (float(heights[north * 33 + i]) - float(heights[south * 33 + i])) / (128.0 * (north - south))
+                normals.append(Vector3(-slope_x, 1.0, slope_y).normalized())
+                var tangent := Vector3(1.0, slope_x, 0.0).normalized()
+                tangents.append_array(PackedFloat32Array([tangent.x, tangent.y, tangent.z, 1.0]))
                 if raw_colors.size() >= idx * 3 + 3:
                     var c := Color(raw_colors[idx * 3] / 255.0,
                         raw_colors[idx * 3 + 1] / 255.0,
@@ -137,6 +150,8 @@ func _build_landscape() -> void:
                 # Winding for the flipped horizontal Y coordinate.
                 indices.append_array(PackedInt32Array([a, c, b, b, c, d]))
         arrays[Mesh.ARRAY_VERTEX] = points
+        arrays[Mesh.ARRAY_NORMAL] = normals
+        arrays[Mesh.ARRAY_TANGENT] = tangents
         arrays[Mesh.ARRAY_COLOR] = colors
         arrays[Mesh.ARRAY_TEX_UV] = uvs
         arrays[Mesh.ARRAY_INDEX] = indices
@@ -150,6 +165,12 @@ func _build_landscape() -> void:
         if image != null:
             var tile_material := material.duplicate() as StandardMaterial3D
             tile_material.albedo_texture = ImageTexture.create_from_image(image)
+            var normal_file := "res://generated/landscape/cell_%d_%d_normal.png" % [cx, cy]
+            var normal_image := Image.load_from_file(ProjectSettings.globalize_path(normal_file))
+            if normal_image != null:
+                tile_material.normal_enabled = true
+                tile_material.normal_texture = ImageTexture.create_from_image(normal_image)
+                tile_material.normal_scale = 1.0
             inst.material_override = tile_material
         else:
             push_warning("Missing source landscape bake: " + filename)
@@ -272,7 +293,7 @@ func _build_hud() -> void:
         data["terrain"].size(), data["objects"].size(), data["actors"].size(), data["people"].size(), labels_count]
     stack.add_child(stats)
     hud = Label.new()
-    hud.text = "WASD fly  ·  Mouse look  ·  Q/E descend/ascend\nShift faster  ·  Tab markers  ·  N residents  ·  Esc release\nOriginal NIF assets and source-blended LAND textures (diffuse only)"
+    hud.text = "WASD fly  ·  Mouse look  ·  Q/E descend/ascend\nShift faster  ·  Tab markers  ·  N residents  ·  Esc release\nSource-authored diffuse & normal maps on props and LAND"
     stack.add_child(hud)
     var label := Label.new()
     label.position = Vector2(20, 670)

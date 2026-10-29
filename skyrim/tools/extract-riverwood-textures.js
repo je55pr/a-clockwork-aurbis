@@ -11,17 +11,19 @@ for(const model of modelNames){
  if(!mesh)continue;
  const shapes=getShapes(mesh).shapes;
  for(const shape of shapes){
-  if(!shape.texture)continue;
-  const key=shape.texture.toLowerCase().replace(/\//g,'\\');
-  if(!found.has(key))found.set(key,0);
-  found.set(key,found.get(key)+index.models[model].instances);
+  for(const texture of [shape.texture,shape.normalTexture]){
+   if(!texture)continue;
+   const key=texture.toLowerCase().replace(/\\/g,'\\');
+   if(!found.has(key))found.set(key,0);
+   found.set(key,found.get(key)+index.models[model].instances);
+  }
  }
 }
-console.log('source diffuse textures referenced:',found.size);
+console.log('source diffuse and normal textures referenced:',found.size);
 let count=0,missing=0,failed=0;
 const sorted=[...found.entries()].sort((a,b)=>b[1]-a[1]);
 for(const [key,uses] of sorted){
- if(count>=120)break;
+ if(count>=320)break;
  const texname=key.replace(/^textures\\/,'').replace(/\.dds$/i,'.png');
  const output=path.resolve(root,'textures',texname);
  if(fs.existsSync(output)){count++;continue}
@@ -33,7 +35,9 @@ for(const [key,uses] of sorted){
  fs.writeFileSync(raw,payload);
  fs.mkdirSync(path.dirname(output),{recursive:true});
  try{
-  execFileSync('ffmpeg',['-hide_banner','-loglevel','error','-y','-i',raw,'-vf','scale=1024:1024:force_original_aspect_ratio=decrease','-frames:v','1',output],{stdio:'pipe',timeout:30000});
+  const normal=/_n\.dds$/i.test(key);
+  const filter='scale=1024:1024:force_original_aspect_ratio=decrease'+(normal?',lutrgb=g=255-val':'');
+  execFileSync('ffmpeg',['-hide_banner','-loglevel','error','-y','-i',raw,'-vf',filter,'-frames:v','1',output],{stdio:'pipe',timeout:30000});
   count++;
   if(count%10===0)console.log('CONVERTED',count,'textures');
  }catch(e){failed++;console.log('ERR-CONVERT',key,e.stderr?.toString()?.slice(-180)||e.message);}

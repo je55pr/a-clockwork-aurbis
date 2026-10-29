@@ -22,7 +22,18 @@ if (-not (Test-Path -LiteralPath $terrainFile) -or
     & node (Join-Path $root 'tools\extract-riverwood.js')
     if ($LASTEXITCODE -ne 0) { throw 'Riverwood record extraction failed.' }
 }
-if (-not (Test-Path -LiteralPath (Join-Path $generated 'model-index.json'))) {
+$modelIndex = Join-Path $generated 'model-index.json'
+$modelTools = @(
+    (Join-Path $root 'tools\nif-to-glb.js'),
+    (Join-Path $root 'tools\extract-riverwood-textures.js'),
+    (Join-Path $root 'tools\convert-riverwood-models.js')
+)
+$rebuildModels = -not (Test-Path -LiteralPath $modelIndex)
+if (-not $rebuildModels) {
+    $modelTime = (Get-Item -LiteralPath $modelIndex).LastWriteTimeUtc
+    $rebuildModels = @($modelTools | Where-Object { (Get-Item -LiteralPath $_).LastWriteTimeUtc -gt $modelTime }).Count -gt 0
+}
+if ($rebuildModels) {
     if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
         throw 'FFmpeg is required to prepare the local Skyrim textures.'
     }
