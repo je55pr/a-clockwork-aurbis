@@ -212,7 +212,11 @@ func _build_models() -> void:
             var rx := float(rot[0])
             var ry := float(rot[1])
             var rz := float(rot[2])
-            item.basis = Basis(Vector3.UP, rz) * Basis(Vector3(0, 0, -1), ry) * Basis(Vector3.RIGHT, rx)
+            # Skyrim REFR Euler angles use the opposite rotation direction from
+            # Godot's right-handed Basis. The source positions already use the
+            # X, Z, -Y coordinate conversion, so negate all three angles here.
+            # Without this, neighbouring fence/wall sections form zigzags.
+            item.basis = Basis(Vector3.UP, -rz) * Basis(Vector3(0, 0, -1), -ry) * Basis(Vector3.RIGHT, -rx)
             add_child(item)
             placed += 1
         model.free()
