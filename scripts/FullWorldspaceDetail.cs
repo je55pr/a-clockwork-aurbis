@@ -23,6 +23,7 @@ public partial class FullWorldspaceDetail : Node3D
     private ShaderMaterial _baseMaterial = null!;
     private FixturePlacementGraph.Component _group = null!;
     private readonly Queue<Batch> _pending = new();
+    private readonly List<ShaderMaterial> _materials = new();
     private Image _coverageImage = null!;
     private ImageTexture _coverageTexture = null!;
     private int _width, _height, _complete, _failed, _renderedTiles, _totalBatches;
@@ -43,6 +44,7 @@ public partial class FullWorldspaceDetail : Node3D
         _worldLow=worldLowestHeight;
         _normalEnabled=normalEnabled;
         _tintEnabled=tintEnabled;
+        GD.Print($"FULL WORLDSPACE DETAIL optional layout/colour overlay: {(tintEnabled?"enabled":"disabled")}");
         _group=new FixturePlacementGraph.Component(
             new Dictionary<uint,FixturePlacementGraph.Position>{
                 [section.DescriptorId]=new(0,0)
@@ -91,6 +93,20 @@ public partial class FullWorldspaceDetail : Node3D
         _baseMaterial.SetShaderParameter("full_detail_mask_size",
             new Vector2I(_width,_height));
         _baseMaterial.SetShaderParameter("use_full_detail_mask",true);
+    }
+
+    public void SetTintEnabled(bool enabled)
+    {
+        _tintEnabled=enabled;
+        foreach(var material in _materials)
+            material.SetShaderParameter("apply_original_tint",enabled);
+    }
+
+    public void SetNormalEnabled(bool enabled)
+    {
+        _normalEnabled=enabled;
+        foreach(var material in _materials)
+            material.SetShaderParameter("use_original_normals",enabled);
     }
 
     public override void _Ready()
@@ -149,6 +165,7 @@ public partial class FullWorldspaceDetail : Node3D
                     (next.PaintZ+2.5f)*100f-_worldCenterZ)
             };
             AddChild(meshNode);
+            _materials.Add(near.Material);
 
             // Reveal the completed chunk, not an empty hole while loading.
             // Base mesh remains visible under chunks that failed to decode.
@@ -190,5 +207,6 @@ public partial class FullWorldspaceDetail : Node3D
         _baseMaterial?.SetShaderParameter("use_full_detail_mask",false);
         _coverageTexture?.Dispose();
         _coverageImage?.Dispose();
+        _materials.Clear();
     }
 }

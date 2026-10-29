@@ -50,7 +50,7 @@ public partial class TerrainBrowser : Node3D
     private bool _showOriginalLodNormals = true;
     private bool _currentHasNearColour;
     private bool _showOriginalNearColourTint =
-        System.Environment.GetEnvironmentVariable("ESO_EXPERIMENTAL_TINT") != "0";
+        System.Environment.GetEnvironmentVariable("ESO_EXPERIMENTAL_TINT") == "1";
     private bool _showOriginalLodDiffuse =
         System.Environment.GetEnvironmentVariable("ESO_TERRAIN_ELEVATION") != "1";
 
@@ -320,17 +320,21 @@ public partial class TerrainBrowser : Node3D
         normalMode.Toggled += enabled => {
             _showOriginalLodNormals = enabled;
             _currentLodMaterial?.SetShaderParameter("use_original_normals",enabled);
+            _terrainRoot?.GetNodeOrNull<FullWorldspaceDetail>(
+                "FullWorldspaceDetail")?.SetNormalEnabled(enabled);
         };
         vbox.AddChild(normalMode);
         var colourMode = new CheckButton {
-            Text = "Original per-tile colour tint (near-field)",
-            TooltipText = "Apply ESO's original 128x128 colour map to the recovered close-up terrain materials. For baked LOD fallback this may double-tint.",
+            Text = "ESO layout/colour overlay (diagnostic only)",
+            TooltipText = "Off by default: the source 128x128 terrain-colour maps contain legacy 'Layout Map v1.2' planning annotations including Dark Anchors and Group Bosses. Not suitable as world terrain colouring.",
             ButtonPressed = _showOriginalNearColourTint
         };
         colourMode.Toggled += enabled => {
             _showOriginalNearColourTint=enabled;
             _currentLodMaterial?.SetShaderParameter(
                 "apply_original_tint",enabled&&_currentHasNearColour);
+            _terrainRoot?.GetNodeOrNull<FullWorldspaceDetail>(
+                "FullWorldspaceDetail")?.SetTintEnabled(enabled);
         };
         vbox.AddChild(colourMode);
 
@@ -967,7 +971,7 @@ void fragment() {
             GD.Print("FULL SECTION " + _status.Text);
             if(fullWorldspaceDetail && !closeUp)
             {
-                var detail=new FullWorldspaceDetail();
+                var detail=new FullWorldspaceDetail { Name="FullWorldspaceDetail" };
                 detail.Setup(_archive,_decoder,_bundles,bundle,selectedMaterial,
                     result.LowestHeight,_showOriginalLodNormals,_showOriginalNearColourTint);
                 detail.Progress+=message=>{
