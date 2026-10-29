@@ -1,8 +1,8 @@
 extends Node3D
 
 # Source records are generated locally from SkyrimVR/Data/Skyrim.esm.
-# Terrain: 25 exact LAND VHGT/VCLR cells. Placements: REFR/ACHR source coordinates.
-# NIF building geometry is not reconstructed yet; only explicit diagnostic markers.
+# Terrain: source LAND VHGT/VCLR with BTXT/ATXT/VTXT blended albedo. Placements: REFR/ACHR source coordinates.
+# Source NIF buildings, landmark markers, and a resident catalogue.
 
 const DATA_FILE = "res://generated/riverwood.json"
 const TERRAIN_SCALE = 0.01
@@ -106,6 +106,7 @@ func _build_landscape() -> void:
         arrays.resize(Mesh.ARRAY_MAX)
         var points := PackedVector3Array()
         var colors := PackedColorArray()
+        var uvs := PackedVector2Array()
         var indices := PackedInt32Array()
         var heights: Array = tile["heights"]
         var raw_colors := PackedByteArray()
@@ -119,6 +120,7 @@ func _build_landscape() -> void:
                 var px := cx * 4096.0 + i * 128.0
                 var py := cy * 4096.0 + j * 128.0
                 points.append(_world(px, py, float(heights[idx])))
+                uvs.append(Vector2(float(i) / 32.0, float(j) / 32.0))
                 if raw_colors.size() >= idx * 3 + 3:
                     var c := Color(raw_colors[idx * 3] / 255.0,
                         raw_colors[idx * 3 + 1] / 255.0,
@@ -136,13 +138,22 @@ func _build_landscape() -> void:
                 indices.append_array(PackedInt32Array([a, c, b, b, c, d]))
         arrays[Mesh.ARRAY_VERTEX] = points
         arrays[Mesh.ARRAY_COLOR] = colors
+        arrays[Mesh.ARRAY_TEX_UV] = uvs
         arrays[Mesh.ARRAY_INDEX] = indices
         var mesh := ArrayMesh.new()
         mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
         var inst := MeshInstance3D.new()
         inst.name = "LAND_%d_%d" % [cx, cy]
         inst.mesh = mesh
-        inst.material_override = material
+        var filename := "res://generated/landscape/cell_%d_%d.png" % [cx, cy]
+        var image := Image.load_from_file(ProjectSettings.globalize_path(filename))
+        if image != null:
+            var tile_material := material.duplicate() as StandardMaterial3D
+            tile_material.albedo_texture = ImageTexture.create_from_image(image)
+            inst.material_override = tile_material
+        else:
+            push_warning("Missing source landscape bake: " + filename)
+            inst.material_override = material
         add_child(inst)
 
 func _pin(position: Vector3, label_text: String, color: Color, tall: bool) -> void:
@@ -261,7 +272,7 @@ func _build_hud() -> void:
         data["terrain"].size(), data["objects"].size(), data["actors"].size(), data["people"].size(), labels_count]
     stack.add_child(stats)
     hud = Label.new()
-    hud.text = "WASD fly  ·  Mouse look  ·  Q/E descend/ascend\nShift faster  ·  Tab markers  ·  N residents  ·  Esc release\nOriginal NIF meshes and diffuse textures; terrain materials not yet decoded"
+    hud.text = "WASD fly  ·  Mouse look  ·  Q/E descend/ascend\nShift faster  ·  Tab markers  ·  N residents  ·  Esc release\nOriginal NIF assets and source-blended LAND textures (diffuse only)"
     stack.add_child(hud)
     var label := Label.new()
     label.position = Vector2(20, 670)

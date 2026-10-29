@@ -15,7 +15,10 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
     throw 'Node.js is required to read Skyrim game data.'
 }
 $generated = Join-Path $root 'generated'
-if (-not (Test-Path -LiteralPath (Join-Path $generated 'riverwood.json'))) {
+$terrainFile = Join-Path $generated 'riverwood.json'
+$extractor = Join-Path $root 'tools\extract-riverwood.js'
+if (-not (Test-Path -LiteralPath $terrainFile) -or
+    (Get-Item -LiteralPath $terrainFile).LastWriteTimeUtc -lt (Get-Item -LiteralPath $extractor).LastWriteTimeUtc) {
     & node (Join-Path $root 'tools\extract-riverwood.js')
     if ($LASTEXITCODE -ne 0) { throw 'Riverwood record extraction failed.' }
 }
@@ -27,6 +30,17 @@ if (-not (Test-Path -LiteralPath (Join-Path $generated 'model-index.json'))) {
     if ($LASTEXITCODE -ne 0) { throw 'Skyrim texture conversion failed.' }
     & node (Join-Path $root 'tools\convert-riverwood-models.js')
     if ($LASTEXITCODE -ne 0) { throw 'NIF mesh conversion failed.' }
+}
+$landscapeManifest = Join-Path $generated 'landscape\manifest.json'
+$landscapeSource = Join-Path $generated 'riverwood.json'
+if (-not (Test-Path -LiteralPath $landscapeManifest) -or
+    (Get-Item -LiteralPath $landscapeSource).LastWriteTimeUtc -gt (Get-Item -LiteralPath $landscapeManifest).LastWriteTimeUtc -or
+    (Get-Item -LiteralPath (Join-Path $root 'tools\bake-landscape.js')).LastWriteTimeUtc -gt (Get-Item -LiteralPath $landscapeManifest).LastWriteTimeUtc) {
+    if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+        throw 'FFmpeg is required to prepare the original Skyrim landscape textures.'
+    }
+    & node (Join-Path $root 'tools\bake-landscape.js')
+    if ($LASTEXITCODE -ne 0) { throw 'Skyrim landscape material baking failed.' }
 }
 if ([string]::IsNullOrWhiteSpace($GodotExe)) {
     $esoGodotPath = 'C:\Repos\a-clockwork-aurbis\.research\godot-exe.txt'

@@ -17,7 +17,7 @@ function parse(file){
     off+=length;
    }else{
     if(off+24+length>end)throw Error('Bad record '+kind+' '+off);
-    const keep=['TES4','NPC_','ACHR','CELL','WRLD','LAND','REFR','STAT','MSTT','TREE','FLOR','ACTI','FURN','CONT','DOOR','LIGH','FURN','PACK','FACT','LVLN','LVLI','RACE','OTFT','ARMO','ARMA','WRLD'].includes(kind);
+    const keep=['TES4','NPC_','ACHR','CELL','WRLD','LAND','REFR','STAT','MSTT','TREE','FLOR','ACTI','FURN','CONT','DOOR','LIGH','FURN','PACK','FACT','LVLN','LVLI','RACE','OTFT','ARMO','ARMA','WRLD','LTEX','TXST'].includes(kind);
     if(keep){
      records.push({kind,id:buffer.readUInt32LE(off+12),flags:buffer.readUInt32LE(off+8),start:off+24,len:length,parents:ancestry,buffer});
     }
@@ -67,6 +67,43 @@ const chosenCells=cells.filter(c=>c.world===0x3c&&c.x>=minx&&c.x<=maxx&&c.y>=min
 console.log('PATCH CELL COUNT',chosenCells.length,'named',chosenCells.filter(c=>c.name).map(c=>c.name));
 const cset=new Map(chosenCells.map(c=>[c.id,c]));
 const used=new Map();
+const landscapeTextures={};
+function textureDefinition(formId){
+ if(!formId)return null;
+ const key=formId.toString(16).padStart(8,'0');
+ if(Object.prototype.hasOwnProperty.call(landscapeTextures,key))return key;
+ const ltex=index.get(formId);
+ if(!ltex||ltex.kind!=='LTEX')return null;
+ const textureSet=index.get(field4(ltex,'TNAM'));
+ if(!textureSet||textureSet.kind!=='TXST')return null;
+ const file=field(textureSet,'TX00')?.toString('utf8').replace(/\0.*$/,'').replace(/\\/g,'/');
+ if(!file)return null;
+ const normal=field(textureSet,'TX01')?.toString('utf8').replace(/\0.*$/,'').replace(/\\/g,'/');
+ landscapeTextures[key]={name:edid(ltex),textureSet:field4(ltex,'TNAM').toString(16).padStart(8,'0'),diffuse:file,normal:normal||null};
+ return key;
+}
+function terrainLayers(f){
+ const btxt=f.get('BTXT')||[],atxt=f.get('ATXT')||[],vtxt=f.get('VTXT')||[];
+ if(atxt.length!==vtxt.length)throw Error('LAND alpha layer and weights counts mismatch');
+ const parseLayer=b=>({
+  texture:b.length>=8?textureDefinition(b.readUInt32LE(0)):null,
+  quadrant:b.length>=8?b.readUInt8(4):null,
+  layer:b.length>=8?b.readUInt16LE(6):null
+ });
+ const base=btxt.map(parseLayer);
+ const alpha=atxt.map((layer,i)=>{
+  const p=parseLayer(layer),v=vtxt[i],weights=[];
+  if(v.length%8)throw Error('Invalid VTXT record byte length '+v.length);
+  for(let at=0;at<v.length;at+=8){
+   const index=v.readUInt16LE(at),opacity=v.readFloatLE(at+4);
+   if(index>=289||!Number.isFinite(opacity))throw Error('Invalid VTXT vertex index/opacity '+index+':'+opacity);
+   weights.push([index,+Math.max(0,Math.min(1,opacity)).toFixed(6)]);
+  }
+  return {...p,weights};
+ });
+ return {base,alpha};
+}
+
 for(const r of records.filter(r=>['LAND','REFR','ACHR'].includes(r.kind))){
  const gp=r.parents;
  const cr=gp.findLast(x=>x.type===6);
@@ -88,7 +125,7 @@ for(const r of records.filter(r=>['LAND','REFR','ACHR'].includes(r.kind))){
      if(x===0)rowStart=h;
     }
    }
-   result.terrain.push({...row,heights,vertexColors:vc?.length>=3267?vc.subarray(0,3267).toString('base64'):null});
+   result.terrain.push({...row,...terrainLayers(f),heights,vertexColors:vc?.length>=3267?vc.subarray(0,3267).toString('base64'):null});
   }
  }else{
   const baseId=field4(r,'NAME'),base=index.get(baseId);
@@ -153,5 +190,5 @@ console.log('COMMON NIF',Object.entries(result.objects.reduce((acc,x)=>((acc[x.n
 console.log('ACTORS',result.actors.map(x=>x.editor+' '+x.xyz.join(',')+' '+x.cell).slice(0,100));
 const out=path.resolve(__dirname,'../generated/riverwood.json');
 fs.mkdirSync(path.dirname(out),{recursive:true});
-fs.writeFileSync(out,JSON.stringify({...result,models:[...used.values()]},null,0));
+fs.writeFileSync(out,JSON.stringify({...result,landscapeTextures,models:[...used.values()]},null,0));
 console.log('WROTE',out,fs.statSync(out).size);
