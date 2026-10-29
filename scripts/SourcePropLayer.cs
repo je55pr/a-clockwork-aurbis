@@ -39,6 +39,8 @@ public partial class SourcePropLayer : Node3D
     public Vector3 Focus {get;private set;}
     public int SourceInstances=>_placements;
     public int SourceModels=>_transforms.Count;
+    public float? HarbourWaterCandidate {get;private set;}
+    public int HarbourAnchorCount {get;private set;}
     public event Action<string>? Progress;
 
     public void Setup(EsoArchive archive,OodleDecoder decoder,TerrainBundle bundle,
@@ -169,6 +171,28 @@ public partial class SourcePropLayer : Node3D
                 fixture.SourcePosition-new Vector3(cx,lowestHeight,cz)));
         }
         _placements=filtered.Count;
+        // Independently authored floating boats identify a likely common
+        // harbour-water elevation. This is NOT a decoded ESO water-level
+        // record and must remain labelled experimental in the viewer.
+        var boatHeights=filtered
+            .Where(f=>_names[f.ModelId].StartsWith("ALT_CSB_Boat",
+                StringComparison.OrdinalIgnoreCase))
+            .Select(f=>f.SourcePosition.Y).OrderBy(h=>h).ToArray();
+        int bestStart=0,bestCount=0;
+        for(int i=0;i<boatHeights.Length;i++)
+        {
+            int n=0;
+            while(i+n<boatHeights.Length&&
+                boatHeights[i+n]-boatHeights[i]<=1.5f)n++;
+            if(n>bestCount){bestStart=i;bestCount=n;}
+        }
+        if(bestCount>=3)
+        {
+            HarbourWaterCandidate=boatHeights[bestStart+bestCount/2];
+            HarbourAnchorCount=bestCount;
+            GD.Print($"SOURCE WATER CANDIDATE from {bestCount} boat origins: "+
+                $"elevation={HarbourWaterCandidate:F3} (not verified sea level)");
+        }
         if(_placements==0)
             throw new InvalidDataException("No verified prop fixtures within the selected terrain patch");
         float[] ys=filtered.Select(f=>f.SourcePosition.Y).OrderBy(v=>v).ToArray();

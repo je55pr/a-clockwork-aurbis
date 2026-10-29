@@ -1066,12 +1066,21 @@ void fragment() {
             {
                 var props=new SourcePropLayer{Name="SourcePlacedProps"};
                 props.Setup(_archive,_decoder,bundle,result.LowestHeight,tileX,tileZ);
+                string waterNote="No source-linked harbour-water elevation found.";
+                if(props.HarbourWaterCandidate is float boatHeight)
+                {
+                    root.AddChild(SourceHarbourWater.Create(boatHeight,
+                        result.LowestHeight,props.HarbourAnchorCount));
+                    waterNote=$"Water experiment: Y={boatHeight:F2} from "+
+                        $"{props.HarbourAnchorCount} authored boat placements; "+
+                        "actual ESO sea level and water material unverified.";
+                }
                 props.Progress+=message=>{
                     if(_terrainRoot==root)
                     {
                         _status.Text=message;
                         _briefStatus.Text=message;
-                        if(_sceneLabel!=null)_sceneLabel.Text=message;
+                        if(_sceneLabel!=null)_sceneLabel.Text=message+"\n"+waterNote;
                     }
                 };
                 root.AddChild(props);
@@ -1081,7 +1090,8 @@ void fragment() {
                 _briefStatus.Text="Best available 5x5 source scene";
                 if(_sceneLabel!=null)_sceneLabel.Text=
                     $"{props.SourceInstances:N0} original prop placements across "+
-                    $"{props.SourceModels} source models. Preparing textures...";
+                    $"{props.SourceModels} source models. Preparing textures...\n"+
+                    waterNote;
             }
             if(fullWorldspaceDetail && !closeUp)
             {
