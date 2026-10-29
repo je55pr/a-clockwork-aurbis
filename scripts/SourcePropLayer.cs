@@ -13,8 +13,8 @@ namespace EsoTest;
 
 /// <summary>
 /// Source-only placed props within one original 5x5 terrain patch.
-/// Model IDs, positions, and angles come directly from the 96-byte ESO fixture
-/// streams. No authored object is substituted or procedurally scattered.
+/// Model IDs, positions, and angles come from the original 96-byte source
+/// records within channel-21 chunks. Placements are never invented or substituted.
 /// Native GR2 conversion remains in an isolated helper process.
 /// </summary>
 public partial class SourcePropLayer : Node3D
@@ -47,7 +47,16 @@ public partial class SourcePropLayer : Node3D
         _archive=archive;_decoder=decoder;_bundle=bundle;
         _root=ProjectSettings.GlobalizePath("res://");
         var index=EsoModelNameIndex.Load(Path.Combine(_root,".research","model-names.tsv"));
-        var fixtures=new List<Fixture>(40000);
+        // Channel 21 stores the full per-chunk placed-object catalogue,
+        // including the vegetation that also appears in descriptor streams.
+        // It must replace (not supplement) channels 1/2 to avoid duplicates.
+        // Its file IDs index 250-unit chunks; per-instance X/Z are chunk local.
+        float minX=(tileX-2)*100f,maxX=(tileX+3)*100f;
+        float minZ=(tileZ-2)*100f,maxZ=(tileZ+3)*100f;
+        float cx=(tileX+0.5f)*100f;
+        float cz=(tileZ+0.5f)*100f;
+        var fixtures=new List<Fixture>(12000);
+        int sourceChunks=0;
         for(int i=bundle.DescriptorOrdinal+1;i<archive.Count;i++)
         {
             var record=archive.GetRecord(i);
@@ -55,15 +64,22 @@ public partial class SourcePropLayer : Node3D
             if(record.ArchiveIndex!=bundle.ArchiveIndex||
                 (record.UncompressedSize==583&&tag.Flags==0x4400&&tag.Field2==0))
                 break;
-            if(tag.Flags!=0x4800 || (uint)(tag.Field2>>5)!=bundle.DescriptorId ||
-                (tag.Field2&31) is not (1 or 2) ||
-                record.UncompressedSize is <8 or >8_000_000)continue;
-            byte[] data=archive.ReadDecoded(record,decoder);
-            if(data.Length<8 || BinaryPrimitives.ReadUInt32LittleEndian(data)!=23)
+            if(tag.Flags!=0x4000 ||
+                tag.Field2!=(bundle.DescriptorId*32+21) ||
+                record.UncompressedSize is <8 or >2_000_000)continue;
+            int chunkX=(int)(record.FileId>>16);
+            int chunkZ=(int)(record.FileId&0xffff);
+            // Only decode chunks overlapping the high-resolution 5x5 view.
+            if(chunkX*250>=maxX||(chunkX+1)*250<=minX||
+                chunkZ*250>=maxZ||(chunkZ+1)*250<=minZ)
                 continue;
+            byte[] data=archive.ReadDecoded(record,decoder);
+            if(data.Length<8||BinaryPrimitives.ReadUInt32LittleEndian(data)!=23)
+                throw new InvalidDataException("Unexpected placed-object chunk format");
             int count=BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(4));
             if(count<0||(long)count*96+8>data.Length)
-                throw new InvalidDataException("Invalid fixture count/record stride");
+                throw new InvalidDataException("Invalid placed-object count/stride");
+            sourceChunks++;
             for(int j=0;j<count;j++)
             {
                 int at=8+j*96;
@@ -71,18 +87,35 @@ public partial class SourcePropLayer : Node3D
                 uint model=BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(at+68));
                 var rotation=new Vector3(BitConverter.ToSingle(data,at+16),
                     BitConverter.ToSingle(data,at+20),BitConverter.ToSingle(data,at+24));
-                var position=new Vector3(BitConverter.ToSingle(data,at+28),
-                    BitConverter.ToSingle(data,at+32),BitConverter.ToSingle(data,at+36));
-                if(!rotation.IsFinite()||!position.IsFinite())continue;
-                fixtures.Add(new Fixture(id,model,position,rotation));
+                float localX=BitConverter.ToSingle(data,at+28);
+                float y=BitConverter.ToSingle(data,at+32);
+                float localZ=BitConverter.ToSingle(data,at+36);
+                if(!rotation.IsFinite()||!float.IsFinite(localX)||
+                    !float.IsFinite(localZ)||!float.IsFinite(y)||
+                    localX<0||localX>=250||localZ<0||localZ>=250)
+                    continue;
+                var position=new Vector3(chunkX*250f+localX,y,
+                    chunkZ*250f+localZ);
+                if(position.X>=minX&&position.X<maxX&&
+                    position.Z>=minZ&&position.Z<maxZ)
+                    fixtures.Add(new Fixture(id,model,position,rotation));
             }
         }
-
-        // Restrict placements to the same 5x5 authored terrain tiles.
-        float minX=(tileX-2)*100f,maxX=(tileX+3)*100f;
-        float minZ=(tileZ-2)*100f,maxZ=(tileZ+3)*100f;
-        float cx=(tileX+0.5f)*100f;
-        float cz=(tileZ+0.5f)*100f;
+        if(sourceChunks==0)
+            throw new InvalidDataException("No placed-object chunks in source terrain area");
+        // Build a lookup in one archive scan. Repeated FindId() over the 1.3M
+        // resource manifest would make hundreds of models prohibitively slow.
+        var modelIds=fixtures.Select(f=>f.ModelId).ToHashSet();
+        var candidateRecords=new Dictionary<uint,List<EsoRecord>>();
+        for(int i=0;i<archive.Count;i++)
+        {
+            var record=archive.GetRecord(i);
+            if(!modelIds.Contains(record.FileId)||
+                archive.GetIdIndexFields(i).Flags!=0)continue;
+            if(!candidateRecords.TryGetValue(record.FileId,out var records))
+                candidateRecords[record.FileId]=records=new List<EsoRecord>();
+            records.Add(record);
+        }
         var filtered=new List<Fixture>();
         var verified=new Dictionary<uint,string?>();
         foreach(var fixture in fixtures)
@@ -97,17 +130,20 @@ public partial class SourcePropLayer : Node3D
                     model.Status=="OK")
                 {
                     string candidate=EsoModelNameIndex.PreferredName(model);
-                    // PFX is an authored effect emitter, not a static world prop.
-                    // Its mesh alone is a misleading white polygon without
-                    // the ESO particle/material system; never fake that system.
-                    if(candidate.StartsWith("PFX_",StringComparison.OrdinalIgnoreCase))
+                    // PFX denotes effects, while CLN_INV denotes invisible helpers.
+                    // Their extracted meshes are not normal visible scene props.
+                    if(candidate.StartsWith("PFX_",StringComparison.OrdinalIgnoreCase)||
+                       candidate.StartsWith("CLN_INV_",StringComparison.OrdinalIgnoreCase))
                     {
                         verified[fixture.ModelId]=null;
                         continue;
                     }
                     // Accept every original, verified placed model, not just vegetation.
-                    var record=archive.FindId(fixture.ModelId).FirstOrDefault(r=>
-                        archive.GetIdIndexFields(r.Ordinal).Flags==0);
+                    var record=candidateRecords.TryGetValue(fixture.ModelId,out var candidates)
+                        ? candidates.FirstOrDefault(r=>
+                            EsoModelNameIndex.MatchesSource(model,r.ArchiveIndex,
+                                r.Offset,r.CompressedSize,r.UncompressedSize))
+                        : default;
                     if(record.UncompressedSize!=0&&
                         EsoModelNameIndex.MatchesSource(model,record.ArchiveIndex,
                             record.Offset,record.CompressedSize,record.UncompressedSize))
@@ -158,11 +194,18 @@ public partial class SourcePropLayer : Node3D
     public override void _Ready()
     {
         _running=true;
-        var ordered=_transforms.OrderByDescending(g=>g.Value.Count).Select(g=>g.Key).ToArray();
+        var ordered=_transforms.OrderByDescending(g=>IsArchitecture(_names[g.Key]))
+            .ThenByDescending(g=>g.Value.Count).Select(g=>g.Key).ToArray();
         Progress?.Invoke($"Source props: {_placements:N0} source placements, "+
             $"{ordered.Length} GR2 models, preparing geometry...");
         _=Task.Run(()=>Prepare(ordered));
     }
+
+    private static bool IsArchitecture(string name) =>
+        name.StartsWith("ALT_STR_",StringComparison.OrdinalIgnoreCase)||
+        name.StartsWith("ALT_WAF_",StringComparison.OrdinalIgnoreCase)||
+        name.StartsWith("GEN_DCK_",StringComparison.OrdinalIgnoreCase)||
+        name.StartsWith("ROK_",StringComparison.OrdinalIgnoreCase);
 
     private void Prepare(uint[] models)
     {
