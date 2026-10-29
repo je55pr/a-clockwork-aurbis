@@ -1,9 +1,8 @@
 language: en-GB
 tone_instructions: >-
-  Report credible correctness, security, performance, and maintainability issues,
-  including low-severity findings. Distinguish verified defects from risks.
-  Check archive bounds, native library isolation, Godot resource lifetime, and
-  whether source assets remain excluded from the repository.
+  Report credible defects and risks, even minor ones, with evidence. Check
+  archive bounds, native DLL isolation, Godot resource lifetimes, and leaked
+  ESO assets or secrets. Distinguish proven bugs from speculation.
 reviews:
   profile: assertive
   high_level_summary: true
