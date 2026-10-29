@@ -367,6 +367,11 @@ public partial class TerrainBrowser : Node3D
         layerRow.AddChild(paintButton);
         vbox.AddChild(layerRow);
 
+        var fullDetailButton = new Button { Text = "Render entire worldspace at original texture resolution" };
+        fullDetailButton.TooltipText="Full 65x65 terrain and authentic near-field material textures across the entire source worldspace. May use substantial GPU memory.";
+        fullDetailButton.Pressed += () => ShowCompleteSection(fullWorldspaceDetail:true);
+        EsoUiStyles.ButtonStyle(fullDetailButton,true);
+        vbox.AddChild(fullDetailButton);
         var allTilesButton = new Button { Text = "Render all tiles for selected section" };
         allTilesButton.Pressed += () => ShowCompleteSection();
         EsoUiStyles.ButtonStyle(allTilesButton);
@@ -458,7 +463,8 @@ public partial class TerrainBrowser : Node3D
             ShowCompleteSection(uint.TryParse(full,out uint detailId) ? detailId : 233u,
                 closeUp: true, tileX: detailX, tileZ: detailZ);
         else if (uint.TryParse(full, out uint fullId))
-            ShowCompleteSection(fullId);
+            ShowCompleteSection(fullId,
+                fullWorldspaceDetail:System.Environment.GetEnvironmentVariable("ESO_FULL_RES_WORLDSPACE")=="1");
         else if (System.Environment.GetEnvironmentVariable("ESO_AUTO_REGION") == "1")
             DiscoverAndDisplayFixtureRegions();
         else if (int.TryParse(region, out int regionIndex) && regionIndex >= 0 &&
@@ -780,11 +786,12 @@ void fragment() {
         }
     }
 
-    public void OpenSectionFromCatalogue(uint descriptorId) =>
-        ShowCompleteSection(descriptorId);
+    public void OpenSectionFromCatalogue(uint descriptorId,bool fullDetail=false) =>
+        ShowCompleteSection(descriptorId,fullWorldspaceDetail:fullDetail);
 
     private void ShowCompleteSection(uint? descriptorId = null,
-        bool closeUp = false, int tileX = 23, int tileZ = 25)
+        bool closeUp = false, int tileX = 23, int tileZ = 25,
+        bool fullWorldspaceDetail=false)
     {
         if (_bundles.Count == 0) return;
         uint id = descriptorId ?? _bundles[_selectedIndex].DescriptorId;
@@ -811,21 +818,30 @@ void fragment() {
             var root = new Node3D {
                 Name = closeUp ? "FullResolutionTerrainDetail" : "CompleteOriginalSection"
             };
-            using var shader = new Shader
+            var shader = new Shader
             {
                 Code = @"shader_type spatial;
 render_mode unshaded, cull_disabled;
+uniform sampler2D full_detail_mask : filter_nearest, repeat_disable;
+uniform bool use_full_detail_mask=false;
+uniform ivec2 full_detail_mask_origin=ivec2(0,0);
+uniform ivec2 full_detail_mask_size=ivec2(1,1);
 uniform float height_range = 250.0;
 varying float elevation;
 void vertex() { elevation = VERTEX.y; }
 void fragment() {
+    ivec2 coord=ivec2(floor(UV2))-full_detail_mask_origin;
+    if(use_full_detail_mask && all(greaterThanEqual(coord,ivec2(0))) &&
+       all(lessThan(coord,full_detail_mask_size)) &&
+       texture(full_detail_mask,(vec2(coord)+vec2(0.5))/vec2(full_detail_mask_size)).r>0.5)
+        discard;
     float t = clamp(elevation/max(height_range,0.01),0.0,1.0);
     ALBEDO = mix(
         mix(vec3(0.19,0.43,0.30),vec3(0.54,0.49,0.36),smoothstep(0.15,0.72,t)),
         vec3(0.76,0.73,0.70),smoothstep(0.72,1.0,t));
 }"
             };
-            using var material = new ShaderMaterial { Shader = shader };
+            var material = new ShaderMaterial { Shader = shader };
             material.SetShaderParameter(
                 "height_range", result.HighestHeight - result.LowestHeight);
             ShaderMaterial selectedMaterial = material;
@@ -897,7 +913,7 @@ void fragment() {
                     GD.PushWarning(textureStatus);
                 }
             }
-            using var mesh = result.Mesh;
+            var mesh = result.Mesh;
             root.AddChild(new MeshInstance3D
             {
                 Name = $"FullSection_{id}", Mesh = mesh, MaterialOverride = selectedMaterial
@@ -949,6 +965,20 @@ void fragment() {
             _briefStatus.Text=$"{(closeUp ? "Full-resolution close-up" : "Full region")} · " +
                 $"section {id} · {result.CellsRendered:N0} tiles";
             GD.Print("FULL SECTION " + _status.Text);
+            if(fullWorldspaceDetail && !closeUp)
+            {
+                var detail=new FullWorldspaceDetail();
+                detail.Setup(_archive,_decoder,_bundles,bundle,selectedMaterial,
+                    result.LowestHeight,_showOriginalLodNormals,_showOriginalNearColourTint);
+                detail.Progress+=message=>{
+                    if(_terrainRoot==root)
+                    {
+                        _status.Text=message;
+                        _briefStatus.Text=message;
+                    }
+                };
+                root.AddChild(detail);
+            }
         }
         catch (Exception error)
         {

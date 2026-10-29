@@ -27,7 +27,8 @@ public static class AutoRegionRenderer
         EsoArchive archive, OodleDecoder decoder,
         IReadOnlyList<TerrainBundle> bundles,
         FixturePlacementGraph.Component group,
-        int sampleStep=4, Vector2I? detailCenter=null, int detailRadius=2)
+        int sampleStep=4, Vector2I? detailCenter=null, int detailRadius=2,
+        Vector2I? renderFrom=null, Vector2I? renderToExclusive=null)
     {
         if (sampleStep<=0||64%sampleStep!=0)
             throw new ArgumentOutOfRangeException(nameof(sampleStep));
@@ -51,6 +52,9 @@ public static class AutoRegionRenderer
                 int localX = (int)(record.FileId >> 16);
                 int localZ = (int)(record.FileId & 0xFFFF);
                 var key = (position.X * 5 + localX, position.Z * 5 + localZ);
+                if(detailCenter is Vector2I center &&
+                    (Math.Abs(key.Item1-center.X)>detailRadius ||
+                     Math.Abs(key.Item2-center.Y)>detailRadius))continue;
                 if (!cells.TryGetValue(key, out var list))
                     cells[key] = list = new();
                 list.Add(record);
@@ -180,6 +184,8 @@ public static class AutoRegionRenderer
         var triangles=new List<int>(included.Count*(Side-1)*(Side-1)*6);
         foreach(var (coord,tile) in included.OrderBy(e=>e.Key.Z).ThenBy(e=>e.Key.X))
         {
+            if(renderFrom is Vector2I from && (coord.X<from.X || coord.Z<from.Y))continue;
+            if(renderToExclusive is Vector2I to && (coord.X>=to.X || coord.Z>=to.Y))continue;
             int offset=vertices.Count;
             for(int iz=0;iz<Side;iz++)
             for(int ix=0;ix<Side;ix++)

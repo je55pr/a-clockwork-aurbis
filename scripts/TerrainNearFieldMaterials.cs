@@ -68,15 +68,21 @@ public static class TerrainNearFieldMaterials
             byte[] data=archive.ReadDecoded(record,decoder);
             if(U32(data,0)!=0x20534444)
                 continue;
-            // ESO's DDS headers use an old, non-standard linear-size value
-            // (2048 for a 512x512 BC3 image instead of 262144). Godot
-            // validates this strictly. Correct only the in-memory header;
-            // preserve all authored compressed pixels/mip levels unchanged.
+            // ESO's BC1/BC2/BC3 DDS headers sometimes provide a top-level
+            // size while omitting DDSD_LINEARSIZE, or use an obsolete size
+            // (2048 for 512x512 BC3). Normalize only the in-memory header.
+            // Never modify any authored compressed pixels or mipmap payloads.
             uint width=U32(data,16),height=U32(data,12);
             uint fourCC=U32(data,84);
-            if(fourCC==0x35545844 && width>0 && height>0)
+            uint blockBytes=fourCC==0x31545844?8u:
+                fourCC is 0x33545844 or 0x35545844?16u:0u;
+            if(blockBytes!=0 && width is >0 and <=4096 &&
+                height is >0 and <=4096)
             {
-                uint expected=((width+3u)/4u)*((height+3u)/4u)*16u;
+                uint flags=U32(data,8);
+                flags=(flags|0x80000u)&~0x8u; // DDSD_LINEARSIZE, not DDSD_PITCH
+                uint expected=((width+3u)/4u)*((height+3u)/4u)*blockBytes;
+                BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(8,4),flags);
                 BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(20,4),expected);
             }
             var img=new Image();
