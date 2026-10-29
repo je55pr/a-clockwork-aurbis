@@ -376,6 +376,16 @@ public partial class TerrainBrowser : Node3D
         fullDetailButton.Pressed += () => ShowCompleteSection(fullWorldspaceDetail:true);
         EsoUiStyles.ButtonStyle(fullDetailButton,true);
         vbox.AddChild(fullDetailButton);
+        var vegetationButton = new Button {
+            Text = "Vulkhel Guard candidate: original vegetation test",
+            TooltipText = "Source-only vegetation fixtures around Auridon's two southernmost " +
+                "lighthouse placements; 3D model meshes and coordinates come from ESO. " +
+                "The precise Vulkhel Guard boundary is not independently verified."
+        };
+        vegetationButton.Pressed += ShowVulkhelVegetation;
+        EsoUiStyles.ButtonStyle(vegetationButton,true);
+        vbox.AddChild(vegetationButton);
+
         var allTilesButton = new Button { Text = "Render all tiles for selected section" };
         allTilesButton.Pressed += () => ShowCompleteSection();
         EsoUiStyles.ButtonStyle(allTilesButton);
@@ -469,6 +479,8 @@ public partial class TerrainBrowser : Node3D
         else if (uint.TryParse(full, out uint fullId))
             ShowCompleteSection(fullId,
                 fullWorldspaceDetail:System.Environment.GetEnvironmentVariable("ESO_FULL_RES_WORLDSPACE")=="1");
+        else if (System.Environment.GetEnvironmentVariable("ESO_VULKHEL_VEGETATION") == "1")
+            ShowVulkhelVegetation();
         else if (System.Environment.GetEnvironmentVariable("ESO_AUTO_REGION") == "1")
             DiscoverAndDisplayFixtureRegions();
         else if (int.TryParse(region, out int regionIndex) && regionIndex >= 0 &&
@@ -793,9 +805,14 @@ void fragment() {
     public void OpenSectionFromCatalogue(uint descriptorId,bool fullDetail=false) =>
         ShowCompleteSection(descriptorId,fullWorldspaceDetail:fullDetail);
 
+    private void ShowVulkhelVegetation()
+    {
+        ShowCompleteSection(233u, vegetationTest:true);
+    }
+
     private void ShowCompleteSection(uint? descriptorId = null,
         bool closeUp = false, int tileX = 23, int tileZ = 25,
-        bool fullWorldspaceDetail=false)
+        bool fullWorldspaceDetail=false, bool vegetationTest=false)
     {
         if (_bundles.Count == 0) return;
         uint id = descriptorId ?? _bundles[_selectedIndex].DescriptorId;
@@ -969,6 +986,29 @@ void fragment() {
             _briefStatus.Text=$"{(closeUp ? "Full-resolution close-up" : "Full region")} · " +
                 $"section {id} · {result.CellsRendered:N0} tiles";
             GD.Print("FULL SECTION " + _status.Text);
+            if(vegetationTest && !closeUp)
+            {
+                var vegetation=new SourceVegetationLayer{Name="OriginalVegetation"};
+                vegetation.Setup(_archive,_decoder,bundle,result.LowestHeight);
+                vegetation.Progress+=message=>{
+                    if(_terrainRoot==root)
+                    {
+                        _status.Text=message;
+                        _briefStatus.Text=message;
+                    }
+                };
+                root.AddChild(vegetation);
+                _focus=vegetation.Focus;
+                _distance=330f;
+                _yaw=0.5f;
+                _pitch=0.66f;
+                UpdateCamera();
+                _status.Text=$"Southern Auridon vegetation-only source test: " +
+                    $"{vegetation.SourceInstances:N0} original instances, " +
+                    $"{vegetation.SourceModels} GR2 models. No generated placements. " +
+                    "Vulkhel Guard boundary is provisional.";
+                _briefStatus.Text="Original vegetation test loading...";
+            }
             if(fullWorldspaceDetail && !closeUp)
             {
                 var detail=new FullWorldspaceDetail { Name="FullWorldspaceDetail" };

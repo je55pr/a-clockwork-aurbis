@@ -87,6 +87,12 @@ public partial class EsoAssetBrowser : CanvasLayer
             !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ESO_DETAIL_PATCH")) ||
             Environment.GetEnvironmentVariable("ESO_AUTO_REGION")=="1";
         ShowLibrary(!worldRequested);
+        if(Environment.GetEnvironmentVariable("ESO_CAPTURE_CLEAN")=="1")
+        {
+            _screen.Visible=false;
+            _worldReturn.Visible=false;
+            _terrain.SetWorkspaceVisible(false);
+        }
     }
 
     private void CreateLibrary()
