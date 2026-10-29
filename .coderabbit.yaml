@@ -1,14 +1,26 @@
 language: en-GB
+tone_instructions: >-
+  Report credible correctness, security, performance, and maintainability issues,
+  including low-severity findings. Distinguish verified defects from risks.
+  Check archive bounds, native library isolation, Godot resource lifetime, and
+  whether source assets remain excluded from the repository.
 reviews:
   profile: assertive
   high_level_summary: true
   review_status: true
+  review_details: true
+  poem: false
+  request_changes_workflow: false
+  commit_status: false
+  fail_commit_status: false
   auto_review:
     enabled: true
-    drafts: false
+    drafts: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
+    ignore_title_keywords: []
   path_filters:
-    - "!docs/**"
-    - "!.godot/**"
-    - "!.research/**"
+    - '*'
+    - '**/*'
 chat:
   auto_reply: true
