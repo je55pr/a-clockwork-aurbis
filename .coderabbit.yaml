@@ -1,14 +1,25 @@
 language: en-GB
+tone_instructions: >-
+  Report credible defects and risks, even minor ones, with evidence. Check
+  archive bounds, native DLL isolation, Godot resource lifetimes, and leaked
+  ESO assets or secrets. Distinguish proven bugs from speculation.
 reviews:
   profile: assertive
   high_level_summary: true
   review_status: true
+  review_details: true
+  poem: false
+  request_changes_workflow: false
+  commit_status: false
+  fail_commit_status: false
   auto_review:
     enabled: true
-    drafts: false
+    drafts: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
+    ignore_title_keywords: []
   path_filters:
-    - "!docs/**"
-    - "!.godot/**"
-    - "!.research/**"
+    - '*'
+    - '**/*'
 chat:
   auto_reply: true
