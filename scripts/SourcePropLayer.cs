@@ -12,12 +12,12 @@ using Process = System.Diagnostics.Process;
 namespace EsoTest;
 
 /// <summary>
-/// Read-only, source-only vegetation placement test for the southern Auridon
-/// lighthouse cluster. All object identities and transforms originate in the
-/// 96-byte fixture streams. Nothing is procedurally scattered or substituted.
-/// GR2 conversion remains in an isolated helper process.
+/// Source-only placed props within one original 5x5 terrain patch.
+/// Model IDs, positions, and angles come directly from the 96-byte ESO fixture
+/// streams. No authored object is substituted or procedurally scattered.
+/// Native GR2 conversion remains in an isolated helper process.
 /// </summary>
-public partial class SourceVegetationLayer : Node3D
+public partial class SourcePropLayer : Node3D
 {
     private readonly record struct Fixture(uint InstanceId, uint ModelId,
         Vector3 SourcePosition, Vector3 SourceAngles);
@@ -42,7 +42,7 @@ public partial class SourceVegetationLayer : Node3D
     public event Action<string>? Progress;
 
     public void Setup(EsoArchive archive,OodleDecoder decoder,TerrainBundle bundle,
-        float lowestHeight,float radius=600f)
+        float lowestHeight,int tileX,int tileZ)
     {
         _archive=archive;_decoder=decoder;_bundle=bundle;
         _root=ProjectSettings.GlobalizePath("res://");
@@ -78,25 +78,17 @@ public partial class SourceVegetationLayer : Node3D
             }
         }
 
-        // The two southernmost lighthouse records are source-authored anchors.
-        // This chooses a test camera/search centre, NOT a prop placement.
-        var lighthouse=fixtures.Where(f=>index.TryGetValue(f.ModelId,out var m)&&
-                EsoModelNameIndex.PreferredName(m).Contains("LightHouse",
-                    StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(f=>f.SourcePosition.Z).Take(2).ToArray();
-        if(lighthouse.Length!=2)
-            throw new InvalidDataException(
-                "Unable to identify two southern source lighthouse anchors");
-        Vector3 centre=(lighthouse[0].SourcePosition+
-            lighthouse[1].SourcePosition)*0.5f;
-        float cx=(bundle.OriginX+bundle.MaximumX+1)*50f;
-        float cz=(bundle.OriginY+bundle.MaximumY+1)*50f;
+        // Restrict placements to the same 5x5 authored terrain tiles.
+        float minX=(tileX-2)*100f,maxX=(tileX+3)*100f;
+        float minZ=(tileZ-2)*100f,maxZ=(tileZ+3)*100f;
+        float cx=(tileX+0.5f)*100f;
+        float cz=(tileZ+0.5f)*100f;
         var filtered=new List<Fixture>();
         var verified=new Dictionary<uint,string?>();
         foreach(var fixture in fixtures)
         {
-            Vector3 difference=fixture.SourcePosition-centre;
-            if(difference.X*difference.X+difference.Z*difference.Z>radius*radius)
+            if(fixture.SourcePosition.X<minX||fixture.SourcePosition.X>=maxX||
+                fixture.SourcePosition.Z<minZ||fixture.SourcePosition.Z>=maxZ)
                 continue;
             if(!verified.TryGetValue(fixture.ModelId,out var name))
             {
@@ -105,21 +97,26 @@ public partial class SourceVegetationLayer : Node3D
                     model.Status=="OK")
                 {
                     string candidate=EsoModelNameIndex.PreferredName(model);
-                    if(candidate.StartsWith("VEG_",StringComparison.OrdinalIgnoreCase)||
-                       candidate.StartsWith("TRE_",StringComparison.OrdinalIgnoreCase))
+                    // PFX is an authored effect emitter, not a static world prop.
+                    // Its mesh alone is a misleading white polygon without
+                    // the ESO particle/material system; never fake that system.
+                    if(candidate.StartsWith("PFX_",StringComparison.OrdinalIgnoreCase))
                     {
-                        var record=archive.FindId(fixture.ModelId).FirstOrDefault(r=>
-                            archive.GetIdIndexFields(r.Ordinal).Flags==0);
-                        if(record.UncompressedSize!=0&&
-                            EsoModelNameIndex.MatchesSource(model,record.ArchiveIndex,
-                                record.Offset,record.CompressedSize,record.UncompressedSize))
-                        {
-                            name=candidate;
-                            _cacheKeys[fixture.ModelId]=$"{fixture.ModelId:X8}-"+
-                                $"a{record.ArchiveIndex}-o{record.Offset}-"+
-                                $"c{record.CompressedSize}-h{record.Hash:X8}-"+
-                                $"u{record.UncompressedSize}-v5.esm";
-                        }
+                        verified[fixture.ModelId]=null;
+                        continue;
+                    }
+                    // Accept every original, verified placed model, not just vegetation.
+                    var record=archive.FindId(fixture.ModelId).FirstOrDefault(r=>
+                        archive.GetIdIndexFields(r.Ordinal).Flags==0);
+                    if(record.UncompressedSize!=0&&
+                        EsoModelNameIndex.MatchesSource(model,record.ArchiveIndex,
+                            record.Offset,record.CompressedSize,record.UncompressedSize))
+                    {
+                        name=candidate;
+                        _cacheKeys[fixture.ModelId]=string.Format(
+                            "{0:X8}-a{1}-o{2}-c{3}-h{4:X8}-u{5}-v5.esm",
+                            fixture.ModelId,record.ArchiveIndex,record.Offset,
+                            record.CompressedSize,record.Hash,record.UncompressedSize);
                     }
                 }
                 verified[fixture.ModelId]=name;
@@ -137,35 +134,32 @@ public partial class SourceVegetationLayer : Node3D
         }
         _placements=filtered.Count;
         if(_placements==0)
-            throw new InvalidDataException("No verified vegetation fixtures in source area");
+            throw new InvalidDataException("No verified prop fixtures within the selected terrain patch");
         float[] ys=filtered.Select(f=>f.SourcePosition.Y).OrderBy(v=>v).ToArray();
-        // Frame the source-authored civic hedges rather than arbitrary terrain.
-        // Camera framing is derived; no instance is moved or fabricated.
+        // Use a source-authored hedge cluster to centre the first-person view.
         var civic=filtered.Where(f=>_names[f.ModelId].Contains("Hedge",
                 StringComparison.OrdinalIgnoreCase)||
-                _names[f.ModelId].Contains("topiary",
+            _names[f.ModelId].Contains("topiary",
                 StringComparison.OrdinalIgnoreCase)).ToArray();
-        Vector3 viewPoint=centre;
-        if(civic.Length>=10)
+        Vector3 target=new((tileX+0.5f)*100f,0f,(tileZ+0.5f)*100f);
+        if(civic.Length>=2)
         {
             var xs=civic.Select(f=>f.SourcePosition.X).OrderBy(v=>v).ToArray();
             var zs=civic.Select(f=>f.SourcePosition.Z).OrderBy(v=>v).ToArray();
-            viewPoint=new Vector3(xs[xs.Length/2],centre.Y,zs[zs.Length/2]);
+            target=new Vector3(xs[xs.Length/2],0f,zs[zs.Length/2]);
         }
-        Focus=new Vector3(viewPoint.X-cx,ys[ys.Length/2]-lowestHeight+8,
-            viewPoint.Z-cz);
-        GD.Print($"SOUTHERN AURIDON civic hedges={civic.Length}, camera from source "+
-            $"fixtures=({viewPoint.X:F1},{viewPoint.Z:F1})");
-        GD.Print($"SOUTHERN AURIDON vegetation source: centre=({centre.X:F1},"+
-            $"{centre.Z:F1}), radius={radius:F0}, original instances={_placements}, "+
-            $"model IDs={_transforms.Count}; all source positions/angles preserved");
+        Focus=new Vector3(target.X-cx,0f,target.Z-cz);
+        GD.Print(string.Format(
+            "SOURCE PROPS tiles {0}..{1} / {2}..{3}: {4} placements, {5} models, {6} hedges, camera {7:F1},{8:F1}",
+            tileX-2,tileX+2,tileZ-2,tileZ+2,_placements,
+            _transforms.Count,civic.Length,target.X,target.Z));
     }
 
     public override void _Ready()
     {
         _running=true;
         var ordered=_transforms.OrderByDescending(g=>g.Value.Count).Select(g=>g.Key).ToArray();
-        Progress?.Invoke($"Vegetation: {_placements:N0} source placements, "+
+        Progress?.Invoke($"Source props: {_placements:N0} source placements, "+
             $"{ordered.Length} GR2 models, preparing geometry...");
         _=Task.Run(()=>Prepare(ordered));
     }
@@ -227,17 +221,17 @@ public partial class SourceVegetationLayer : Node3D
             catch(Exception e)
             {
                 _missingModels++;
-                GD.PushWarning($"ESO vegetation model 0x{ready.ModelId:X8} not rendered: {e.Message}");
+                GD.PushWarning($"ESO prop model 0x{ready.ModelId:X8} not rendered: {e.Message}");
             }
             if((_loadedModels+_missingModels)%5==0||
                 _loadedModels+_missingModels==_transforms.Count)
             {
-                string message=$"Southern Auridon original vegetation: "+
+                string message=$"Southern Auridon original props: "+
                     $"{_placements:N0} source instances / "+
                     $"{_loadedModels}/{_transforms.Count} models loaded, "+
                     $"{_missingModels} failed, {_meshBatches} GPU instance batches";
                 Progress?.Invoke(message);
-                GD.Print("SOURCE VEGETATION "+message);
+                GD.Print("SOURCE PROPS "+message);
             }
         }
         if(_loadedModels+_missingModels==_transforms.Count)

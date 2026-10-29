@@ -45,6 +45,10 @@ public partial class TerrainBrowser : Node3D
     // Free-flight: _focus/_distance are retained only for initial framing when switching scenes.
     private Vector3 _flyPosition;
     private bool _mouseLooking;
+    private bool _bestView;
+    public bool IsBestView => _bestView;
+    private CanvasLayer? _simpleHud;
+    private Label? _sceneLabel;
     private float _flySpeed = 35f;
     private ShaderMaterial? _currentLodMaterial;
     private bool _showOriginalLodNormals = true;
@@ -71,7 +75,8 @@ public partial class TerrainBrowser : Node3D
 
     public void SetWorkspaceVisible(bool visible)
     {
-        if(_terrainUiLayer!=null)_terrainUiLayer.Visible=visible;
+        if(_terrainUiLayer!=null)_terrainUiLayer.Visible=visible&&!_bestView;
+        if(_simpleHud!=null)_simpleHud.Visible=visible&&_bestView;
         if(!visible && _referenceMap!=null)_referenceMap.Visible=false;
         if(!visible && _atlas!=null)_atlas.Visible=false;
     }
@@ -86,6 +91,7 @@ public partial class TerrainBrowser : Node3D
         }
         _camera.Current = true;
         GD.Print($"TerrainBrowser camera: {_camera.GetPath()}");
+        CreateSimpleHud();
         var layer = new CanvasLayer {Visible=false};
         _terrainUiLayer=layer;
         AddChild(layer);
@@ -382,7 +388,7 @@ public partial class TerrainBrowser : Node3D
                 "lighthouse placements; 3D model meshes and coordinates come from ESO. " +
                 "The precise Vulkhel Guard boundary is not independently verified."
         };
-        vegetationButton.Pressed += ShowVulkhelVegetation;
+        vegetationButton.Pressed += ShowBestAvailableScene;
         EsoUiStyles.ButtonStyle(vegetationButton,true);
         vbox.AddChild(vegetationButton);
 
@@ -480,7 +486,7 @@ public partial class TerrainBrowser : Node3D
             ShowCompleteSection(fullId,
                 fullWorldspaceDetail:System.Environment.GetEnvironmentVariable("ESO_FULL_RES_WORLDSPACE")=="1");
         else if (System.Environment.GetEnvironmentVariable("ESO_VULKHEL_VEGETATION") == "1")
-            ShowVulkhelVegetation();
+            ShowBestAvailableScene();
         else if (System.Environment.GetEnvironmentVariable("ESO_AUTO_REGION") == "1")
             DiscoverAndDisplayFixtureRegions();
         else if (int.TryParse(region, out int regionIndex) && regionIndex >= 0 &&
@@ -490,11 +496,8 @@ public partial class TerrainBrowser : Node3D
             ShowCatalogRegion(regionIndex);
         }
         else if (requested.Length > 0) JumpTo(requested);
-        else if (System.Environment.GetEnvironmentVariable("ESO_START_TERRAIN") == "1")
-            ShowCompleteSection(233);
         else
-            _status.Text = "Asset browser ready (B). Choose a worldspace to view its original terrain. " +
-                "Full 3D rendering may be unavailable while the ESO depot is downloading.";
+            ShowBestAvailableScene();
         if (System.Environment.GetEnvironmentVariable("ESO_GAP_DIAGNOSTIC") == "1")
             InspectCurrentSectionGaps();
         string mask = System.Environment.GetEnvironmentVariable("ESO_PAINT_MASK") ?? "";
@@ -805,9 +808,82 @@ void fragment() {
     public void OpenSectionFromCatalogue(uint descriptorId,bool fullDetail=false) =>
         ShowCompleteSection(descriptorId,fullWorldspaceDetail:fullDetail);
 
-    private void ShowVulkhelVegetation()
+    private void CreateSimpleHud()
     {
-        ShowCompleteSection(233u, vegetationTest:true);
+        var layer=new CanvasLayer{Name="WorldHud",Layer=2,Visible=false};
+        _simpleHud=layer;
+        AddChild(layer);
+        var panel=new PanelContainer{
+            Position=new Vector2(16,16),
+            CustomMinimumSize=new Vector2(350,0),
+            MouseFilter=Control.MouseFilterEnum.Ignore
+        };
+        panel.AddThemeStyleboxOverride("panel",
+            EsoUiStyles.Box(EsoUiStyles.Background,10,1,new Color("#324b5b"),12));
+        layer.AddChild(panel);
+        var content=new VBoxContainer();
+        content.AddThemeConstantOverride("separation",5);
+        panel.AddChild(content);
+        var title=new Label{Text="SOUTHERN AURIDON  |  SOURCE SCENE"};
+        title.AddThemeFontSizeOverride("font_size",16);
+        content.AddChild(title);
+        _sceneLabel=new Label{
+            Text="Loading original landscape...",
+            AutowrapMode=TextServer.AutowrapMode.WordSmart,
+            CustomMinimumSize=new Vector2(350,0)
+        };
+        _sceneLabel.AddThemeFontSizeOverride("font_size",12);
+        content.AddChild(_sceneLabel);
+        var help=new Label{
+            Text="WASD move | Right mouse look | E/Q up/down | Shift sprint | Wheel speed",
+            AutowrapMode=TextServer.AutowrapMode.WordSmart
+        };
+        help.AddThemeFontSizeOverride("font_size",11);
+        help.Modulate=new Color(0.75f,0.82f,0.88f);
+        content.AddChild(help);
+    }
+
+    // Sample source elevations at the selected position; the camera is
+    // ground-level, not an overhead orbit or a paper-map approximation.
+    private void PositionGroundCameraAtSource(TerrainBundle bundle,int centerX,
+        int centerZ,float lowestHeight,Vector3 localSourcePosition)
+    {
+        if(_camera==null)return;
+        float worldX=(centerX+0.5f)*100f+localSourcePosition.X;
+        float worldZ=(centerZ+0.5f)*100f+localSourcePosition.Z;
+        int tx=Mathf.FloorToInt(worldX/100f),tz=Mathf.FloorToInt(worldZ/100f);
+        var record=bundle.Tiles.FirstOrDefault(r=>
+            (int)(r.FileId>>16)==tx&&(int)(r.FileId&0xffff)==tz);
+        if(record.UncompressedSize==0)
+            throw new InvalidOperationException("Camera tile missing from ESO source");
+        if(!LandTile.TryParse(_archive.ReadDecoded(record,_decoder),out var tile)||
+            tile==null)
+            throw new InvalidOperationException("Cannot decode camera heightfield");
+        float u=Mathf.Clamp((worldX-tx*100f)/100f,0f,1f)*64f;
+        float v=Mathf.Clamp((worldZ-tz*100f)/100f,0f,1f)*64f;
+        int ix=Mathf.FloorToInt(u),iz=Mathf.FloorToInt(v);
+        int nx=Math.Min(ix+1,64),nz=Math.Min(iz+1,64);
+        float a=tile.Samples[iz*65+ix],b=tile.Samples[iz*65+nx];
+        float c=tile.Samples[nz*65+ix],e=tile.Samples[nz*65+nx];
+        if(a==0||b==0||c==0||e==0)
+            throw new InvalidOperationException("Camera would spawn in height padding");
+        float h=Mathf.Lerp(Mathf.Lerp(a,b,u-ix),Mathf.Lerp(c,e,u-ix),v-iz);
+        _flyPosition=new Vector3(localSourcePosition.X,h-lowestHeight+2.15f,
+            localSourcePosition.Z);
+        _yaw=0.45f;
+        _pitch=0.05f;
+        _flySpeed=8f;
+        _camera.Position=_flyPosition;
+        _camera.Rotation=new Vector3(-_pitch,_yaw,0f);
+        GD.Print($"SOURCE GROUND CAMERA: ({worldX:F2},{worldZ:F2}) "+
+            $"heightfield={h:F2}, eyeHeight=2.15, section={bundle.DescriptorId}");
+    }
+    private void ShowBestAvailableScene()
+    {
+        _bestView=true;
+        if(_terrainUiLayer!=null)_terrainUiLayer.Visible=false;
+        if(_simpleHud!=null)_simpleHud.Visible=true;
+        ShowCompleteSection(233u,closeUp:true,tileX:23,tileZ:39,vegetationTest:true);
     }
 
     private void ShowCompleteSection(uint? descriptorId = null,
@@ -986,28 +1062,26 @@ void fragment() {
             _briefStatus.Text=$"{(closeUp ? "Full-resolution close-up" : "Full region")} · " +
                 $"section {id} · {result.CellsRendered:N0} tiles";
             GD.Print("FULL SECTION " + _status.Text);
-            if(vegetationTest && !closeUp)
+            if(vegetationTest && closeUp)
             {
-                var vegetation=new SourceVegetationLayer{Name="OriginalVegetation"};
-                vegetation.Setup(_archive,_decoder,bundle,result.LowestHeight);
-                vegetation.Progress+=message=>{
+                var props=new SourcePropLayer{Name="SourcePlacedProps"};
+                props.Setup(_archive,_decoder,bundle,result.LowestHeight,tileX,tileZ);
+                props.Progress+=message=>{
                     if(_terrainRoot==root)
                     {
                         _status.Text=message;
                         _briefStatus.Text=message;
+                        if(_sceneLabel!=null)_sceneLabel.Text=message;
                     }
                 };
-                root.AddChild(vegetation);
-                _focus=vegetation.Focus;
-                _distance=330f;
-                _yaw=0.5f;
-                _pitch=0.66f;
-                UpdateCamera();
-                _status.Text=$"Southern Auridon vegetation-only source test: " +
-                    $"{vegetation.SourceInstances:N0} original instances, " +
-                    $"{vegetation.SourceModels} GR2 models. No generated placements. " +
-                    "Vulkhel Guard boundary is provisional.";
-                _briefStatus.Text="Original vegetation test loading...";
+                root.AddChild(props);
+                PositionGroundCameraAtSource(bundle,tileX,tileZ,
+                    result.LowestHeight,props.Focus);
+                _status.Text="Original source props and native 65x65 terrain loaded.";
+                _briefStatus.Text="Best available 5x5 source scene";
+                if(_sceneLabel!=null)_sceneLabel.Text=
+                    $"{props.SourceInstances:N0} original prop placements across "+
+                    $"{props.SourceModels} source models. Preparing textures...";
             }
             if(fullWorldspaceDetail && !closeUp)
             {

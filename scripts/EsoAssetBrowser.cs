@@ -85,7 +85,8 @@ public partial class EsoAssetBrowser : CanvasLayer
         bool worldRequested=Environment.GetEnvironmentVariable("ESO_START_TERRAIN")=="1" ||
             !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ESO_FULL_SECTION")) ||
             !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ESO_DETAIL_PATCH")) ||
-            Environment.GetEnvironmentVariable("ESO_AUTO_REGION")=="1";
+            Environment.GetEnvironmentVariable("ESO_AUTO_REGION")=="1" ||
+            Environment.GetEnvironmentVariable("ESO_ASSET_BROWSER")!="1";
         ShowLibrary(!worldRequested);
         if(Environment.GetEnvironmentVariable("ESO_CAPTURE_CLEAN")=="1")
         {
@@ -303,7 +304,7 @@ public partial class EsoAssetBrowser : CanvasLayer
     {
         _inLibrary=library;
         _screen.Visible=library;
-        _worldReturn.Visible=!library;
+        _worldReturn.Visible=!library&&!_terrain.IsBestView;
         _terrain.SetWorkspaceVisible(!library);
     }
 
