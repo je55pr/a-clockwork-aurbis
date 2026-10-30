@@ -9,7 +9,7 @@ static int Usage()
 
     dotnet run -c Release --project tools/SimulationRunner -- [options]
 
-    --people N        Number of agents (default 10000)
+    --people N        Synthetic agents (default 10000); real profile cap only if specified
     --days N          Simulated days (default 3, max 365)
     --seed N          Stable world seed (default 42)
     --profiles PATH   Use ProfileBuilder initial-npcs.jsonl instead of synthetic agents
@@ -28,7 +28,8 @@ static int Usage()
 
 try
 {
-    int people = 10_000, days = 3, seed = 42;
+    int? requestedPeople = null;
+    int days = 3, seed = 42;
     string? path = null, area = null, trace = null;
     bool traceFirst = false, json = false;
 
@@ -41,7 +42,7 @@ try
         {
             case "--help":
             case "-h": return Usage();
-            case "--people": people = int.Parse(Next()); break;
+            case "--people": requestedPeople = int.Parse(Next()); break;
             case "--days": days = int.Parse(Next()); break;
             case "--seed": seed = int.Parse(Next()); break;
             case "--profiles": path = Next(); break;
@@ -52,14 +53,14 @@ try
             default: throw new ArgumentException("Unknown option " + value);
         }
     }
-    if (people is < 0 or > 1_000_000 || days is < 0 or > 365)
+    if (requestedPeople is < 0 or > 1_000_000 || days is < 0 or > 365)
         throw new ArgumentOutOfRangeException(nameof(args), "People must be 0..1,000,000 and days 0..365.");
     if (area is not null && path is null)
         throw new ArgumentException("--area requires --profiles");
 
     var setupClock = Stopwatch.StartNew();
-    var seeds = path is null ? NpcSeeds.Synthetic(people)
-        : NpcSeeds.ReadProfiles(path, people, area);
+    var seeds = path is null ? NpcSeeds.Synthetic(requestedPeople ?? 10_000)
+        : NpcSeeds.ReadProfiles(path, requestedPeople ?? int.MaxValue, area);
     if (traceFirst && seeds.Count > 0) trace = seeds[0].Id;
     var world = new SimulationWorld(seeds, new SimulationSettings { Seed = seed });
     setupClock.Stop();

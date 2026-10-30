@@ -37,6 +37,7 @@ static void Assert(bool condition, string message)
 static void Economics()
 {
     var world = new SimulationWorld(NpcSeeds.Synthetic(120));
+    var initialWallets = world.Agents.Select(x => x.Gold).ToArray();
     world.AdvanceTo(3 * 1440);
     world.CheckInvariants();
     var report = world.Report();
@@ -49,7 +50,8 @@ static void Economics()
     Assert(world.Agents.Any(p => p.MealsEaten > 0), "food affects individual NPC");
     Assert(world.Agents.Any(p => p.TotalMinutesSleeping > 0), "sleep affects individual NPC");
     Assert(world.Agents.Any(p => p.WagesReceived > 0), "wages affect individual NPC");
-    Assert(world.Agents.Any(p => p.Gold != 15), "individual balances change");
+    Assert(world.Agents.Where((p,i) => p.Gold != initialWallets[i]).Any(),
+        "individual balances change from their actual initial values");
     Assert(report.TotalGold == report.InitialTotalGold, "currency conservation");
     Assert(report.TotalFoodRemaining + report.GoodsEaten ==
         report.InitialTotalFood + report.GoodsProduced, "food conservation");
