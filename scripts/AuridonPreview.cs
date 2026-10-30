@@ -27,7 +27,9 @@ public static class AuridonPreview
         var grid = new GridContainer { Columns = 2 };
         grid.AddThemeConstantOverride("h_separation", 0);
         grid.AddThemeConstantOverride("v_separation", 0);
-        container.AddChild(grid);
+        var mapRoot=new Control {CustomMinimumSize=new Vector2(512,512)};
+        container.AddChild(mapRoot);
+        mapRoot.AddChild(grid);
 
         var pathIndex = names.ToDictionary(kv => kv.Value.ToLowerInvariant(), kv => kv.Key);
         int loaded = 0;
@@ -61,7 +63,11 @@ public static class AuridonPreview
                 break;
             }
         }
+        mapRoot.AddChild(new AuridonPopulationOverlay {Name="PopulationMapDots"});
         detail.Text += $" ({loaded}/4 tiles loaded)";
+        var annotation=new Label {Text="Gold = named source-place anchor. Positions approximate, not NPC coordinates."};
+        annotation.AddThemeFontSizeOverride("font_size",11);
+        container.AddChild(annotation);
         return container;
     }
 }
