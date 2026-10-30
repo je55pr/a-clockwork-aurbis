@@ -43,6 +43,20 @@ public partial class SourcePropLayer : Node3D
     public int HarbourAnchorCount {get;private set;}
     private readonly List<Vector2> _dockStructures=new();
     public IReadOnlyList<Vector2> DockStructures=>_dockStructures;
+    // Source-model identification, NOT a guessed UESP image-map transform.
+    private readonly Dictionary<string,Vector2> _sourceLandmarks=
+        new(StringComparer.OrdinalIgnoreCase);
+    public IReadOnlyDictionary<string,Vector2> SourceLandmarks=>_sourceLandmarks;
+    public bool TrySourceLandmark(string place,out Vector2 localAnchor)
+    {
+        if(_sourceLandmarks.TryGetValue(place,out localAnchor))return true;
+        const string prefix="Vulkhel Guard (near ";
+        if(place.StartsWith(prefix,StringComparison.OrdinalIgnoreCase)&&place.EndsWith(")",StringComparison.Ordinal))
+            return _sourceLandmarks.TryGetValue(place.Substring(prefix.Length,
+                place.Length-prefix.Length-1),out localAnchor);
+        localAnchor=default;
+        return false;
+    }
     public event Action<string>? Progress;
     public event Action? GeometryPrepared;
     public readonly record struct PropFootprint(float MinX, float MinZ, float MaxX, float MaxZ);
@@ -50,6 +64,8 @@ public partial class SourcePropLayer : Node3D
     public IReadOnlyList<PropFootprint> PropFootprints => _propFootprints;
     public bool HasPreparedGeometry { get; private set; }
     public SourceGeometryRaycaster Raycaster { get; } = new();
+    public static bool BlocksNpcSpawn(string sourceModelName)
+        => !string.Equals(sourceModelName,"ActiveRunes",StringComparison.OrdinalIgnoreCase);
     private readonly Dictionary<uint,List<PropFootprint>> _coarsePerModel = new();
     private readonly List<PropFootprint> _unresolvedFootprints = new();
     public IReadOnlyList<PropFootprint> UnresolvedFootprints => _unresolvedFootprints;
@@ -181,6 +197,31 @@ public partial class SourcePropLayer : Node3D
             list.Add(new Transform3D(basis,
                 fixture.SourcePosition-new Vector3(cx,lowestHeight,cz)));
         }
+        // Exact original scenery fixture IDs give the correct approximate
+        // building anchors; a map-image marker often does not.
+        var namedSourceBuildings=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Mages Guild (Vulkhel Guard)"]="ALT_STR_GuildMage001",
+            ["Fighters Guild (Vulkhel Guard)"]="GEN_LSB_BannerFighterGuildSmall001",
+            ["Vulkhel Guard Manor & Treasury"]="ALT_STR_Manor001",
+            ["Vulkhel Guard Warehouse"]="ALT_STR_Warehouse001",
+            ["Harborside Market"]="GEN_LSB_BannerGuildSellerAreaSmall001",
+            ["Guard's Forge"]="ALT_STR_Forge001"
+        };
+        foreach(var mapping in namedSourceBuildings)
+        {
+            var matches=filtered.Where(f=>string.Equals(
+                _names[f.ModelId],mapping.Value,StringComparison.OrdinalIgnoreCase)).ToArray();
+            if(matches.Length==0)continue;
+            // A category may have multiple copies. Keep a stable,
+            // deterministic position; never guess a missing building.
+            var landmark=matches.OrderBy(f=>f.SourcePosition.X)
+                .ThenBy(f=>f.SourcePosition.Z).First();
+            _sourceLandmarks[mapping.Key]=new Vector2(
+                landmark.SourcePosition.X-cx,landmark.SourcePosition.Z-cz);
+        }
+        GD.Print($"SOURCE LANDMARKS {_sourceLandmarks.Count}: "+
+            string.Join(", ",_sourceLandmarks.Keys.OrderBy(x=>x)));
         // Fast provisional clearance while genuine mesh bounds load asynchronously.
         // Large architectural models receive conservative exclusion radii.
         foreach(var fixture in filtered)
@@ -451,7 +492,12 @@ public partial class SourcePropLayer : Node3D
             // triangles and its transforms with the CPU spatial/BVH raycaster.
             var faceVertices=mesh.GetFaces();
             if(faceVertices.Length==0)throw new InvalidDataException("Empty source prop mesh");
-            Raycaster.AddMesh(faceVertices,placements);
+            // Some placed models are rendered visual effects, not physical
+            // scenery. Their large flat effect meshes can falsely reject
+            // otherwise valid town streets. Keep rendering them but do not
+            // turn them into impenetrable collision geometry.
+            if(BlocksNpcSpawn(_names[id]))
+                Raycaster.AddMesh(faceVertices,placements);
             // Project each rendered prop bounding box onto the ground plane.
             var bounds=mesh.GetAabb();
             foreach(var transform in placements)

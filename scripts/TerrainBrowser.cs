@@ -25,7 +25,9 @@ public partial class TerrainBrowser : Node3D
     {
         if(_populationCaptureStarted||_population?.PlacedCount<1)return;
         _populationCaptureStarted=true;
-        if(System.Environment.GetEnvironmentVariable("ESO_CAPTURE_DOCK_VIEW")=="1")
+        if(System.Environment.GetEnvironmentVariable("ESO_CAPTURE_GUILD_VIEW")=="1")
+            FocusGuildView();
+        else if(System.Environment.GetEnvironmentVariable("ESO_CAPTURE_DOCK_VIEW")=="1")
             FocusDockView();
         else FocusPopulationView();
         if(_toolsPanel!=null)_toolsPanel.Visible=false;
@@ -40,6 +42,8 @@ public partial class TerrainBrowser : Node3D
     }
     private void FocusPopulationView()=>FocusSourceView(
         _population?.SuggestedCameraEye,_population?.SuggestedCameraTarget,"Population");
+    private void FocusGuildView()=>FocusSourceView(
+        _population?.SuggestedGuildCameraEye,_population?.SuggestedGuildCameraTarget,"Guild");
     private void FocusDockView()=>FocusSourceView(
         _population?.SuggestedDockCameraEye,_population?.SuggestedDockCameraTarget,"Docks");
     private void FocusSourceView(Vector3? possibleEye,Vector3? possibleTarget,string name)
@@ -877,7 +881,7 @@ void fragment() {
         _sceneLabel.AddThemeFontSizeOverride("font_size",12);
         content.AddChild(_sceneLabel);
         var help=new Label{
-            Text="WASD move | Right mouse look | E/Q up/down | Shift sprint | Wheel speed | N: NPCs | J: density | P: crowd | K: docks | M: Auridon map",
+            Text="WASD move | Right mouse look | E/Q up/down | Shift sprint | Wheel speed | N: NPCs | J: density | P: crowd | G: guilds | K: docks | M: Auridon map",
             AutowrapMode=TextServer.AutowrapMode.WordSmart
         };
         help.AddThemeFontSizeOverride("font_size",11);
@@ -1624,6 +1628,12 @@ void fragment() {
             if(populationKey.Keycode==Key.P)
             {
                 FocusPopulationView();
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+            if(populationKey.Keycode==Key.G)
+            {
+                FocusGuildView();
                 GetViewport().SetInputAsHandled();
                 return;
             }

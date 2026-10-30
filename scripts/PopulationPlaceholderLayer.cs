@@ -28,6 +28,8 @@ public partial class PopulationPlaceholderLayer : Node3D
     public Vector3? SuggestedCameraTarget {get;private set;}
     public Vector3? SuggestedDockCameraEye {get;private set;}
     public Vector3? SuggestedDockCameraTarget {get;private set;}
+    public Vector3? SuggestedGuildCameraEye {get;private set;}
+    public Vector3? SuggestedGuildCameraTarget {get;private set;}
     public event Action<string>? Changed;
 
     public void Setup(EsoArchive archive,OodleDecoder decoder,TerrainBundle bundle,
@@ -55,7 +57,11 @@ public partial class PopulationPlaceholderLayer : Node3D
             float x=props.Focus.X+(u-365000f)*0.00070f;
             float z=props.Focus.Z+(v-660000f)*0.00070f;
             string place=town.GetProperty("place").GetString()??"Vulkhel Guard";
-            _town.Add(new PopulationSpawnPlanner.Candidate(id,name,race,place,x,z));
+            string kind=town.TryGetProperty("kind",out var sourceKind)
+                ? sourceKind.GetString()??"map_estimate" : "map_estimate";
+            float maxDisplacement=kind=="estimated_city_district"?70f:55f;
+            _town.Add(new PopulationSpawnPlanner.Candidate(
+                id,name,race,place,x,z,maxDisplacement,kind));
             if(place.Contains("Vulkhel Guard Docks",StringComparison.OrdinalIgnoreCase))
                 _dockNpcIds.Add(id);
         }
@@ -96,11 +102,21 @@ public partial class PopulationPlaceholderLayer : Node3D
         }
         if(_dockNpcIds.Count>0 && _dockLandings.Count==0)PrepareDockShoreLandings();
         var count=(int)MathF.Round(_town.Count*_density);
-        var source=_town.Select(c=>{
-            if(!_dockNpcIds.Contains(c.Id)||_dockLandings.Count==0)return c;
-            int site=PopulationSpawnPlanner.StableHash(c.Id)%_dockLandings.Count;
-            var point=_dockLandings[site];
-            return c with {AnchorX=point.X,AnchorZ=point.Y};
+        var source=_town.Select(c=>
+        {
+            if(_dockNpcIds.Contains(c.Id)&&_dockLandings.Count>0)
+            {
+                int site=PopulationSpawnPlanner.StableHash(c.Id)%_dockLandings.Count;
+                var point=_dockLandings[site];
+                return c with {AnchorX=point.X,AnchorZ=point.Y,
+                    MaxDisplacement=55f,AnchorKind="source_dock_fixture"};
+            }
+            if(_props.TrySourceLandmark(c.Place,out var fixture))
+                return c with {AnchorX=fixture.X,AnchorZ=fixture.Y,
+                    MaxDisplacement=55f,AnchorKind="source_named_fixture"};
+            // Other named places retain the existing approximate map point.
+            // The planner may not relocate them across town to make up numbers.
+            return c;
         }).OrderBy(c=>PopulationSpawnPlanner.StableHash(c.Id)).ToArray();
         var candidates=new List<PopulationSpawnPlanner.Candidate>();
         candidates.AddRange(source.Take(count));
@@ -119,10 +135,12 @@ public partial class PopulationPlaceholderLayer : Node3D
         }
         var (spawns,stats)=PopulationSpawnPlanner.Generate(candidates,
             _surface.GroundAt,_props.UnresolvedFootprints,_props.Raycaster);
+        AuditPlacements(candidates,spawns,stats);
         _requested=stats.Requested;_placed=stats.Placed;
         int dockPlaced=spawns.Count(x=>_dockNpcIds.Contains(x.Id));
         ChooseCameraAmongCrowd(spawns);
         ChooseDockCamera(spawns);
+        ChooseGuildCamera(spawns);
         BuildModels(spawns);
         GD.Print($"POPULATION PREVIEW placed={stats.Placed}/{stats.Requested}, "+
             $"rejected={stats.Rejected}, shifted={stats.Shifted}, "+
@@ -134,6 +152,51 @@ public partial class PopulationPlaceholderLayer : Node3D
             $"sourceMeshesReady={_props.HasPreparedGeometry}");
         Notify();
     }
+    private void AuditPlacements(IReadOnlyList<PopulationSpawnPlanner.Candidate> candidates,
+        IReadOnlyList<PopulationSpawnPlanner.Placement> spawns,
+        PopulationSpawnPlanner.Summary stats)
+    {
+        var anchors=candidates.ToDictionary(c=>c.Id,c=>c);
+        var centre=_props.DockStructures.Count>0 ? new Vector2(
+            _props.DockStructures.Average(p=>p.X),_props.DockStructures.Average(p=>p.Y))
+            : new Vector2(float.PositiveInfinity,float.PositiveInfinity);
+        int nearDock=0,nonDockNear=0,sourceNamed=0,nonDockElsewhere=0;
+        var rows=new List<object>();
+        foreach(var p in spawns)
+        {
+            if(!anchors.TryGetValue(p.Id,out var a))continue;
+            var ground=new Vector2(p.Position.X,p.Position.Z);
+            float distance=ground.DistanceTo(new Vector2(a.AnchorX,a.AnchorZ));
+            bool dock=_dockNpcIds.Contains(p.Id);
+            bool harbour=ground.DistanceSquaredTo(centre)<135f*135f;
+            if(harbour){nearDock++;if(!dock)nonDockNear++;}
+            else if(!dock)nonDockElsewhere++;
+            if(a.AnchorKind=="source_named_fixture")sourceNamed++;
+            if(distance>a.MaxDisplacement+0.01f)
+                throw new InvalidOperationException(
+                    $"NPC {p.Name} displaced {distance:F1}m; limit {a.MaxDisplacement:F1}m");
+            rows.Add(new {p.Id,p.Name,p.Place,a.AnchorKind,
+                AnchorX=a.AnchorX,AnchorZ=a.AnchorZ,a.MaxDisplacement,
+                SpawnX=p.Position.X,SpawnY=p.Position.Y,SpawnZ=p.Position.Z,
+                Displacement=distance,DockAssigned=dock,NearDock=harbour});
+        }
+        GD.Print($"POPULATION DISTRIBUTION namedSourceFixtures={sourceNamed}, "+
+            $"nearDocks={nearDock}, unrelatedNearDocks={nonDockNear}, "+
+            $"nonDockElsewhere={nonDockElsewhere}, "+
+            $"excluded={stats.Rejected}, total={stats.Requested}");
+        string? path=System.Environment.GetEnvironmentVariable("ESO_POPULATION_AUDIT_PATH");
+        if(!string.IsNullOrEmpty(path))
+        {
+            File.WriteAllText(path,JsonSerializer.Serialize(new {
+                Requested=stats.Requested,Placed=stats.Placed,Excluded=stats.Rejected,
+                NearDocks=nearDock,NonDockNearDocks=nonDockNear,
+                NonDockElsewhere=nonDockElsewhere,SourceFixtureAnchors=sourceNamed,
+                SourceLandmarkPositions=_props.SourceLandmarks.ToDictionary(
+                    kv=>kv.Key,kv=>new {x=kv.Value.X,z=kv.Value.Y}),
+                Placements=rows},new JsonSerializerOptions {WriteIndented=true}));
+        }
+    }
+
     private void PrepareDockShoreLandings()
     {
         // Only actual placed dock ramps/walkways identify the harbour. A landing
@@ -183,6 +246,13 @@ public partial class PopulationPlaceholderLayer : Node3D
         var docks=points.Where(p=>_dockNpcIds.Contains(p.Id)).ToArray();
         (SuggestedDockCameraEye,SuggestedDockCameraTarget)=FindVisibleCamera(docks);
         GD.Print($"DOCK CAMERA clear={SuggestedDockCameraEye.HasValue} dockNPCs={docks.Length}");
+    }
+    private void ChooseGuildCamera(IReadOnlyList<PopulationSpawnPlanner.Placement> points)
+    {
+        var guild=points.Where(p=>p.Place.Contains("Mages Guild",StringComparison.OrdinalIgnoreCase)
+            ||p.Place.Contains("Fighters Guild",StringComparison.OrdinalIgnoreCase)).ToArray();
+        (SuggestedGuildCameraEye,SuggestedGuildCameraTarget)=FindVisibleCamera(guild);
+        GD.Print($"GUILD CAMERA clear={SuggestedGuildCameraEye.HasValue} guildNPCs={guild.Length}");
     }
     private (Vector3? Eye,Vector3? Target) FindVisibleCamera(
         IReadOnlyList<PopulationSpawnPlanner.Placement> points)

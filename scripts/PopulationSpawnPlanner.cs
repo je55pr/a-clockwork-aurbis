@@ -11,7 +11,8 @@ namespace EsoTest;
 public static class PopulationSpawnPlanner
 {
     public readonly record struct Candidate(string Id, string Name, string Race,
-        string Place, float AnchorX, float AnchorZ);
+        string Place, float AnchorX, float AnchorZ,
+        float MaxDisplacement=65f, string AnchorKind="map_estimate");
     public readonly record struct Placement(string Id, string Name, string Race,
         string Place, Vector3 Position, float Facing, bool Shifted);
     public readonly record struct Summary(int Requested, int Placed, int Rejected,
@@ -55,12 +56,17 @@ public static class PopulationSpawnPlanner
         var missing=new List<Candidate>();
         foreach(var item in candidates)
         {
+            float maxTravel=Math.Min(item.MaxDisplacement,radius);
+            if(!float.IsFinite(maxTravel)||maxTravel<=0f)
+                throw new ArgumentOutOfRangeException(nameof(candidates),
+                    $"Invalid maximum spawn displacement for {item.Id}");
             var rand=new Random(StableHash(item.Id));
             bool found=false;
             for(int attempt=0;attempt<maxAttempts;attempt++)
             {
                 // Favour locations near the named landmark; broaden only when needed.
-                float spread=attempt<70 ? 22f : attempt<170 ? 65f : 145f;
+                float spread=Math.Min(maxTravel,
+                    attempt<70 ? 12f : attempt<170 ? 30f : maxTravel);
                 float theta=(float)(rand.NextDouble()*Math.Tau);
                 float distance=MathF.Sqrt((float)rand.NextDouble())*spread;
                 float x=item.AnchorX+MathF.Cos(theta)*distance;
@@ -132,9 +138,9 @@ public static class PopulationSpawnPlanner
             // without clear ground near their place remains unspawned.
             foreach(var item in missing)
             {
-                float maxReach=item.Place.Contains("Docks",StringComparison.OrdinalIgnoreCase)
-                    ? 155f : item.Place.StartsWith("Vulkhel Guard (near ",StringComparison.Ordinal)
-                        ? 430f : 370f;
+                // Never solve a missing location by sending an unrelated NPC
+                // across town. The same cap applies in both sampling passes.
+                float maxReach=Math.Min(item.MaxDisplacement,radius);
                 float closest=maxReach*maxReach;
                 int best=-1;
                 for(int i=0;i<pool.Count;i++)
@@ -167,6 +173,9 @@ public static class PopulationSpawnPlanner
                 if(!occupied.TryGetValue(Key(gx,gz),out var list))
                     occupied[Key(gx,gz)]=list=new();
                 list.Add(new Vector2(choice.X,choice.Z));
+                // Recheck clearance to guard against future pool changes.
+                if(!raycaster.OpenSkyToTerrain(choice.X,choice.Z,choice.Y))
+                    throw new InvalidOperationException("Unsafe fallback pool landing");
                 placements.Add(new Placement(item.Id,item.Name,item.Race,item.Place,
                     choice,StableHash(item.Id)*0.000001f%Mathf.Tau,true));
                 fallbackPlaced++;shifted++;

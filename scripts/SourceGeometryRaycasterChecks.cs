@@ -14,6 +14,12 @@ public static class SourceGeometryRaycasterChecks
 
     public static void Run()
     {
+        Expect(!SourcePropLayer.BlocksNpcSpawn("ActiveRunes"),
+            "visual runes must not make entire town impassable");
+        Expect(SourcePropLayer.BlocksNpcSpawn("ROK_GRY_Auridon_Hillside006"),
+            "real rock still blocks NPCs");
+        Expect(SourcePropLayer.BlocksNpcSpawn("ALT_STR_GuildMage001"),
+            "real building still blocks NPCs");
         // Overhanging rock ceiling/roof must block a ground spawn.
         var stone=new SourceGeometryRaycaster();
         var roof=new[]{
@@ -86,6 +92,27 @@ public static class SourceGeometryRaycasterChecks
             float x=a.X-b.X,z=a.Z-b.Z;
             Expect(x*x+z*z>=2.6f*2.6f-0.002f,"NPC separation");
         }
-        GD.Print("POPULATION RAYCAST SELFTEST PASSED: roof, wall, body radius, blocked ground, crowd spacing");
+        // Regression: a location with safe ground only 65m away may NOT send
+        // its resident across town if its allowed walking radius is 25m.
+        var restricted=new[]{new PopulationSpawnPlanner.Candidate(
+            "npc:restricted","Manor Resident","Altmer","Manor",
+            0f,0f,25f,"source_named_fixture")};
+        var farOpen=PopulationSpawnPlanner.Generate(restricted,
+            (x,z)=>x>65f ? 0f : null,
+            Array.Empty<SourcePropLayer.PropFootprint>(),free,radius:90f);
+        Expect(farOpen.Stats.Placed==0,
+            "resident not relocated beyond a named place just to hit spawn count");
+        var localOpen=new[]{new PopulationSpawnPlanner.Candidate(
+            "npc:local","Guard","Altmer","Mages Guild",
+            80f,0f,25f,"source_named_fixture")};
+        var nearby=PopulationSpawnPlanner.Generate(localOpen,
+            (x,z)=>x>65f ? 0f : null,
+            Array.Empty<SourcePropLayer.PropFootprint>(),free,radius:110f);
+        Expect(nearby.Stats.Placed==1,"resident allowed nearby open ground");
+        var landed=nearby.Placements[0].Position;
+        var diff= new Vector2(landed.X-80f,landed.Z);
+        Expect(diff.LengthSquared() <= 25f*25f+0.001f,
+            "maximum displacement enforced at placement");
+        GD.Print("POPULATION RAYCAST SELFTEST PASSED: roof, wall, body radius, blocked ground, crowd spacing, strict home radius");
     }
 }
