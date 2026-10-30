@@ -105,6 +105,10 @@ public partial class TerrainBrowser : Node3D
     public bool IsBestView => _bestView;
     private CanvasLayer? _simpleHud;
     private Label? _sceneLabel;
+    private uint? _activeDetailSectionId;
+    private bool _activeDetailCloseUp;
+    private int _activeDetailTileX=23,_activeDetailTileZ=25;
+    private bool _activeDetailFullWorldspace,_activeDetailVegetation;
     private float _flySpeed = 35f;
     private ShaderMaterial? _currentLodMaterial;
     private bool _showOriginalLodNormals = true;
@@ -372,7 +376,13 @@ public partial class TerrainBrowser : Node3D
         };
         diffuseMode.Toggled += enabled => {
             _showOriginalLodDiffuse = enabled;
-            ShowCompleteSection();
+            // Rebuild the section and render mode that was active before
+            // the toggle, instead of implicitly switching to coarse LOD.
+            ShowCompleteSection(_activeDetailSectionId,
+                closeUp:_activeDetailCloseUp,
+                tileX:_activeDetailTileX,tileZ:_activeDetailTileZ,
+                fullWorldspaceDetail:_activeDetailFullWorldspace,
+                vegetationTest:_activeDetailVegetation);
         };
         vbox.AddChild(diffuseMode);
         var normalMode = new CheckButton {
@@ -956,6 +966,12 @@ void fragment() {
             _briefStatus.Text = _status.Text;
             return;
         }
+        _activeDetailSectionId=id;
+        _activeDetailCloseUp=closeUp;
+        _activeDetailTileX=tileX;
+        _activeDetailTileZ=tileZ;
+        _activeDetailFullWorldspace=fullWorldspaceDetail;
+        _activeDetailVegetation=vegetationTest;
         _status.Text = $"Decoding the complete original terrain in section {id} ({bundle.Tiles.Count} tiles)...";
         _briefStatus.Text=$"Loading source section {id}…";
         try
