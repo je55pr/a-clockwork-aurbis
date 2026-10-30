@@ -12,6 +12,13 @@ public partial class ArchiveWorld : Node3D
 
     public override void _Ready()
     {
+        if(System.Environment.GetEnvironmentVariable("ESO_TEST_POPULATION_RAYCAST")=="1")
+        {
+            SourceGeometryRaycasterChecks.Run();
+            NpcHoverChecks.Run();
+            GetTree().Quit();
+            return;
+        }
         try
         {
             string root = System.Environment.GetEnvironmentVariable("ESO_ROOT") ?? "";

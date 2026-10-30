@@ -21,7 +21,6 @@ public static class TerrainNearFieldMaterials
         int UniqueMaterials,int DiffuseDds,int NormalDds);
 
     private const int TilePixels=128;
-    private const int TileSide=5;
     private const int PaletteSlots=16;
 
     private static uint U32(ReadOnlySpan<byte> b,int offset)=>
@@ -128,12 +127,19 @@ public static class TerrainNearFieldMaterials
         TerrainBundle section,int centerX,int centerZ,
         TerrainNearFieldColors.Result? originalColour=null,
         bool normalEnabled=true,bool applyTint=true)
+        => LoadRegion(archive,decoder,section,centerX-2,centerZ-2,5,
+            originalColour,normalEnabled,applyTint);
+
+    public static Result LoadRegion(EsoArchive archive,OodleDecoder decoder,
+        TerrainBundle section,int firstX,int firstZ,int tileSide,
+        TerrainNearFieldColors.Result? originalColour=null,
+        bool normalEnabled=true,bool applyTint=true)
     {
-        int firstX=centerX-2,firstZ=centerZ-2;
+        if(tileSide is <1 or >8)throw new ArgumentOutOfRangeException(nameof(tileSide));
         var records=section.Tiles.ToDictionary(r=>
             ((int)(r.FileId>>16),(int)(r.FileId&0xffff)));
         var definitions=ReadDefinitions(archive,decoder);
-        var tilePalettes=new uint[TileSide*TileSide,PaletteSlots];
+        var tilePalettes=new uint[tileSide*tileSide,PaletteSlots];
         var weights=new Godot.Collections.Array<Image>();
         var diffuseImgs=new Godot.Collections.Array<Image>();
         var normalImgs=new Godot.Collections.Array<Image>();
@@ -141,10 +147,10 @@ public static class TerrainNearFieldMaterials
         try
         {
             var used=new SortedSet<uint>();
-            for(int tz=0;tz<TileSide;tz++)
-            for(int tx=0;tx<TileSide;tx++)
+            for(int tz=0;tz<tileSide;tz++)
+            for(int tx=0;tx<tileSide;tx++)
             {
-                int tileIndex=tz*TileSide+tx;
+                int tileIndex=tz*tileSide+tx;
                 if(!records.TryGetValue((firstX+tx,firstZ+tz),out var record))
                     throw new InvalidOperationException(
                         $"Missing original close-up tile {firstX+tx},{firstZ+tz}");
@@ -203,8 +209,8 @@ public static class TerrainNearFieldMaterials
             var normalArray=MakeArray(normalImgs,"normal");
             var weightArray=MakeArray(weights,"blend");
 
-            byte[] lookup=new byte[PaletteSlots*TileSide*TileSide*4];
-            for(int tile=0;tile<TileSide*TileSide;tile++)
+            byte[] lookup=new byte[PaletteSlots*tileSide*tileSide*4];
+            for(int tile=0;tile<tileSide*tileSide;tile++)
             for(int slot=0;slot<PaletteSlots;slot++)
             {
                 uint id=tilePalettes[tile,slot];
@@ -219,7 +225,7 @@ public static class TerrainNearFieldMaterials
                 lookup[off+3]=255;
             }
             using var paletteImage=Image.CreateFromData(
-                PaletteSlots,TileSide*TileSide,false,Image.Format.Rgba8,lookup);
+                PaletteSlots,tileSide*tileSide,false,Image.Format.Rgba8,lookup);
             var paletteTexture=ImageTexture.CreateFromImage(paletteImage);
             var shader=new Shader{Code=ShaderCode};
             var result=new ShaderMaterial{Shader=shader};
@@ -228,12 +234,13 @@ public static class TerrainNearFieldMaterials
             result.SetShaderParameter("material_weights",weightArray);
             result.SetShaderParameter("material_lookup",paletteTexture);
             result.SetShaderParameter("tile_origin",new Vector2I(firstX,firstZ));
+            result.SetShaderParameter("tile_side",tileSide);
             result.SetShaderParameter("use_original_normals",normalEnabled);
             result.SetShaderParameter("apply_original_tint",originalColour!=null&&applyTint);
             if(originalColour!=null)
                 result.SetShaderParameter("original_tile_colour",originalColour.Texture);
 
-            return new Result(result,25,used.Count,used.Count,used.Count);
+            return new Result(result,tileSide*tileSide,used.Count,used.Count,used.Count);
         }
         finally
         {
@@ -256,14 +263,15 @@ uniform sampler2DArray material_weights : filter_linear, repeat_disable;
 uniform sampler2D material_lookup : filter_nearest, repeat_disable;
 uniform sampler2DArray original_tile_colour : source_color, filter_linear, repeat_disable;
 uniform ivec2 tile_origin=ivec2(0,0);
+uniform int tile_side=5;
 uniform bool use_original_normals=true;
 uniform bool apply_original_tint=true;
 
 void fragment() {
     vec2 tile_coord=UV2;
     ivec2 patch_coord=ivec2(floor(tile_coord))-tile_origin;
-    patch_coord=clamp(patch_coord,ivec2(0),ivec2(4));
-    int tile_index=patch_coord.y*5+patch_coord.x;
+    patch_coord=clamp(patch_coord,ivec2(0),ivec2(tile_side-1));
+    int tile_index=patch_coord.y*tile_side+patch_coord.x;
     vec2 local_uv=fract(tile_coord);
     // ESO TerrainSingleLayerPS.hlsl: sample the 128x128 blend maps at
     // texel centres, keeping the outermost weights on the tile borders.
@@ -289,7 +297,7 @@ void fragment() {
         float weight=block[slot%4];
         if(weight<0.001)continue;
 
-        vec2 key=vec2((float(slot)+0.5)/16.0,(float(tile_index)+0.5)/25.0);
+        vec2 key=vec2((float(slot)+0.5)/16.0,(float(tile_index)+0.5)/float(tile_side*tile_side));
         vec4 definition=texture(material_lookup,key);
         int layer=int(round(definition.r*255.0))-1;
         if(layer<0)continue;
