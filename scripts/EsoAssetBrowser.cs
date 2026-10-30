@@ -27,6 +27,7 @@ public partial class EsoAssetBrowser : CanvasLayer
     private Label _detail=null!;
     private TextureRect _preview=null!;
     private Button _openTerrain=null!;
+    private Button _fullTerrain=null!;
     private Button _preview3D=null!;
     private EsoModelPreview _modelPreview=null!;
     private uint _selectedModelId;
@@ -84,8 +85,15 @@ public partial class EsoAssetBrowser : CanvasLayer
         bool worldRequested=Environment.GetEnvironmentVariable("ESO_START_TERRAIN")=="1" ||
             !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ESO_FULL_SECTION")) ||
             !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ESO_DETAIL_PATCH")) ||
-            Environment.GetEnvironmentVariable("ESO_AUTO_REGION")=="1";
+            Environment.GetEnvironmentVariable("ESO_AUTO_REGION")=="1" ||
+            Environment.GetEnvironmentVariable("ESO_ASSET_BROWSER")!="1";
         ShowLibrary(!worldRequested);
+        if(Environment.GetEnvironmentVariable("ESO_CAPTURE_CLEAN")=="1")
+        {
+            _screen.Visible=false;
+            _worldReturn.Visible=false;
+            _terrain.SetWorkspaceVisible(false);
+        }
     }
 
     private void CreateLibrary()
@@ -253,8 +261,12 @@ public partial class EsoAssetBrowser : CanvasLayer
 
         _openTerrain=new Button {Text="Open in World viewer",Visible=false};
         EsoUiStyles.ButtonStyle(_openTerrain,true);
-        _openTerrain.Pressed+=OpenTerrain;
+        _openTerrain.Pressed+=()=>OpenTerrain();
         detailColumn.AddChild(_openTerrain);
+        _fullTerrain=new Button {Text="Render entire worldspace (original textures)",Visible=false};
+        EsoUiStyles.ButtonStyle(_fullTerrain);
+        _fullTerrain.Pressed+=()=>OpenTerrain(fullDetail:true);
+        detailColumn.AddChild(_fullTerrain);
 
         var scroll=new ScrollContainer {
             SizeFlagsVertical=Control.SizeFlags.ExpandFill,
@@ -292,7 +304,7 @@ public partial class EsoAssetBrowser : CanvasLayer
     {
         _inLibrary=library;
         _screen.Visible=library;
-        _worldReturn.Visible=!library;
+        _worldReturn.Visible=!library&&!_terrain.IsBestView;
         _terrain.SetWorkspaceVisible(!library);
     }
 
@@ -347,6 +359,7 @@ public partial class EsoAssetBrowser : CanvasLayer
         _preview.Texture=null;
         _previewHint.Visible=true;
         _openTerrain.Visible=false;
+        _fullTerrain.Visible=false;
         _detail.Text=_matches.Count==0 ?
             "No verified entries match this search. Try a shorter name or another category.":
             "Choose a record to see its original IDs, source path, and artwork when available.";
@@ -374,6 +387,7 @@ public partial class EsoAssetBrowser : CanvasLayer
         _preview3D.Visible=_selectedModelId!=0;
         _openTerrain.Visible=entry.SectionId is uint section &&
             _availableSections.Contains(section);
+        _fullTerrain.Visible=_openTerrain.Visible;
         _preview.Texture=null;
         _previewHint.Visible=true;
 
@@ -413,11 +427,11 @@ public partial class EsoAssetBrowser : CanvasLayer
         _modelPreview.ShowModel(_selectedModelId,_detailTitle.Text);
     }
 
-    private void OpenTerrain()
+    private void OpenTerrain(bool fullDetail=false)
     {
         if(_selectedTerrainSection==0)return;
         ShowLibrary(false);
-        _terrain.OpenSectionFromCatalogue(_selectedTerrainSection);
+        _terrain.OpenSectionFromCatalogue(_selectedTerrainSection,fullDetail);
     }
 
     public override void _Input(InputEvent @event)

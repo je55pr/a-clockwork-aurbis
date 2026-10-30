@@ -27,7 +27,8 @@ public static class AutoRegionRenderer
         EsoArchive archive, OodleDecoder decoder,
         IReadOnlyList<TerrainBundle> bundles,
         FixturePlacementGraph.Component group,
-        int sampleStep=4, Vector2I? detailCenter=null, int detailRadius=2)
+        int sampleStep=4, Vector2I? detailCenter=null, int detailRadius=2,
+        Vector2I? renderFrom=null, Vector2I? renderToExclusive=null)
     {
         if (sampleStep<=0||64%sampleStep!=0)
             throw new ArgumentOutOfRangeException(nameof(sampleStep));
@@ -51,6 +52,9 @@ public static class AutoRegionRenderer
                 int localX = (int)(record.FileId >> 16);
                 int localZ = (int)(record.FileId & 0xFFFF);
                 var key = (position.X * 5 + localX, position.Z * 5 + localZ);
+                if(detailCenter is Vector2I center &&
+                    (Math.Abs(key.Item1-center.X)>detailRadius ||
+                     Math.Abs(key.Item2-center.Y)>detailRadius))continue;
                 if (!cells.TryGetValue(key, out var list))
                     cells[key] = list = new();
                 list.Add(record);
@@ -133,6 +137,17 @@ public static class AutoRegionRenderer
                     $"No terrain in 5x5 source patch around tile ({c.X},{c.Y})");
         }
 
+        // A close-up may request an even-sided 8x8 view; clip source tiles
+        // BEFORE computing height limits or tile counts, not just mesh vertices.
+        if(renderFrom is Vector2I fromArea && renderToExclusive is Vector2I toArea)
+        {
+            included=included.Where(e=>e.Key.X>=fromArea.X&&e.Key.Z>=fromArea.Y&&
+                e.Key.X<toArea.X&&e.Key.Z<toArea.Y)
+                .ToDictionary(e=>e.Key,e=>e.Value);
+            if(included.Count==0)throw new InvalidOperationException(
+                "No source land tiles within requested close-up rectangle");
+        }
+
         int mismatchedSeams=0;
         foreach(var (coord,tile) in included)
         {
@@ -166,8 +181,14 @@ public static class AutoRegionRenderer
 
         int lowX=included.Keys.Min(p=>p.X),highX=included.Keys.Max(p=>p.X);
         int lowZ=included.Keys.Min(p=>p.Z),highZ=included.Keys.Max(p=>p.Z);
-        float centerX=(lowX+highX+1)*TileWorldWidth*0.5f;
-        float centerZ=(lowZ+highZ+1)*TileWorldWidth*0.5f;
+        // Keep the original source-coordinate origin at the selected tile
+        // centre even for an 8x8 (even-sided) rectangle.
+        float centerX=detailCenter.HasValue
+            ? (detailCenter.Value.X+0.5f)*TileWorldWidth
+            : (lowX+highX+1)*TileWorldWidth*0.5f;
+        float centerZ=detailCenter.HasValue
+            ? (detailCenter.Value.Y+0.5f)*TileWorldWidth
+            : (lowZ+highZ+1)*TileWorldWidth*0.5f;
 
         int Side=(TileSamples-1)/sampleStep+1;
         var vertices=new List<Vector3>(included.Count*Side*Side);
@@ -180,6 +201,8 @@ public static class AutoRegionRenderer
         var triangles=new List<int>(included.Count*(Side-1)*(Side-1)*6);
         foreach(var (coord,tile) in included.OrderBy(e=>e.Key.Z).ThenBy(e=>e.Key.X))
         {
+            if(renderFrom is Vector2I from && (coord.X<from.X || coord.Z<from.Y))continue;
+            if(renderToExclusive is Vector2I to && (coord.X>=to.X || coord.Z>=to.Y))continue;
             int offset=vertices.Count;
             for(int iz=0;iz<Side;iz++)
             for(int ix=0;ix<Side;ix++)

@@ -109,6 +109,10 @@ uniform sampler2DArray original_lod_diffuse : source_color, filter_linear_mipmap
 uniform sampler2DArray original_lod_normal : filter_linear_mipmap, repeat_disable;
 uniform int lod_grid_width = 1;
 uniform int lod_grid_height = 1;
+uniform sampler2D full_detail_mask : filter_nearest, repeat_disable;
+uniform bool use_full_detail_mask=false;
+uniform ivec2 full_detail_mask_origin=ivec2(0,0);
+uniform ivec2 full_detail_mask_size=ivec2(1,1);
 uniform bool use_original_normals = true;
 uniform float normal_strength : hint_range(0.0,1.0) = 0.65;
 uniform sampler2DArray original_tile_colour : source_color, filter_linear_mipmap, repeat_disable;
@@ -119,6 +123,11 @@ uniform int tint_grid_height = 5;
 uniform float experimental_tint_strength : hint_range(0.0,1.0) = 0.65;
 
 void fragment() {
+    ivec2 coord=ivec2(floor(UV2))-full_detail_mask_origin;
+    if(use_full_detail_mask && all(greaterThanEqual(coord,ivec2(0))) &&
+       all(lessThan(coord,full_detail_mask_size)) &&
+       texture(full_detail_mask,(vec2(coord)+vec2(0.5))/vec2(full_detail_mask_size)).r>0.5)
+        discard;
     vec2 cell = floor(UV);
     vec2 tile_uv = fract(UV);
     int gx = clamp(int(cell.x),0,lod_grid_width-1);
