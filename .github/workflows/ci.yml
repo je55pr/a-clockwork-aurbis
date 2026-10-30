@@ -64,3 +64,13 @@ jobs:
         run: dotnet run --project tests/SimulationTests/SimulationTests.csproj --configuration Release
       - name: Exercise 10000 agents across three days
         run: dotnet run --project tools/SimulationRunner/SimulationRunner.csproj --configuration Release -- --people 10000 --days 3 --json
+      - name: Test independently simulated businesses, stock, wages and named places
+        run: dotnet run --project tests/SettlementTests/SettlementTests.csproj --configuration Release
+      - name: Build source-backed settlement runner without game assets
+        run: dotnet build tools/SettlementRunner/SettlementRunner.csproj --configuration Release --nologo
+      - name: Set up Node for offline source adapter fixture
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+      - name: Test source catalog extraction without ESO database
+        run: node --test tools/SettlementCatalog/export.test.js

@@ -1,0 +1,127 @@
+namespace AClockworkAurbis.Simulation;
+
+public sealed partial class SettlementWorld
+{
+    private void Decide(int index,ResidentState actor)
+    {
+        int localMinute=(int)(Minute%DayMinutes);
+        int hour=localMinute/60;
+        bool night=hour>=22||hour<6;
+        if(night)
+        {
+            if(actor.CurrentPlaceId!=actor.HomeId)
+                Travel(index,actor,actor.HomeId);
+            else
+            {
+                int untilMorning=(6*60-localMinute+DayMinutes)%DayMinutes;
+                Enqueue(index,Math.Max(1,untilMorning),SettlementAction.Sleep);
+                Observe(actor,"sleep",DisplayPlace(actor.HomeId));
+            }
+            return;
+        }
+
+        if(actor.Satiation<53)
+        {
+            if(actor.Food>0)
+            {
+                Enqueue(index,12,SettlementAction.Eat);
+                Observe(actor,"eat",actor.Source.Name+" is hungry");
+                return;
+            }
+            if(hour>=7&&hour<21&&actor.Gold>=_settings.MealPrice)
+            {
+                var food=ChooseShop(actor,food:true);
+                if(food is not null)
+                {
+                    if(actor.CurrentPlaceId!=food.Id)Travel(index,actor,food.Id);
+                    else Enqueue(index,4,SettlementAction.BuyFood);
+                    return;
+                }
+            }
+        }
+
+        if(actor.WorkId is not null &&
+           localMinute>=actor.WorkStart*60&&
+           localMinute<(actor.WorkStart+8)*60 &&
+           actor.Energy>=18)
+        {
+            if(actor.CurrentPlaceId!=actor.WorkId)
+                Travel(index,actor,actor.WorkId);
+            else
+            {
+                int untilShiftEnds=(actor.WorkStart+8)*60-localMinute;
+                Enqueue(index,Math.Min(60,untilShiftEnds),SettlementAction.Work);
+                Observe(actor,"work",DisplayPlace(actor.WorkId));
+            }
+            return;
+        }
+
+        // Household tool/general-goods purchases are deliberately modest.
+        // We do not assert which specific TES items residents need yet.
+        if(actor.Goods==0 && actor.Gold>=_settings.GoodsPrice+_settings.MealPrice &&
+           Minute/DayMinutes>actor.LastGoodsShoppingDay+2 &&
+           hour>=9&&hour<20 && actor.Satiation>=37)
+        {
+            var goods=ChooseShop(actor,food:false);
+            if(goods is not null)
+            {
+                if(actor.CurrentPlaceId!=goods.Id)Travel(index,actor,goods.Id);
+                else Enqueue(index,4,SettlementAction.BuyGoods);
+                return;
+            }
+        }
+
+        if(actor.CurrentPlaceId!=actor.HomeId &&
+           (hour>=18||actor.Energy<28||actor.WorkId is null))
+        {
+            Travel(index,actor,actor.HomeId);
+            return;
+        }
+        if(actor.Energy<35 && actor.CurrentPlaceId==actor.HomeId)
+        {
+            Enqueue(index,90,SettlementAction.Sleep);
+            Observe(actor,"rest",DisplayPlace(actor.HomeId));
+        }
+        else Enqueue(index,45,SettlementAction.Idle);
+    }
+
+    private BusinessState? ChooseShop(ResidentState actor,bool food)
+    {
+        BusinessState? best=null;
+        ulong lowest=ulong.MaxValue;
+        foreach(var shop in food?_foodShops:_goodsShops)
+        {
+            if(food)
+            {
+                if(shop.Kind!=BusinessKinds.FoodRetail||shop.Food<1)continue;
+            }
+            else if(shop.Kind is not (BusinessKinds.GoodsRetail or BusinessKinds.Workshop)||
+                    shop.Goods<1)continue;
+            ulong hash=StableRandom.Hash(actor.Source.Id,_settings.Seed)^
+                StableRandom.Hash(shop.Id,unchecked(_settings.Seed+41));
+            // Prefer the current shop, avoiding gratuitous teleport-like churn.
+            if(shop.Id==actor.CurrentPlaceId)return shop;
+            if(hash<lowest){lowest=hash;best=shop;}
+        }
+        return best;
+    }
+
+    private void Travel(int index,ResidentState actor,string destination)
+    {
+        actor.DestinationPlaceId=destination;
+        ulong hash=StableRandom.Hash(actor.Source.Id,_settings.Seed)^
+            StableRandom.Hash(destination,unchecked(_settings.Seed+71));
+        int variation=(int)(hash%11uL);
+        Enqueue(index,_settings.BaseTravelMinutes+variation,SettlementAction.Travel);
+        Observe(actor,"travel",$"{DisplayPlace(actor.CurrentPlaceId)} -> {DisplayPlace(destination)}");
+    }
+
+    private string DisplayPlace(string placeId)
+    {
+        if(_byBusiness.TryGetValue(placeId,out var business))return business.Name;
+        if(_placeNames.TryGetValue(placeId,out var placeName))return placeName;
+        return placeId.StartsWith("sim:unmapped-home:",StringComparison.Ordinal)
+            ? "Unmapped home (simulation default)"
+            : placeId;
+    }
+}
