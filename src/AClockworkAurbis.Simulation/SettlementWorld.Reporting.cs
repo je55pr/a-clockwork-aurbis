@@ -9,7 +9,7 @@ public sealed partial class SettlementWorld
     }
 
     private long TotalGold() =>
-        checked(_businesses.Sum(b=>b.Gold)+_residents.Sum(r=>r.Gold));
+        checked(_businesses.Sum(b=>b.Gold)+_residents.Sum(r=>r.Gold)+_publicGold);
 
     private long TotalFood() =>
         checked(_businesses.Sum(b=>(long)b.Food)+_residents.Sum(r=>(long)r.Food));
@@ -24,7 +24,9 @@ public sealed partial class SettlementWorld
         return new SettlementReport
         {
             Settlement=Catalog.Settlement,
-            SourcePlaces=Catalog.Places.Length,
+            SourcePlaces=Catalog.Places.Count(p=>p.SourcePageId>0),
+            SimulatedPlaces=Catalog.Places.Count(p=>p.SourcePageId==0),
+            SimulatedBusinesses=_businesses.Count(b=>b.Place.SourcePageId==0),
             Businesses=_businesses.Count,
             Residents=_residents.Count,
             SourceHomeAssignments=_residents.Count(p=>p.Source.HomePlaceId is not null),
@@ -47,6 +49,29 @@ public sealed partial class SettlementWorld
             FoodImported=_foodImported,MaterialsImported=_materialsImported,
             FoodRemaining=TotalFood(),MaterialsRemaining=TotalMaterials(),
             GoodsRemaining=TotalGoods(),
+            Economy=_settings.Economy.ToString(),
+            SimulatedContracts=_simulatedContracts,
+            FoodProducedLocally=_localFood,
+            FoodHarvestedForSubsistence=_subsistenceFood,
+            RawMaterialsExtracted=_localMaterials,
+            FoodExported=_foodExports,GoodsExported=_goodsExports,
+            MaterialsExported=_materialsExports,
+            FoodBoughtExternally=_foodImportsPaidUnits,
+            MaterialsBoughtExternally=_materialsImportsPaidUnits,
+            GoldPaidAbroad=_goldImportsPaid,GoldReceivedFromAbroad=_goldExportsEarned,
+            AssistanceGoldPaid=_aidPaid,AssistedResidents=_aidRecipients.Count,
+            RevenueTaxed=_taxRevenue,CooperativeDistributions=_cooperativeDistributions,
+            PublicGold=_publicGold,ExternalGold=_outsideGold,
+            InitialAllAccountsGold=Regional?_initialAllGold:_initialGold,
+            AllAccountsGold=TotalGold()+_outsideGold,
+            ExternalFood=_outsideFood,ExternalMaterials=_outsideMaterials,
+            TotalFoodIncludingExternal=TotalFood()+_outsideFood,
+            TotalMaterialsIncludingExternal=TotalMaterials()+TotalGoods()+_outsideMaterials+_outsideGoods,
+            FoodProducers=_farms.Length,ResourceProducers=_extractors.Length,
+            ResidentsFurloughed=_residents.Count(p=>p.OnUnpaidLeave),
+            PersonHoursAtZeroSatiation=Math.Round(_residents.Sum(p=>p.MinutesAtZeroSatiation)/60d,2),
+            PersonHoursBelow20Satiation=Math.Round(_residents.Sum(p=>p.MinutesBelow20Satiation)/60d,2),
+            WorkersFurloughedCumulative=_furloughs,JobsReassigned=_rehired,
             InitialFood=_initialFood,InitialMaterials=_initialMaterials,
             InitialGoods=_initialGoods,InitialGold=_initialGold,TotalGold=TotalGold(),
             BusinessDetails=_businesses.OrderBy(b=>b.Id,StringComparer.Ordinal)
@@ -59,11 +84,22 @@ public sealed partial class SettlementWorld
 
     public void CheckInvariants()
     {
-        if(TotalGold()!=_initialGold)
+        if (Regional)
+        {
+            if(checked(TotalGold()+_outsideGold)!=_initialAllGold)
+                throw new InvalidOperationException("All gold accounts including foreign trade do not reconcile");
+            if(TotalFood()+_outsideFood+_meals!=
+               _initialFood+_initialOutsideFood+_localFood)
+                throw new InvalidOperationException("Regional food accounting mismatch");
+            if(TotalMaterials()+TotalGoods()+_outsideMaterials+_outsideGoods+_goodsUsed!=
+               _initialMaterials+_initialGoods+_initialOutsideMaterials+_initialOutsideGoods+_localMaterials)
+                throw new InvalidOperationException("Regional materials and goods accounting mismatch");
+        }
+        else if(TotalGold()!=_initialGold)
             throw new InvalidOperationException("Gold appeared or disappeared outside transfers");
-        if(TotalFood()+_meals!=_initialFood+_foodImported)
+        if(!Regional && TotalFood()+_meals!=_initialFood+_foodImported)
             throw new InvalidOperationException("Food ledger did not reconcile");
-        if(TotalMaterials()+TotalGoods()+_goodsUsed!=_initialMaterials+_initialGoods+_materialsImported)
+        if(!Regional && TotalMaterials()+TotalGoods()+_goodsUsed!=_initialMaterials+_initialGoods+_materialsImported)
             throw new InvalidOperationException("Material + finished goods ledger did not reconcile");
         if(_dividends!=_residents.Sum(r=>r.DividendIncome)||
            _dividends!=_businesses.Sum(b=>b.DividendsPaid))
@@ -79,7 +115,7 @@ public sealed partial class SettlementWorld
         }
         foreach(var b in _businesses)
         {
-            if(b.Gold<0||b.Food<0||b.Materials<0||b.Goods<0)
+            if(b.Gold<0||b.Food<0||b.Materials<0||b.Goods<0||b.MineralReserve<0||b.LandYieldRemaining<0)
                 throw new InvalidOperationException("Invalid business account/stock: "+b.Id);
         }
     }

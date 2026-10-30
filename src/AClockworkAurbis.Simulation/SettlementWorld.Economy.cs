@@ -13,7 +13,8 @@ public sealed partial class SettlementWorld
         if(hours<=0)return;
         business.WorkHours+=hours;
         long payment=checked((long)hours*_settings.HourlyWage);
-        if(business.Gold>=payment)
+        bool paid = business.Gold>=payment;
+        if(paid)
         {
             business.Gold-=payment;
             business.WagesPaid+=payment;
@@ -27,7 +28,9 @@ public sealed partial class SettlementWorld
             actor.UnpaidHours+=hours;
             _unpaid+=hours;
             Observe(actor,"unpaid",$"{business.Name} could not fund {hours} hour(s)");
+            if(Regional)FurloughForInsolvency(actor,business);
         }
+        if(CompleteRegionalWork(actor,business,paid?hours:0))return;
         // Craft workshops actually convert one raw-material unit into one
         // finished goods unit per completed productive hour.
         if(business.Kind==BusinessKinds.Workshop)
@@ -64,8 +67,11 @@ public sealed partial class SettlementWorld
             _goodsSales++;
         }
         actor.Gold-=cost;
-        business.Gold+=cost;
-        business.RetailRevenue+=cost;
+        int tax = Regional ? (food?_settings.FoodSalesTax:_settings.GoodsSalesTax) : 0;
+        business.Gold+=cost-tax;
+        _publicGold+=tax;
+        _taxRevenue+=tax;
+        business.RetailRevenue+=cost-tax;
         business.RetailSales++;
         actor.Purchases++;
         _purchases++;
@@ -74,6 +80,7 @@ public sealed partial class SettlementWorld
 
     private void DeliverImportsAndRestock()
     {
+        if(Regional){RunRegionalDay();return;}
         if(_residents.Count==0)return;
         // Share a small portion of yesterday’s operating surplus with a
         // simulated leaseholder. The legal owner remains unknown in the

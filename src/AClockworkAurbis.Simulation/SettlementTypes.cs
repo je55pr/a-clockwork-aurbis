@@ -11,7 +11,8 @@ public sealed record SettlementCatalog(
     JsonElement Counts,
     PlaceDefinition[] Places,
     BusinessDefinition[] Businesses,
-    ResidentDefinition[] Residents)
+    ResidentDefinition[] Residents,
+    string? Scope = null)
 {
     public static SettlementCatalog Load(string file)
     {
@@ -67,13 +68,15 @@ public sealed record SettlementCatalog(
 public static class BusinessKinds
 {
     public const string FoodRetail = "food_retail";
+    public const string FoodProducer = "food_producer";
+    public const string ResourceProducer = "resource_producer";
     public const string GoodsRetail = "goods_retail";
     public const string Workshop = "workshop";
     public const string ImportHub = "import_hub";
     public const string Institution = "institution";
     public static readonly IReadOnlySet<string> Valid =
         new HashSet<string>(StringComparer.Ordinal)
-        { FoodRetail, GoodsRetail, Workshop, ImportHub, Institution };
+        { FoodRetail, FoodProducer, ResourceProducer, GoodsRetail, Workshop, ImportHub, Institution };
 }
 
 public sealed record PlaceDefinition(
@@ -96,8 +99,10 @@ public sealed record ResidentDefinition(
 
 public enum SettlementAction : byte
 {
-    Idle, Travel, Work, Eat, Sleep, BuyFood, BuyGoods
+    Idle, Travel, Work, Eat, Sleep, BuyFood, BuyGoods, HarvestFood
 }
+
+public enum EconomyMode { Prototype, RegionalProduction }
 
 public sealed class ResidentState
 {
@@ -116,7 +121,17 @@ public sealed class ResidentState
     }
     public ResidentDefinition Source { get; }
     public string HomeId { get; }
-    public string? WorkId => Source.WorkPlaceId;
+    // Source-backed job links are immutable; contracts are simulation state.
+    public string? WorkId => OnUnpaidLeave ? null : AssignedWorkPlaceId ?? Source.WorkPlaceId;
+    public bool OnUnpaidLeave { get; internal set; }
+    public int InsolvencyJobChanges { get; internal set; }
+    public string? AssignedWorkPlaceId { get; internal set; }
+    public string EmploymentEvidence { get; internal set; } = "no_known_employment";
+    public int SubsistenceFoodHarvested { get; internal set; }
+    public double MinutesAtZeroSatiation { get; internal set; }
+    public double MinutesBelow20Satiation { get; internal set; }
+    public long AssistanceGold { get; internal set; }
+    public long CooperativeIncome { get; internal set; }
     public string CurrentPlaceId { get; internal set; }
     public string DestinationPlaceId { get; internal set; }
     public SettlementAction Activity { get; internal set; }
@@ -171,11 +186,39 @@ public sealed class BusinessState
     public int RetailSales { get; internal set; }
     public int WorkHours { get; internal set; }
     public int ItemsCrafted { get; internal set; }
+    public int FoodProduced { get; internal set; }
+    public int MaterialsExtracted { get; internal set; }
+    public int LandYieldRemaining { get; internal set; }
+    public int MineralReserve { get; internal set; }
+    public int WorkerCount { get; internal set; }
 }
 
 public sealed record SettlementSettings
 {
     public int Seed { get; init; } = 42;
+    public EconomyMode Economy { get; init; } = EconomyMode.Prototype;
+    // Economic constants are simulation hypotheses, not ESO measurements.
+    public int RenewableFoodPerWorkHour { get; init; } = 3;
+    public int RawMaterialPerWorkHour { get; init; } = 2;
+    public int DailyLandRegrowthPerResident { get; init; } = 4;
+    public int InitialMineralReservePerSite { get; init; } = 3000;
+    public int InitialOutsideGold { get; init; } = 1_200_000;
+    public int InitialOutsideFood { get; init; } = 100_000;
+    public int InitialOutsideMaterials { get; init; } = 50_000;
+    public int InitialPublicGoldPerResident { get; init; } = 10;
+    public int DailyForeignFoodDemandPerResident { get; init; } = 2;
+    public int DailyForeignGoodsDemandPerResident { get; init; } = 1;
+    public int DailyImportCapPerTenResidents { get; init; } = 2;
+    public int FoodExportPrice { get; init; } = 3;
+    public int GoodsExportPrice { get; init; } = 8;
+    public int ExternalFoodImportPrice { get; init; } = 1;
+    public int ExternalMaterialImportPrice { get; init; } = 2;
+    public int FoodSalesTax { get; init; } = 1;
+    public int GoodsSalesTax { get; init; } = 2;
+    public int DailyAssistanceLimit { get; init; } = 8;
+    public bool EnableLocalProduction { get; init; } = true;
+    public bool EnableExternalTrade { get; init; } = true;
+    public bool EnablePublicAssistance { get; init; } = true;
     public int MealPrice { get; init; } = 6;
     public int GoodsPrice { get; init; } = 12;
     public int FoodWholesalePrice { get; init; } = 2;
@@ -204,6 +247,8 @@ public sealed record SettlementReport
 {
     public required string Settlement { get; init; }
     public required int SourcePlaces { get; init; }
+    public int SimulatedPlaces { get; init; }
+    public int SimulatedBusinesses { get; init; }
     public required int Businesses { get; init; }
     public required int Residents { get; init; }
     public required int SourceHomeAssignments { get; init; }
@@ -242,4 +287,35 @@ public sealed record SettlementReport
     public required int ResidentsWithoutFood { get; init; }
     public required int ResidentsWithoutGold { get; init; }
     public required BusinessSnapshot[] BusinessDetails { get; init; }
+    public string Economy { get; init; } = "prototype";
+    public int SimulatedContracts { get; init; }
+    public long FoodProducedLocally { get; init; }
+    public long FoodHarvestedForSubsistence { get; init; }
+    public long RawMaterialsExtracted { get; init; }
+    public long FoodExported { get; init; }
+    public long GoodsExported { get; init; }
+    public long MaterialsExported { get; init; }
+    public long FoodBoughtExternally { get; init; }
+    public long MaterialsBoughtExternally { get; init; }
+    public long GoldPaidAbroad { get; init; }
+    public long GoldReceivedFromAbroad { get; init; }
+    public long AssistanceGoldPaid { get; init; }
+    public int AssistedResidents { get; init; }
+    public long RevenueTaxed { get; init; }
+    public long CooperativeDistributions { get; init; }
+    public long PublicGold { get; init; }
+    public long ExternalGold { get; init; }
+    public long InitialAllAccountsGold { get; init; }
+    public long AllAccountsGold { get; init; }
+    public int ExternalFood { get; init; }
+    public int ExternalMaterials { get; init; }
+    public long TotalFoodIncludingExternal { get; init; }
+    public long TotalMaterialsIncludingExternal { get; init; }
+    public int FoodProducers { get; init; }
+    public int ResourceProducers { get; init; }
+    public int ResidentsFurloughed { get; init; }
+    public double PersonHoursAtZeroSatiation { get; init; }
+    public double PersonHoursBelow20Satiation { get; init; }
+    public long WorkersFurloughedCumulative { get; init; }
+    public long JobsReassigned { get; init; }
 }

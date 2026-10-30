@@ -17,6 +17,8 @@ const unique=items=>[...new Set(items)];
 function role(place){
  const type=(place.place_type||'').toLowerCase(),label=(place.name||'').toLowerCase();
  if(type==='home'||type==='player house')return 'dwelling';
+ if(type==='farm'||type==='plantation'||type==='fishery')return 'food_producer';
+ if(type==='mine'||type==='grove'||type==='quarry')return 'resource_producer';
  if(type==='inn'||type==='marketplace'||type.includes('tavern'))return 'food_retail';
  if(type.includes('transportation')&&/dock|harbou?r|port|quay/.test(label))return 'import_hub';
  if(type.includes('carpentry')||type.includes('smithy')||type.includes('forge'))return 'workshop';
@@ -121,7 +123,7 @@ try{
   mapX:locate(p)?.x??null,mapY:locate(p)?.y??null,
   mapEvidence:locate(p)?.evidence??'unmapped',district:district(p)
  }));
- const businessKinds=new Set(['food_retail','goods_retail','workshop','import_hub','institution']);
+ const businessKinds=new Set(['food_retail','goods_retail','workshop','import_hub','institution','food_producer','resource_producer']);
  const businesses=included.filter(p=>businessKinds.has(roleByPage.get(p.page_id))).map(p=>({
   placeId:placeLabel(p.page_id),kind:roleByPage.get(p.page_id),
   ownerNpcId:null, // Evidence does not establish legal ownership.
@@ -129,6 +131,56 @@ try{
      .map(l=>'npc:uesp-online:'+l.npc_page_id)),
   evidence:'UESP place type and npc_store links; finances and inventory are simulation defaults'
  }));
+ // The source contains very few documented farms and no populated farming
+ // industry in most towns. Model municipal allotments and produce stalls as
+ // explicitly synthetic workplaces. The source town marker only anchors them;
+ // it is NOT evidence that a particular farm existed in ESO.
+ if(wholeZone){
+   const centers=resultPlaces.filter(p=>['City','Town'].includes(p.sourceType));
+   const occupied=new Set(centers.map(p=>p.id));
+   // Rural communities are grouped around larger source-associated NPC
+   // clusters, keeping remote residents from magically commuting to a city.
+   const counts=new Map();
+   for(const l of mapped){if(l.relation!=='npc_city')counts.set(l.place_page_id, (counts.get(l.place_page_id)||0)+1);}
+   const rural=resultPlaces.filter(p=>!p.district && p.mapX!==null &&
+       !['Zone','City','Town','Treasure Map','Survey Report'].includes(p.sourceType))
+      .sort((a,b)=>(counts.get(b.sourcePageId)||0)-(counts.get(a.sourcePageId)||0) ||
+            a.id.localeCompare(b.id));
+   const centersOfActivity=[...centers];
+   for(const candidate of rural){
+     if(centersOfActivity.length>=centers.length+12)break;
+     if((counts.get(candidate.sourcePageId)||0)<2)continue;
+     if(centersOfActivity.some(x=>x.mapX!==null && x.mapY!==null &&
+        Math.hypot(x.mapX-candidate.mapX,x.mapY-candidate.mapY)<35000))continue;
+     centersOfActivity.push(candidate);
+   }
+   for(const anchor of centersOfActivity){
+     const suffix=anchor.id.replace(/[^a-z0-9]+/gi,'-');
+     const farmId='sim:allotment:'+suffix;
+     const district=anchor.district||anchor.name;
+     resultPlaces.push({id:farmId,sourcePageId:0,
+       name:'Community allotments near '+anchor.name,
+       sourceType:'simulation_default_agriculture',settlement:anchor.name,
+       zone:wholeZone,role:'food_producer',sourceUrl:'',
+       mapX:anchor.mapX,mapY:anchor.mapY,
+       mapEvidence:anchor.mapX!==null?'simulation_at_source_anchor':'unmapped',district});
+     businesses.push({placeId:farmId,kind:'food_producer',ownerNpcId:null,
+       operatorNpcIds:[],evidence:'SIMULATION DEFAULT renewable plots near source place; not an ESO farm claim'});
+     const existingFood=businesses.some(b=>b.kind==='food_retail' &&
+        resultPlaces.find(p=>p.id===b.placeId)?.district===district);
+     if(!existingFood){
+       const shopId='sim:food-market:'+suffix;
+       resultPlaces.push({id:shopId,sourcePageId:0,
+         name:'Community provisions near '+anchor.name,
+         sourceType:'simulation_default_cooperative_market',settlement:anchor.name,
+         zone:wholeZone,role:'food_retail',sourceUrl:'',
+         mapX:anchor.mapX,mapY:anchor.mapY,
+         mapEvidence:anchor.mapX!==null?'simulation_at_source_anchor':'unmapped',district});
+       businesses.push({placeId:shopId,kind:'food_retail',ownerNpcId:null,
+         operatorNpcIds:[],evidence:'SIMULATION DEFAULT village food market; unconfirmed in source'});
+     }
+   }
+ }
  const businessIds=new Set(businesses.map(b=>b.placeId));
  const residents=valid.map(row=>{
   const data=JSON.parse(row.profile_json);
@@ -177,8 +229,10 @@ try{
       explicitHomes:residents.filter(p=>p.homeEvidence==='explicit_npc_house').length,
       placesWithExactMapMarkers:resultPlaces.filter(p=>p.mapEvidence==='source_map_marker').length,
       placesWithEstimatedMapMarkers:resultPlaces.filter(p=>p.mapEvidence==='estimated_parent_settlement_marker').length,
-      residentsWithMapAnchor:residents.filter(r=>resultPlaces.some(p=>p.id===r.anchorPlaceId&&p.mapX!==null)).length},
-   places:resultPlaces,businesses,residents};
+      residentsWithMapAnchor:residents.filter(r=>resultPlaces.some(p=>p.id===r.anchorPlaceId&&p.mapX!==null)).length,
+      sourcePlaces:resultPlaces.filter(p=>p.sourcePageId>0).length,
+      simulatedProductionPlaces:resultPlaces.filter(p=>p.sourcePageId===0).length},
+   places:resultPlaces,businesses,residents,scope:wholeZone?'whole_zone':'settlement'};
  fs.mkdirSync(path.dirname(out),{recursive:true});
  fs.writeFileSync(out,JSON.stringify(exportData,null,2)+'\n');
  console.log(JSON.stringify({file:out,settlement:wholeZone??name,scope:wholeZone?'whole_zone':'settlement',counts:exportData.counts,

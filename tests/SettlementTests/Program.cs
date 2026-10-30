@@ -13,6 +13,13 @@ var tests=new (string Name,Action Run)[]
     ("Missing port is explicitly synthetic outside trade", MissingPort),
     ("Malformed source associations rejected", CatalogValidation),
     ("Whole-island map travel and neighbourhood shopping", IslandTravel),
+    ("Regional production needs actual labour and finite natural capacity", RegionalProduction),
+    ("Closed regional economy works without automatic imports", ClosedRegion),
+    ("Disabling work and imports cannot create food", NoSupply),
+    ("External trade funds are finite and count in all ledgers", FiniteForeignMarket),
+    ("Crop failure exposes genuine food shortage", CropFailureSensitivity),
+    ("Public assistance cannot exceed collected and allocated funds", FundedAssistance),
+    ("Deterministic regional simulations can run in time chunks", RegionalDeterminism),
     ("Large 10k actor headless performance and integrity", Stress)
 };
 int passed=0;
@@ -28,7 +35,7 @@ static void Expect(bool okay,string message)
 {
     if(!okay)throw new Exception(message);
 }
-static SettlementCatalog Fixture(int count=30,bool includePort=true)
+static SettlementCatalog Fixture(int count=30,bool includePort=true,bool production=false)
 {
     var places=new List<PlaceDefinition>();
     var businesses=new List<BusinessDefinition>();
@@ -49,6 +56,10 @@ static SettlementCatalog Fixture(int count=30,bool includePort=true)
     Add("b:forge","Blacksmith",BusinessKinds.Workshop);
     Add("b:guild","Guildhall",BusinessKinds.Institution);
     if(includePort)Add("b:port","Exampleton Harbour",BusinessKinds.ImportHub);
+    if(production){
+        Add("sim:fields","Simulated community allotment",BusinessKinds.FoodProducer);
+        Add("b:mine","Source-linked ore mine",BusinessKinds.ResourceProducer);
+    }
     var residents=new ResidentDefinition[count];
     for(int i=0;i<count;i++)
     {
@@ -266,6 +277,120 @@ static void IslandTravel()
         "nearby market chosen in observed purchase events");
     Expect(!trace.Any(t=>t.Action=="purchase"&&t.Detail.Contains("Test Tavern")),
         "resident does not cross whole island to buy identical nearby food");
+}
+
+static void RegionalProduction()
+{
+    var world=new SettlementWorld(Fixture(120,production:true),
+        new SettlementSettings{Economy=EconomyMode.RegionalProduction});
+    world.AdvanceTo(1440L*30);
+    world.CheckInvariants();
+    var report=world.Report();
+    Expect(report.FoodProducedLocally>0 && report.RawMaterialsExtracted>0,
+        "fields and mines produce output only after worker activities");
+    Expect(report.FoodProducers==1 && report.ResourceProducers==1,
+        "producer sites retain different resource types");
+    Expect(report.SimulatedContracts>0,"jobs assigned but source identities unchanged");
+    Expect(world.Residents.Any(p=>p.EmploymentEvidence=="simulated_labor_contract"),
+        "synthetic contracts never masquerade as original professions");
+    Expect(world.Residents.First(p=>p.Source.Id=="npc:example:0").Source.WorkPlaceId=="b:market",
+        "source-known workplace association preserved");
+    Expect(report.AllAccountsGold==report.InitialAllAccountsGold,
+        "domestic, public and external gold reconcile");
+}
+
+static void ClosedRegion()
+{
+    var world=new SettlementWorld(Fixture(95,production:true),
+        new SettlementSettings{Economy=EconomyMode.RegionalProduction,
+            EnableExternalTrade=false,InitialOutsideGold=0,
+            InitialOutsideFood=0,InitialOutsideMaterials=0});
+    world.AdvanceTo(1440L*30);
+    world.CheckInvariants();
+    var report=world.Report();
+    Expect(report.FoodProducedLocally>0 && report.FoodImported==0,
+        "local crops grow without imported inventory");
+    Expect(report.GoldPaidAbroad==0 && report.GoldReceivedFromAbroad==0,
+        "foreign trade cannot occur when explicitly disabled");
+    Expect(report.TotalGold==report.InitialGold,
+        "closed region gold moves only between residents, firms and treasury");
+    Expect(report.Meals>0,"locally generated food is eaten");
+}
+
+static void NoSupply()
+{
+    var world=new SettlementWorld(Fixture(50,production:true),
+        new SettlementSettings{Economy=EconomyMode.RegionalProduction,
+            EnableExternalTrade=false,EnableLocalProduction=false,
+            InitialOutsideGold=0,InitialOutsideFood=0,InitialOutsideMaterials=0});
+    world.AdvanceTo(1440L*30);
+    world.CheckInvariants();
+    var r=world.Report();
+    Expect(r.FoodProducedLocally==0 && r.RawMaterialsExtracted==0,
+        "no harvesting without the production sector");
+    Expect(r.FoodImported==0 && r.MaterialsImported==0,
+        "no hidden automatic restock");
+    Expect(r.Meals<=r.InitialFood,"only actual opening inventory may be eaten");
+}
+
+static void FiniteForeignMarket()
+{
+    var world=new SettlementWorld(Fixture(75,production:true),
+        new SettlementSettings{Economy=EconomyMode.RegionalProduction,
+            InitialOutsideGold=7,InitialOutsideFood=20,
+            InitialOutsideMaterials=15});
+    world.AdvanceTo(1440L*15);
+    world.CheckInvariants();
+    var r=world.Report();
+    Expect(r.ExternalGold>=0 && r.ExternalFood>=0 && r.ExternalMaterials>=0,
+        "foreign accounts cannot overdraft");
+    Expect(r.AllAccountsGold==r.InitialAllAccountsGold,
+        "imports and exports cannot create money");
+}
+
+static void CropFailureSensitivity()
+{
+    var catalog=Fixture(100,production:true);
+    var growing=new SettlementWorld(catalog,new SettlementSettings
+    {Economy=EconomyMode.RegionalProduction,EnableExternalTrade=false});
+    var failed=new SettlementWorld(catalog,new SettlementSettings
+    {Economy=EconomyMode.RegionalProduction,EnableExternalTrade=false,
+     EnableLocalProduction=false});
+    growing.AdvanceTo(1440L*30);
+    failed.AdvanceTo(1440L*30);
+    growing.CheckInvariants();failed.CheckInvariants();
+    Expect(failed.Report().FoodProducedLocally==0,
+        "crop failure actually removes local production");
+    Expect(growing.Report().FoodProducedLocally>0,
+        "unaffected land requires paid productive work to harvest");
+    Expect(failed.Report().PersonHoursAtZeroSatiation>
+           growing.Report().PersonHoursAtZeroSatiation,
+        "a production shock must measurably worsen hunger");
+}
+
+static void FundedAssistance()
+{
+    var world=new SettlementWorld(Fixture(80,production:true),
+        new SettlementSettings{Economy=EconomyMode.RegionalProduction,
+            InitialPublicGoldPerResident=0,EnableExternalTrade=false});
+    world.AdvanceTo(1440L*30);
+    world.CheckInvariants();
+    var r=world.Report();
+    Expect(r.AssistanceGoldPaid <= r.RevenueTaxed,
+        "with no opening treasury, assistance is limited by tax receipts");
+    Expect(r.PublicGold>=0,"public budget cannot run negative");
+}
+
+static void RegionalDeterminism()
+{
+    var catalog=Fixture(100,production:true);
+    var a=new SettlementWorld(catalog,new SettlementSettings{Economy=EconomyMode.RegionalProduction});
+    var b=new SettlementWorld(catalog,new SettlementSettings{Economy=EconomyMode.RegionalProduction});
+    a.AdvanceTo(1440L*30);
+    for(long minute=0;minute<=1440L*30;minute+=120)b.AdvanceTo(minute);
+    a.CheckInvariants();b.CheckInvariants();
+    Expect(JsonSerializer.Serialize(a.Report())==JsonSerializer.Serialize(b.Report()),
+        "headless regional economy is deterministic across chunking");
 }
 
 static void Stress()

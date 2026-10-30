@@ -80,10 +80,14 @@ try{
   {encoding:'utf8'});
  const whole=JSON.parse(fs.readFileSync(outZone,'utf8'));
  assert.equal(whole.settlement,'The Example Isles');
- assert.equal(whole.counts.places,7,'all zone places, including category-only grove and zone root');
+ assert.equal(whole.counts.sourcePlaces,7,'all source places, including zone-membership-only places');
+ assert.ok(whole.counts.simulatedProductionPlaces>=1,'explicitly simulated agriculture added');
+ assert.ok(whole.counts.places>whole.counts.sourcePlaces);
  assert.equal(whole.counts.linkedCharacters,4,'zone membership includes NPC not covered by zone field');
  assert.equal(whole.counts.eligibleSingleAppearanceCharacters,3,'reject multiple-appearance person');
  assert.equal(whole.counts.placesWithExactMapMarkers,3);
+ assert.ok(whole.businesses.some(b=>b.kind==='food_producer' &&
+   b.evidence.includes('SIMULATION DEFAULT')),'synthetic co-ops distinguish source evidence');
  assert.ok(whole.counts.placesWithEstimatedMapMarkers>=1);
  assert.equal(whole.residents.find(x=>x.name==='Cedar').anchorPlaceId,'uesp:place:9');
  assert.ok(whole.places.find(x=>x.name==='Waterfront Market').mapEvidence==='estimated_parent_settlement_marker');

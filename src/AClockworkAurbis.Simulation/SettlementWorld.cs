@@ -46,7 +46,19 @@ public sealed partial class SettlementWorld
            _settings.FoodImportPerResident<0 || _settings.MaterialImportPerTenResidents<0 ||
            _settings.StartHour is <0 or >23 ||
            _settings.MapUnitsPerTravelMinute<1 ||
-           _settings.UnknownMapInterdistrictMinutes<0)
+           _settings.UnknownMapInterdistrictMinutes<0 ||
+           _settings.FoodSalesTax<0 || _settings.GoodsSalesTax<0 ||
+           _settings.FoodSalesTax>_settings.MealPrice ||
+           _settings.GoodsSalesTax>_settings.GoodsPrice ||
+           _settings.InitialOutsideGold<0 || _settings.InitialOutsideFood<0 ||
+           _settings.InitialOutsideMaterials<0 || _settings.InitialPublicGoldPerResident<0 ||
+           _settings.DailyLandRegrowthPerResident<0 || _settings.InitialMineralReservePerSite<0 ||
+           _settings.RenewableFoodPerWorkHour<1 || _settings.RawMaterialPerWorkHour<1 ||
+           _settings.DailyForeignFoodDemandPerResident<0 ||
+           _settings.DailyForeignGoodsDemandPerResident<0 ||
+           _settings.DailyImportCapPerTenResidents<0 ||
+           _settings.ExternalFoodImportPrice<0 ||
+           _settings.ExternalMaterialImportPrice<0 || _settings.DailyAssistanceLimit<0)
             throw new ArgumentOutOfRangeException(nameof(settings));
 
         _sourcePlaces=catalog.Places.ToDictionary(p=>p.Id,StringComparer.Ordinal);
@@ -123,6 +135,7 @@ public sealed partial class SettlementWorld
             if(business.Kind==BusinessKinds.FoodRetail)business.Food=5;
             if(business.Kind==BusinessKinds.GoodsRetail)business.Goods=2;
         }
+        if (Regional) InitializeRegional();
         _initialGold=TotalGold();
         _initialFood=TotalFood();
         _initialMaterials=TotalMaterials();
@@ -167,7 +180,15 @@ public sealed partial class SettlementWorld
         long delta=minute-actor.LastUpdate;
         if(delta<0)throw new InvalidOperationException("NPC time cannot run backwards");
         if(delta==0)return;
-        actor.Satiation=Math.Clamp(actor.Satiation-delta*0.044,0,100);
+        // Integrate deprivation analytically over scheduled events. Snapshot
+        // hunger at day 90 alone can conceal repeated short starvation.
+        const double hungerRate=0.044;
+        double initialSatiation=actor.Satiation;
+        actor.MinutesBelow20Satiation+=Math.Clamp((double)delta -
+            Math.Max(0d,(initialSatiation-20d)/hungerRate),0d,(double)delta);
+        actor.MinutesAtZeroSatiation+=Math.Clamp((double)delta -
+            initialSatiation/hungerRate,0d,(double)delta);
+        actor.Satiation=Math.Clamp(initialSatiation-delta*hungerRate,0,100);
         double rate=actor.Activity switch
         {
             SettlementAction.Sleep=>0.16,
@@ -212,6 +233,9 @@ public sealed partial class SettlementWorld
                 break;
             case SettlementAction.BuyGoods:
                 CompletePurchase(actor,food:false);
+                break;
+            case SettlementAction.HarvestFood:
+                CompleteSubsistenceHarvest(actor);
                 break;
         }
     }

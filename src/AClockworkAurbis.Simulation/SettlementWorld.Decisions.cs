@@ -40,6 +40,9 @@ public sealed partial class SettlementWorld
             }
         }
 
+        if (Regional && actor.Food==0 && actor.Gold<_settings.MealPrice &&
+            actor.Satiation<72 && ChooseSubsistence(index,actor))return;
+
         if(actor.WorkId is not null &&
            localMinute>=actor.WorkStart*60&&
            localMinute<(actor.WorkStart+8)*60 &&
