@@ -137,6 +137,17 @@ public static class AutoRegionRenderer
                     $"No terrain in 5x5 source patch around tile ({c.X},{c.Y})");
         }
 
+        // A close-up may request an even-sided 8x8 view; clip source tiles
+        // BEFORE computing height limits or tile counts, not just mesh vertices.
+        if(renderFrom is Vector2I fromArea && renderToExclusive is Vector2I toArea)
+        {
+            included=included.Where(e=>e.Key.X>=fromArea.X&&e.Key.Z>=fromArea.Y&&
+                e.Key.X<toArea.X&&e.Key.Z<toArea.Y)
+                .ToDictionary(e=>e.Key,e=>e.Value);
+            if(included.Count==0)throw new InvalidOperationException(
+                "No source land tiles within requested close-up rectangle");
+        }
+
         int mismatchedSeams=0;
         foreach(var (coord,tile) in included)
         {
@@ -170,8 +181,14 @@ public static class AutoRegionRenderer
 
         int lowX=included.Keys.Min(p=>p.X),highX=included.Keys.Max(p=>p.X);
         int lowZ=included.Keys.Min(p=>p.Z),highZ=included.Keys.Max(p=>p.Z);
-        float centerX=(lowX+highX+1)*TileWorldWidth*0.5f;
-        float centerZ=(lowZ+highZ+1)*TileWorldWidth*0.5f;
+        // Keep the original source-coordinate origin at the selected tile
+        // centre even for an 8x8 (even-sided) rectangle.
+        float centerX=detailCenter.HasValue
+            ? (detailCenter.Value.X+0.5f)*TileWorldWidth
+            : (lowX+highX+1)*TileWorldWidth*0.5f;
+        float centerZ=detailCenter.HasValue
+            ? (detailCenter.Value.Y+0.5f)*TileWorldWidth
+            : (lowZ+highZ+1)*TileWorldWidth*0.5f;
 
         int Side=(TileSamples-1)/sampleStep+1;
         var vertices=new List<Vector3>(included.Count*Side*Side);
