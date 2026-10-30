@@ -12,6 +12,7 @@ var tests=new (string Name,Action Run)[]
     ("Economic shortage cannot mint wages or stock", Shortage),
     ("Missing port is explicitly synthetic outside trade", MissingPort),
     ("Malformed source associations rejected", CatalogValidation),
+    ("Whole-island map travel and neighbourhood shopping", IslandTravel),
     ("Large 10k actor headless performance and integrity", Stress)
 };
 int passed=0;
@@ -93,6 +94,8 @@ static void Economy()
 {
     var report=Run(120);
     Expect(report.Residents==120 && report.Businesses==6,"population and business counts");
+    Expect(report.ResidentsWithZeroSatiation>=0 && report.ResidentsWithZeroSatiation<=120,
+        "well-being snapshot bounded by population");
     Expect(report.Wages>0 && report.RetailFoodSales>0 && report.Meals>0,
         "real wages and food purchases occur");
     Expect(report.RetailGoodsSales>0 && report.CraftedGoods>0,
@@ -232,6 +235,39 @@ static void CatalogValidation()
     catch(InvalidDataException){failed=true;}
     Expect(failed,"businesses must reference genuine place IDs");
 }
+static void IslandTravel()
+{
+    var fixture=Fixture(24);
+    var places=fixture.Places.Select(p=>p.Id switch
+    {
+        "home:1" => p with {MapX=10000,MapY=10000,MapEvidence="source_map_marker",District="Exampleton"},
+        "b:market" => p with {MapX=12000,MapY=10000,MapEvidence="source_map_marker",District="Exampleton"},
+        "b:tavern" => p with {MapX=800000,MapY=800000,MapEvidence="source_map_marker",District="Elsewhere"},
+        "b:forge" => p with {MapX=30000,MapY=20000,MapEvidence="source_map_marker",District="Exampleton"},
+        "b:gear" => p with {MapX=18000,MapY=11000,MapEvidence="source_map_marker",District="Exampleton"},
+        _ => p
+    }).ToArray();
+    var cat=fixture with {Places=places};
+    var sim=new SettlementWorld(cat);
+    const string resident="npc:example:10";
+    int nearby=sim.EstimateTravelMinutes(resident,"b:market");
+    int distant=sim.EstimateTravelMinutes(resident,"b:tavern");
+    int unknown=sim.EstimateTravelMinutes(resident,"b:guild");
+    Expect(nearby<25,"nearby source market short journey");
+    Expect(distant>400,"distant island tavern does not take 18 minutes");
+    Expect(unknown>nearby+60,"unmapped business does not rank as magically adjacent");
+    var trace=new List<SimObservation>();
+    sim.Observer=x=>{if(x.NpcId==resident)trace.Add(x);};
+    sim.AdvanceTo(1440*3);
+    sim.CheckInvariants();
+    Expect(sim.Report().TravelMinutes>0,"trip durations accumulated");
+    Expect(sim.Report().LongJourneys>0,"extended trips measured");
+    Expect(trace.Any(t=>t.Action=="purchase"&&t.Detail.Contains("Market Street")),
+        "nearby market chosen in observed purchase events");
+    Expect(!trace.Any(t=>t.Action=="purchase"&&t.Detail.Contains("Test Tavern")),
+        "resident does not cross whole island to buy identical nearby food");
+}
+
 static void Stress()
 {
     var r=Run(10_000);

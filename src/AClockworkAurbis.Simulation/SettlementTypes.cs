@@ -32,7 +32,10 @@ public sealed record SettlementCatalog(
         foreach (var place in Places)
         {
             if (string.IsNullOrWhiteSpace(place.Id) || !placeIds.Add(place.Id) ||
-                string.IsNullOrWhiteSpace(place.Name))
+                string.IsNullOrWhiteSpace(place.Name) ||
+                place.MapX.HasValue != place.MapY.HasValue ||
+                place.MapX is double x && (x < 0 || x > 1_000_000 || double.IsNaN(x)) ||
+                place.MapY is double y && (y < 0 || y > 1_000_000 || double.IsNaN(y)))
                 throw new InvalidDataException("Duplicate/unnamed source place");
         }
 
@@ -75,7 +78,9 @@ public static class BusinessKinds
 
 public sealed record PlaceDefinition(
     string Id, int SourcePageId, string Name, string? SourceType,
-    string? Settlement, string? Zone, string Role, string SourceUrl);
+    string? Settlement, string? Zone, string Role, string SourceUrl,
+    double? MapX = null, double? MapY = null,
+    string? MapEvidence = null, string? District = null);
 
 public sealed record BusinessDefinition(
     string PlaceId, string Kind, string? OwnerNpcId,
@@ -86,7 +91,8 @@ public sealed record ResidentDefinition(
     string? Race, string? Profession,
     string? HomePlaceId, string HomeEvidence,
     string? WorkPlaceId, string WorkEvidence,
-    string[] LocationPlaceIds, string? SourceUrl);
+    string[] LocationPlaceIds, string? SourceUrl,
+    string? AnchorPlaceId = null, string? AnchorEvidence = null);
 
 public enum SettlementAction : byte
 {
@@ -131,6 +137,7 @@ public sealed class ResidentState
     public long UnpaidHours { get; internal set; }
     public long WorkMinutes { get; internal set; }
     public long SleepMinutes { get; internal set; }
+    public long JourneyMinutes { get; internal set; }
     internal long LastGoodsShoppingDay { get; set; } = -10;
 }
 
@@ -178,6 +185,10 @@ public sealed record SettlementSettings
     public int FoodImportPerResident { get; init; } = 2;
     public int MaterialImportPerTenResidents { get; init; } = 3;
     public int BaseTravelMinutes { get; init; } = 18;
+    // UESP map units are not metres. This is a simulated travel-time
+    // calibration parameter, not a real-world speed measurement.
+    public int MapUnitsPerTravelMinute { get; init; } = 2500;
+    public int UnknownMapInterdistrictMinutes { get; init; } = 90;
     public int StartingBusinessGold { get; init; } = 1_200;
     public int StartHour { get; init; } = 6;
 }
@@ -207,6 +218,11 @@ public sealed record SettlementReport
     public required long RetailGoodsSales { get; init; }
     public required long Meals { get; init; }
     public required long Travel { get; init; }
+    public required long TravelMinutes { get; init; }
+    public required long LongJourneys { get; init; }
+    public required int ResidentsWithMapAnchor { get; init; }
+    public required int PlacesWithSourceMarker { get; init; }
+    public required int PlacesWithEstimatedMarker { get; init; }
     public required long CraftedGoods { get; init; }
     public required long GoodsUsed { get; init; }
     public required long FoodImported { get; init; }
@@ -221,5 +237,9 @@ public sealed record SettlementReport
     public required long TotalGold { get; init; }
     public required int SyntheticHomeCount { get; init; }
     public required int UnemployedResidents { get; init; }
+    public required int ResidentsWithLowSatiation { get; init; }
+    public required int ResidentsWithZeroSatiation { get; init; }
+    public required int ResidentsWithoutFood { get; init; }
+    public required int ResidentsWithoutGold { get; init; }
     public required BusinessSnapshot[] BusinessDetails { get; init; }
 }

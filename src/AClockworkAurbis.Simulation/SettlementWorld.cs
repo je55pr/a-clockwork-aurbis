@@ -13,6 +13,7 @@ public sealed partial class SettlementWorld
     private readonly List<BusinessState> _businesses = new();
     private readonly Dictionary<string,ResidentState> _residentById =
         new(StringComparer.Ordinal);
+    private readonly Dictionary<string,PlaceDefinition> _sourcePlaces;
     private readonly Dictionary<string,string> _placeNames =
         new(StringComparer.Ordinal);
     private BusinessState[] _foodShops = [];
@@ -23,6 +24,7 @@ public sealed partial class SettlementWorld
     private long _sequence;
     private long _initialGold,_initialFood,_initialMaterials,_initialGoods;
     private long _events,_wages,_dividends,_unpaid,_foodSales,_goodsSales,_meals,_travel;
+    private long _travelMinutes,_longJourneys;
     private long _crafted,_goodsUsed,_foodImported,_materialsImported;
     private long _purchases;
     public long Minute { get; private set; }
@@ -42,10 +44,13 @@ public sealed partial class SettlementWorld
            _settings.FoodWholesalePrice<0 || _settings.MaterialWholesalePrice<0 ||
            _settings.GoodsWholesalePrice<0 ||
            _settings.FoodImportPerResident<0 || _settings.MaterialImportPerTenResidents<0 ||
-           _settings.StartHour is <0 or >23)
+           _settings.StartHour is <0 or >23 ||
+           _settings.MapUnitsPerTravelMinute<1 ||
+           _settings.UnknownMapInterdistrictMinutes<0)
             throw new ArgumentOutOfRangeException(nameof(settings));
 
-        var places=catalog.Places.ToDictionary(p=>p.Id,StringComparer.Ordinal);
+        _sourcePlaces=catalog.Places.ToDictionary(p=>p.Id,StringComparer.Ordinal);
+        var places=_sourcePlaces;
         foreach(var place in catalog.Places)_placeNames.Add(place.Id,place.Name);
         foreach(var def in catalog.Businesses.OrderBy(b=>b.PlaceId,StringComparer.Ordinal))
         {
@@ -69,6 +74,7 @@ public sealed partial class SettlementWorld
             _businesses.Add(generated);
             _byBusiness.Add(generated.Id,generated);
             _placeNames.Add(generated.Id,generated.Name);
+            _sourcePlaces.Add(generated.Id,generated.Place);
         }
 
         foreach(var person in catalog.Residents.OrderBy(x=>x.Id,StringComparer.Ordinal))
@@ -182,6 +188,10 @@ public sealed partial class SettlementWorld
                 actor.CurrentPlaceId=actor.DestinationPlaceId;
                 actor.Journeys++;
                 _travel++;
+                long trip=Minute-actor.ActionStart;
+                actor.JourneyMinutes+=trip;
+                _travelMinutes+=trip;
+                if(trip>=60)_longJourneys++;
                 Observe(actor,"arrive",DisplayPlace(actor.CurrentPlaceId));
                 break;
             case SettlementAction.Eat:
