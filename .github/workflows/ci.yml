@@ -34,7 +34,7 @@ jobs:
       - name: Build Godot C# project
         run: dotnet build EsoTest.csproj --configuration Debug --nologo
       - name: Set up Node for profile checks
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
       - name: Test source-backed NPC profiles

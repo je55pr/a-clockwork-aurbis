@@ -22,7 +22,9 @@ function chooseConsensus(variants, field, convert = plain) {
 }
 function nullableInteger(value) {
   const text = rawOrNull(value);
-  return text && /^[0-9][0-9,]*$/.test(text) ? Number(text.replaceAll(',', '')) : null;
+  if(!text || !/^(?:0|[1-9][0-9]*|[1-9][0-9]{0,2}(?:,[0-9]{3})+)$/.test(text))return null;
+  const parsed=Number(text.replaceAll(',',''));
+  return Number.isSafeInteger(parsed)?parsed:null;
 }
 function factionName(raw) {
   if (!raw) return null;
@@ -63,10 +65,12 @@ function locationsFrom(variants, pages) {
   let primary = null;
   let ambiguous = false;
   for (const field of LOCATION_FIELDS) {
-    const entries = candidates.filter(c => c.relation === field && c.placeId !== null);
-    const unique = new Map(entries.map(c => [c.placeId, c]));
-    if (!unique.size) continue;
-    if (unique.size === 1) primary = [...unique.values()][0];
+    const entries = candidates.filter(c => c.relation === field);
+    if (!entries.length) continue;
+    const unique = new Map(entries.map(c => [c.pageTitle??('unresolved:'+c.name.toLowerCase()),c]));
+    // One resolved place plus an unresolved alternative is NOT unambiguous.
+    if(unique.size === 1 && entries.every(c=>c.placeId!==null))
+      primary = [...unique.values()][0];
     else ambiguous = true;
     break;
   }

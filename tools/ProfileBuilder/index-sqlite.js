@@ -33,7 +33,7 @@ async function run(){
  try {
   db.exec('DELETE FROM standard_npc_profiles_v1');
   const stream=readline.createInterface({input:fs.createReadStream(path.join(folder,'all-npcs.jsonl'),{encoding:'utf8'}),crlfDelay:Infinity});
-  const seen=new Set();
+  const seen=new Set(),eligible=[];
   for await(const line of stream){
    if(!line)continue;
    const p=JSON.parse(line),selected=ids.has(p.id);
@@ -41,6 +41,7 @@ async function run(){
    if(seen.has(p.id))throw Error('Duplicate profile '+p.id);
    seen.add(p.id);
    if(selected&&!p.selection?.eligible)throw Error('Ineligible profile selected '+p.id);
+   if(p.selection?.eligible)eligible.push({id:p.id,hash:p.selection.hash});
    add.run(p.id,p.source?.pageId??null,p.identity?.name??null,p.identity?.race??null,
     p.identity?.gender??null,p.identity?.title??null,p.society?.serviceRole??null,p.society?.faction??null,
     p.combat?.gameClass??null,p.combat?.reaction??null,p.combat?.health??null,p.combat?.healthRaw??null,
@@ -51,6 +52,10 @@ async function run(){
    count++;if(selected)chosen++;
   }
   if(count!==manifest.records||chosen!==manifest.selected)throw Error('Import counts differ from manifest '+count+'/'+chosen);
+  eligible.sort((a,b)=>a.hash.localeCompare(b.hash)||a.id.localeCompare(b.id));
+  const ranked=eligible.slice(0,manifest.selected);
+  if(ranked.length!==ids.size||ranked.some(p=>!ids.has(p.id)))
+    throw Error('Roster membership differs from deterministic eligible-profile ranking');
   const record=db.prepare('SELECT COUNT(*) n FROM source_collection_coverage WHERE source_key=?');
   const insert=db.prepare('INSERT INTO source_collection_coverage VALUES (?,?,?,?,?,?,?,?)');
   const update=db.prepare('UPDATE source_collection_coverage SET scope=?,expected_count=?,acquired_count=?,collection_status=?,verification_note=?,sample_only=?,updated_at=? WHERE source_key=?');
@@ -61,14 +66,14 @@ async function run(){
     if(record.get(key).n)update.run(description,total,total,'derived_complete',description,0,now,key);
     else insert.run(key,description,total,total,'derived_complete',description,0,now);
   }
-  db.exec('COMMIT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_std_npc_v1_id ON standard_npc_profiles_v1(profile_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_std_npc_v1_race ON standard_npc_profiles_v1(race)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_std_npc_v1_place ON standard_npc_profiles_v1(primary_place_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_std_npc_v1_name ON standard_npc_profiles_v1(name)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_std_npc_v1_initial ON standard_npc_profiles_v1(initial_roster)');
   db.exec('CREATE VIEW IF NOT EXISTS standard_npc_initial_roster_v1 AS SELECT * FROM standard_npc_profiles_v1 WHERE initial_roster=1');
+  db.exec('COMMIT');
   console.log(JSON.stringify({indexed:count,initialRoster:chosen,integrity:db.prepare('PRAGMA quick_check').get().quick_check},null,2));
- }catch(e){db.exec('ROLLBACK');throw e}finally{db.close()}
+ }catch(e){try{db.exec('ROLLBACK')}catch{}throw e}finally{db.close()}
 }
 run().catch(e=>{console.error(e.stack);process.exitCode=1});

@@ -66,3 +66,18 @@ test('CLI rejects invalid arguments',()=>{
   assert.throws(()=>options(['--count','0']),/positive integer/);
   assert.throws(()=>options(['--wat']),/Unknown argument/);
 });
+test('health parser rejects malformed comma groups and unsafe integers',()=>{
+ for(const text of ['1,2','5,','10,,5','12,34','001','1,0000','999999999999999999999','1.5','1-3'])
+   assert.equal(p.nullableInteger(text),null,'Should reject '+text);
+ assert.equal(p.nullableInteger('10,005'),10005);
+ assert.equal(p.nullableInteger('1,234,567'),1234567);
+ assert.equal(p.nullableInteger('1234567'),1234567);
+ assert.equal(p.nullableInteger('0'),0);
+});
+test('unresolved alternative keeps location ambiguous rather than assigning fixed home',()=>{
+ const result=p.locationsFrom([{number:1,fields:{loc:'[[ON:Auridon]] or [[ON:Nowhere]]',city:'Vulkhel Guard'}}],places);
+ assert.equal(result.primary,null);
+ assert.equal(result.ambiguous,true);
+ assert.equal(result.candidates.length,3);
+ assert.equal(result.candidates.find(c=>c.name==='Nowhere').resolution,'unresolved');
+});

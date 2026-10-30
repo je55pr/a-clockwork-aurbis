@@ -89,7 +89,7 @@ function profileFor(n, variants, quests, pages, places, lore, creatureIds) {
     locations:{primary, candidates:locations.candidates, ambiguous:locations.ambiguous, multiAppearance:variants.length>1},
     references:{quests:questRefs,lore:loreRef,race:raceReferences,imageFilename:scalar(variants,'image')},
     source:{provider:'uesp',game:'eso',pageId:n.page_id,wikiTitle:n.wiki_title,
-      revisionId:n.revision_id??null,revisionTimestamp:n.revision_timestamp??null,
+      revisionId:n.revision_id??null,revisionTimestamp:n.revision_timestamp==null?null:String(n.revision_timestamp),
       wikiUrl:urlFor(n.wiki_title)},
     appearances:variants.map(v=>({summaryNumber:v.number,rawFields:v.fields})),
     conflicts,

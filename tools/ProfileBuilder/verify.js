@@ -12,14 +12,16 @@ async function run(){
  for await(const p of lines('all-npcs.jsonl')){
   if(p.schemaVersion!==1||p.kind!=='npc'||!p.id||seen.has(p.id))throw Error('Invalid or duplicated source profile');
   seen.add(p.id);count++;
-  if(p.selection?.eligible)eligible.push({id:p.id,hash:p.selection.hash});
+  if(p.selection?.eligible)eligible.push({id:p.id,hash:p.selection.hash,record:p});
  }
  eligible.sort((a,b)=>a.hash.localeCompare(b.hash)||a.id.localeCompare(b.id));
  if(count!==manifest.records||eligible.length!==manifest.eligible)throw Error('Manifest source counts do not match files');
- const expected=eligible.slice(0,manifest.selected).map(x=>x.id);
+ const expected=eligible.slice(0,manifest.selected);
  let selected=0,raceLore=0,personLore=0;
  for await(const p of lines('initial-npcs.jsonl')){
-  if(p.id!==expected[selected])throw Error('Selection differs from deterministic source ranking at line '+(selected+1));
+  if(p.id!==expected[selected]?.id)throw Error('Selection differs from deterministic source ranking at line '+(selected+1));
+  if(JSON.stringify(p)!==JSON.stringify(expected[selected].record))
+    throw Error('Selected profile contents differ from full source record at line '+(selected+1));
   if(!p.selection?.eligible||!p.locations?.primary?.placeId)throw Error('Unqualified selected record '+p.id);
   if(!p.identity?.name||!p.identity?.race||!p.identity?.gender)throw Error('Missing required identity for selected record');
   names.add(p.identity.name);places.add(p.locations.primary.placeId);

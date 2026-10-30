@@ -99,7 +99,7 @@ public sealed class NpcSource
 public sealed class NpcAppearance
 {
     public int? SummaryNumber { get; init; }
-    public Dictionary<string, string?>? RawFields { get; init; }
+    public Dictionary<string, JsonElement>? RawFields { get; init; }
 }
 public sealed class NpcSimulation
 {
