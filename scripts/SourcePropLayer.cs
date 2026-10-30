@@ -12,7 +12,7 @@ using Process = System.Diagnostics.Process;
 namespace EsoTest;
 
 /// <summary>
-/// Source-only placed props within one original 5x5 terrain patch.
+/// Source-only placed props within one original 8x8 terrain patch.
 /// Model IDs, positions, and angles come from the original 96-byte source
 /// records within channel-21 chunks. Placements are never invented or substituted.
 /// Native GR2 conversion remains in an isolated helper process.
@@ -41,7 +41,34 @@ public partial class SourcePropLayer : Node3D
     public int SourceModels=>_transforms.Count;
     public float? HarbourWaterCandidate {get;private set;}
     public int HarbourAnchorCount {get;private set;}
+    private readonly List<Vector2> _dockStructures=new();
+    public IReadOnlyList<Vector2> DockStructures=>_dockStructures;
+    // Source-model identification, NOT a guessed UESP image-map transform.
+    private readonly Dictionary<string,Vector2> _sourceLandmarks=
+        new(StringComparer.OrdinalIgnoreCase);
+    public IReadOnlyDictionary<string,Vector2> SourceLandmarks=>_sourceLandmarks;
+    public bool TrySourceLandmark(string place,out Vector2 localAnchor)
+    {
+        if(_sourceLandmarks.TryGetValue(place,out localAnchor))return true;
+        const string prefix="Vulkhel Guard (near ";
+        if(place.StartsWith(prefix,StringComparison.OrdinalIgnoreCase)&&place.EndsWith(")",StringComparison.Ordinal))
+            return _sourceLandmarks.TryGetValue(place.Substring(prefix.Length,
+                place.Length-prefix.Length-1),out localAnchor);
+        localAnchor=default;
+        return false;
+    }
     public event Action<string>? Progress;
+    public event Action? GeometryPrepared;
+    public readonly record struct PropFootprint(float MinX, float MinZ, float MaxX, float MaxZ);
+    private readonly List<PropFootprint> _propFootprints = new();
+    public IReadOnlyList<PropFootprint> PropFootprints => _propFootprints;
+    public bool HasPreparedGeometry { get; private set; }
+    public SourceGeometryRaycaster Raycaster { get; } = new();
+    public static bool BlocksNpcSpawn(string sourceModelName)
+        => !string.Equals(sourceModelName,"ActiveRunes",StringComparison.OrdinalIgnoreCase);
+    private readonly Dictionary<uint,List<PropFootprint>> _coarsePerModel = new();
+    private readonly List<PropFootprint> _unresolvedFootprints = new();
+    public IReadOnlyList<PropFootprint> UnresolvedFootprints => _unresolvedFootprints;
 
     public void Setup(EsoArchive archive,OodleDecoder decoder,TerrainBundle bundle,
         float lowestHeight,int tileX,int tileZ)
@@ -53,8 +80,8 @@ public partial class SourcePropLayer : Node3D
         // including the vegetation that also appears in descriptor streams.
         // It must replace (not supplement) channels 1/2 to avoid duplicates.
         // Its file IDs index 250-unit chunks; per-instance X/Z are chunk local.
-        float minX=(tileX-2)*100f,maxX=(tileX+3)*100f;
-        float minZ=(tileZ-2)*100f,maxZ=(tileZ+3)*100f;
+        float minX=(tileX-3)*100f,maxX=(tileX+5)*100f;
+        float minZ=(tileZ-3)*100f,maxZ=(tileZ+5)*100f;
         float cx=(tileX+0.5f)*100f;
         float cz=(tileZ+0.5f)*100f;
         var fixtures=new List<Fixture>(12000);
@@ -71,7 +98,7 @@ public partial class SourcePropLayer : Node3D
                 record.UncompressedSize is <8 or >2_000_000)continue;
             int chunkX=(int)(record.FileId>>16);
             int chunkZ=(int)(record.FileId&0xffff);
-            // Only decode chunks overlapping the high-resolution 5x5 view.
+            // Only decode chunks overlapping the high-resolution 8x8 view.
             if(chunkX*250>=maxX||(chunkX+1)*250<=minX||
                 chunkZ*250>=maxZ||(chunkZ+1)*250<=minZ)
                 continue;
@@ -170,6 +197,72 @@ public partial class SourcePropLayer : Node3D
             list.Add(new Transform3D(basis,
                 fixture.SourcePosition-new Vector3(cx,lowestHeight,cz)));
         }
+        // Exact original scenery fixture IDs give the correct approximate
+        // building anchors; a map-image marker often does not.
+        var namedSourceBuildings=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Mages Guild (Vulkhel Guard)"]="ALT_STR_GuildMage001",
+            ["Fighters Guild (Vulkhel Guard)"]="GEN_LSB_BannerFighterGuildSmall001",
+            ["Vulkhel Guard Manor & Treasury"]="ALT_STR_Manor001",
+            ["Vulkhel Guard Warehouse"]="ALT_STR_Warehouse001",
+            ["Harborside Market"]="GEN_LSB_BannerGuildSellerAreaSmall001",
+            ["Guard's Forge"]="ALT_STR_Forge001"
+        };
+        foreach(var mapping in namedSourceBuildings)
+        {
+            var matches=filtered.Where(f=>string.Equals(
+                _names[f.ModelId],mapping.Value,StringComparison.OrdinalIgnoreCase)).ToArray();
+            if(matches.Length==0)continue;
+            // A category may have multiple copies. Keep a stable,
+            // deterministic position; never guess a missing building.
+            var landmark=matches.OrderBy(f=>f.SourcePosition.X)
+                .ThenBy(f=>f.SourcePosition.Z).First();
+            _sourceLandmarks[mapping.Key]=new Vector2(
+                landmark.SourcePosition.X-cx,landmark.SourcePosition.Z-cz);
+        }
+        GD.Print($"SOURCE LANDMARKS {_sourceLandmarks.Count}: "+
+            string.Join(", ",_sourceLandmarks.Keys.OrderBy(x=>x)));
+        // Fast provisional clearance while genuine mesh bounds load asynchronously.
+        // Large architectural models receive conservative exclusion radii.
+        foreach(var fixture in filtered)
+        {
+            string label=_names[fixture.ModelId];
+            float padding=IsArchitecture(label)?10f:
+                label.Contains("Tree",StringComparison.OrdinalIgnoreCase)?3.4f:
+                label.Contains("Boat",StringComparison.OrdinalIgnoreCase)?5.5f:1.5f;
+            float x=fixture.SourcePosition.X-cx,z=fixture.SourcePosition.Z-cz;
+            var coarse=new PropFootprint(x-padding,z-padding,x+padding,z+padding);
+            _propFootprints.Add(coarse);
+            if(!_coarsePerModel.TryGetValue(fixture.ModelId,out var group))
+                _coarsePerModel[fixture.ModelId]=group=new();
+            group.Add(coarse);
+        }
+        // These are actual ESO source fixture origins, unlike uncalibrated
+        // UESP map image coordinates. Use real dock walkway/ramp structures
+        // as evidence for the harbour vicinity, not a fictional centre point.
+        var dockPilings=filtered.Where(f=>_names[f.ModelId].Contains(
+            "DockPilling",StringComparison.OrdinalIgnoreCase)).ToArray();
+        if(dockPilings.Length>4)
+        {
+            var xs=dockPilings.Select(f=>f.SourcePosition.X).OrderBy(x=>x).ToArray();
+            var zs=dockPilings.Select(f=>f.SourcePosition.Z).OrderBy(z=>z).ToArray();
+            var harbourCentre=new Vector2(xs[xs.Length/2],zs[zs.Length/2]);
+            foreach(var fixture in filtered)
+            {
+                var label=_names[fixture.ModelId];
+                bool structure=label.StartsWith("GEN_DCK_Dock",StringComparison.OrdinalIgnoreCase)
+                    && (label.Contains("Ramp",StringComparison.OrdinalIgnoreCase)
+                       || label.Contains("Narrow",StringComparison.OrdinalIgnoreCase)
+                       || label.Contains("Wide",StringComparison.OrdinalIgnoreCase)
+                       || label.Contains("Low",StringComparison.OrdinalIgnoreCase));
+                if(!structure)continue;
+                var pos=new Vector2(fixture.SourcePosition.X,fixture.SourcePosition.Z);
+                if(pos.DistanceSquaredTo(harbourCentre)>175f*175f)continue;
+                _dockStructures.Add(pos-new Vector2(cx,cz));
+            }
+            GD.Print($"SOURCE DOCK STRUCTURES {_dockStructures.Count} source ramps/walkways, "+
+                $"harbour piling centre {harbourCentre.X:F1},{harbourCentre.Y:F1}");
+        }
         _placements=filtered.Count;
         // Independently authored floating boats identify a likely common
         // harbour-water elevation. This is NOT a decoded ESO water-level
@@ -211,7 +304,7 @@ public partial class SourcePropLayer : Node3D
         Focus=new Vector3(target.X-cx,0f,target.Z-cz);
         GD.Print(string.Format(
             "SOURCE PROPS tiles {0}..{1} / {2}..{3}: {4} placements, {5} models, {6} hedges, camera {7:F1},{8:F1}",
-            tileX-2,tileX+2,tileZ-2,tileZ+2,_placements,
+            tileX-3,tileX+4,tileZ-3,tileZ+4,_placements,
             _transforms.Count,civic.Length,target.X,target.Z));
     }
 
@@ -288,6 +381,8 @@ public partial class SourcePropLayer : Node3D
             catch(Exception e)
             {
                 _missingModels++;
+                if(_coarsePerModel.TryGetValue(ready.ModelId,out var footprintGroup))
+                    _unresolvedFootprints.AddRange(footprintGroup);
                 GD.PushWarning($"ESO prop model 0x{ready.ModelId:X8} not rendered: {e.Message}");
             }
             if((_loadedModels+_missingModels)%5==0||
@@ -301,8 +396,16 @@ public partial class SourcePropLayer : Node3D
                 GD.Print("SOURCE PROPS "+message);
             }
         }
-        if(_loadedModels+_missingModels==_transforms.Count)
+        if(_loadedModels+_missingModels==_transforms.Count && !HasPreparedGeometry)
+        {
+            HasPreparedGeometry=true;
+            GD.Print($"SOURCE RAYCAST READY: {Raycaster.MeshCount} source meshes, "+
+                $"{Raycaster.InstanceCount} transformed instances, "+
+                $"{Raycaster.TriangleCount} source triangles, "+
+                $"{_unresolvedFootprints.Count} undecoded placements blocked.");
+            GeometryPrepared?.Invoke();
             SetProcess(false);
+        }
     }
 
     private void InstallGeometry(uint id,string path)
@@ -385,6 +488,36 @@ public partial class SourcePropLayer : Node3D
                 mesh.SurfaceSetMaterial(mesh.GetSurfaceCount()-1,mat);
             }
             var placements=_transforms[id];
+            // MultiMeshInstance3D has NO physics collider: register its exact source
+            // triangles and its transforms with the CPU spatial/BVH raycaster.
+            var faceVertices=mesh.GetFaces();
+            if(faceVertices.Length==0)throw new InvalidDataException("Empty source prop mesh");
+            // Some placed models are rendered visual effects, not physical
+            // scenery. Their large flat effect meshes can falsely reject
+            // otherwise valid town streets. Keep rendering them but do not
+            // turn them into impenetrable collision geometry.
+            if(BlocksNpcSpawn(_names[id]))
+                Raycaster.AddMesh(faceVertices,placements);
+            // Project each rendered prop bounding box onto the ground plane.
+            var bounds=mesh.GetAabb();
+            foreach(var transform in placements)
+            {
+                float minX=float.PositiveInfinity,minZ=float.PositiveInfinity;
+                float maxX=float.NegativeInfinity,maxZ=float.NegativeInfinity;
+                for(int corner=0;corner<8;corner++)
+                {
+                    var local=bounds.Position+new Vector3(
+                        (corner&1)==0?0f:bounds.Size.X,
+                        (corner&2)==0?0f:bounds.Size.Y,
+                        (corner&4)==0?0f:bounds.Size.Z);
+                    var world=transform*local;
+                    minX=Math.Min(minX,world.X);minZ=Math.Min(minZ,world.Z);
+                    maxX=Math.Max(maxX,world.X);maxZ=Math.Max(maxZ,world.Z);
+                }
+                if(float.IsFinite(minX)&&float.IsFinite(maxX)&&
+                    float.IsFinite(minZ)&&float.IsFinite(maxZ))
+                    _propFootprints.Add(new PropFootprint(minX,minZ,maxX,maxZ));
+            }
             var multimesh=new MultiMesh{
                 TransformFormat=MultiMesh.TransformFormatEnum.Transform3D,
                 Mesh=mesh,

@@ -17,9 +17,12 @@ public static class TerrainNearFieldColors
 
     public static Result LoadPatch(EsoArchive archive,OodleDecoder decoder,
         TerrainBundle section,int centerX,int centerZ,int radius=2)
+        => LoadRegion(archive,decoder,section,centerX-radius,centerZ-radius,2*radius+1);
+
+    public static Result LoadRegion(EsoArchive archive,OodleDecoder decoder,
+        TerrainBundle section,int startX,int startZ,int side)
     {
-        int side=2*radius+1,startX=centerX-radius,startZ=centerZ-radius;
-        if(radius is <0 or >4)throw new ArgumentOutOfRangeException(nameof(radius));
+        if(side is <1 or >8)throw new ArgumentOutOfRangeException(nameof(side));
         var recordMap=new Dictionary<(int,int),EsoRecord>();
         foreach(var r in section.Tiles)
             recordMap[((int)(r.FileId>>16),(int)(r.FileId&65535))]=r;

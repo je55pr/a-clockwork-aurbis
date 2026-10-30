@@ -8,7 +8,7 @@ namespace EsoTest;
 /// coherent cluster of independently source-placed floating boats, NOT a
 /// decoded water level. The simple animated shader is not ESO's water shader.
 /// No position, level, shoreline mask or texture is presented as verified ESO
-/// water data. The mesh is bounded to the existing 5x5 terrain preview.
+/// water data. The mesh is bounded to the expanded 8x8 terrain preview.
 /// </summary>
 public static class SourceHarbourWater
 {
@@ -40,7 +40,7 @@ void fragment() {
 }"
         };
         var material=new ShaderMaterial{Shader=shader};
-        var mesh=new PlaneMesh{Size=new Vector2(500f,500f)};
+        var mesh=new PlaneMesh{Size=new Vector2(900f,900f)};
         root.AddChild(new MeshInstance3D
         {
             Name="CandidateSeaSurface",
