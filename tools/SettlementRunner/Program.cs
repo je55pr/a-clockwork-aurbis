@@ -7,7 +7,7 @@ try
     string? catalogPath=null,trace=null;
     int days=3,seed=42;
     string? economicMode=null;
-    bool traceFirst=false,details=false;
+    bool traceFirst=false,details=false,allResidents=false;
     bool disableTrade=false,disableProduction=false,disableAid=false;
     for(int i=0;i<args.Length;i++)
     {
@@ -21,6 +21,7 @@ try
             case "--trace":trace=Next();break;
             case "--trace-first":traceFirst=true;break;
             case "--details":details=true;break;
+            case "--resident-details":allResidents=true;break;
             case "--economy":economicMode=Next();break;
             case "--no-foreign-trade":disableTrade=true;break;
             case "--no-local-production":disableProduction=true;break;
@@ -30,7 +31,7 @@ try
                     "dotnet run -c Release --project tools/SettlementRunner -- "+
                     "--catalog catalog.json [--days 3] [--seed 42] [--trace-first] "+
                     "[--economy prototype|production] [--no-foreign-trade] "+
-                    "[--no-local-production] [--no-assistance] [--trace NPC_ID] [--details]");
+                    "[--no-local-production] [--no-assistance] [--trace NPC_ID] [--details] [--resident-details]");
                 return 0;
             default:throw new ArgumentException("Unknown parameter "+args[i]);
         }
@@ -156,6 +157,20 @@ try
         BusinessesDetail=details?summary.BusinessDetails:
             summary.BusinessDetails.Where(x=>x.RetailSales>0||x.WorkHours>0||
                 x.ItemsCrafted>0).Take(12).ToArray(),
+        ResidentDetails=allResidents?world.Residents.Select(r=>new {
+            Id=r.Source.Id,Name=r.Source.Name,Race=r.Source.Race,
+            SourceProfession=r.Source.Profession,
+            SourceHomeId=r.Source.HomePlaceId,SourceWorkId=r.Source.WorkPlaceId,
+            r.EmploymentEvidence,
+            CurrentWorkId=r.WorkId,SimulatedWorkId=r.AssignedWorkPlaceId,
+            CurrentWorkplace=world.Businesses.FirstOrDefault(b=>b.Id==r.WorkId)?.Name,
+            LastLocation=r.CurrentPlaceId,
+            r.HomeId,r.Gold,r.Food,r.Goods,r.Satiation,r.Energy,
+            r.MealsEaten,r.Purchases,r.Journeys,r.WageIncome,
+            r.DividendIncome,r.CooperativeIncome,r.AssistanceGold,
+            r.SubsistenceFoodHarvested,r.UnpaidHours,r.WorkMinutes,
+            r.SleepMinutes,r.JourneyMinutes,r.OnUnpaidLeave,r.InsolvencyJobChanges
+        }).ToArray():null,
         ExampleResidents=world.Residents.Where(r=>r.WorkId!=null)
             .Take(5).Select(r=>new {
                 r.Source.Name,
