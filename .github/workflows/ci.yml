@@ -33,6 +33,12 @@ jobs:
           if ($blocked) { $blocked; throw "Proprietary/generated/binary files must not be committed" }
       - name: Build Godot C# project
         run: dotnet build EsoTest.csproj --configuration Debug --nologo
+      - name: Set up Node for profile checks
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+      - name: Test source-backed NPC profiles
+        run: node --test tools/ProfileBuilder/profile.test.js
       - name: Build geometry helper
         run: dotnet build tools/ModelGeometry/ModelGeometry.csproj --configuration Debug --nologo
       - name: Build model indexer
