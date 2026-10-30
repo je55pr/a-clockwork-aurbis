@@ -184,12 +184,12 @@ public sealed class SourceGeometryRaycaster
             _topY = Math.Max(_topY, maxY);
             var worldBox = new Aabb(new Vector3(minX, minY, minZ),
                 new Vector3(maxX - minX, maxY - minY, maxZ - minZ));
-            // The population test never extends beyond a 230 m local radius.
+            // The population test never extends beyond a 430 m local radius.
             // Extremely large world-space props only index the relevant cells.
-            int minCellX = Cell(Math.Max(-232f, minX));
-            int maxCellX = Cell(Math.Min(232f, maxX));
-            int minCellZ = Cell(Math.Max(-232f, minZ));
-            int maxCellZ = Cell(Math.Min(232f, maxZ));
+            int minCellX = Cell(Math.Max(-460f, minX));
+            int maxCellX = Cell(Math.Min(460f, maxX));
+            int minCellZ = Cell(Math.Max(-460f, minZ));
+            int maxCellZ = Cell(Math.Min(460f, maxZ));
             if (minCellX > maxCellX || minCellZ > maxCellZ) continue;
             int index = _instances.Count;
             _instances.Add(new Instance(mesh, transform.AffineInverse(), worldBox));
@@ -210,10 +210,10 @@ public sealed class SourceGeometryRaycaster
         float length = segment.Length();
         if (length < 0.001f) return false;
         Vector3 dir = segment / length;
-        int xMin = Cell(Math.Max(-232f, Math.Min(from.X, to.X)));
-        int xMax = Cell(Math.Min(232f, Math.Max(from.X, to.X)));
-        int zMin = Cell(Math.Max(-232f, Math.Min(from.Z, to.Z)));
-        int zMax = Cell(Math.Min(232f, Math.Max(from.Z, to.Z)));
+        int xMin = Cell(Math.Max(-460f, Math.Min(from.X, to.X)));
+        int xMax = Cell(Math.Min(460f, Math.Max(from.X, to.X)));
+        int zMin = Cell(Math.Max(-460f, Math.Min(from.Z, to.Z)));
+        int zMax = Cell(Math.Min(460f, Math.Max(from.Z, to.Z)));
         if (xMin > xMax || zMin > zMax) return false;
         var visited = new HashSet<int>();
         for (int x = xMin; x <= xMax; x++)

@@ -15,7 +15,8 @@ public static class PopulationSpawnPlanner
     public readonly record struct Placement(string Id, string Name, string Race,
         string Place, Vector3 Position, float Facing, bool Shifted);
     public readonly record struct Summary(int Requested, int Placed, int Rejected,
-        int Shifted, int BlockedByScenery, int BlockedByTerrain, int BlockedByCrowd);
+        int Shifted, int BlockedByScenery, int BlockedByTerrain, int BlockedByCrowd,
+        int FallbackPlacements, int OpenGroundPool);
     public delegate bool TerrainSampler(float localX, float localZ, out float sourceElevation);
 
     private const float CellSize=6f;
@@ -27,7 +28,7 @@ public static class PopulationSpawnPlanner
         IReadOnlyList<SourcePropLayer.PropFootprint> obstacles,
         SourceGeometryRaycaster raycaster,
         float minSeparation=2.6f, float footprintMargin=0.8f,
-        float radius=230f, int maxAttempts=260)
+        float radius=430f, int maxAttempts=260)
     {
         if(minSeparation<=0f||radius<=0f||maxAttempts<=0)
             throw new ArgumentOutOfRangeException(nameof(minSeparation));
@@ -51,6 +52,7 @@ public static class PopulationSpawnPlanner
         var occupied=new Dictionary<long,List<Vector2>>();
         var placements=new List<Placement>(candidates.Count);
         int scenery=0,terrain=0,crowd=0,shifted=0;
+        var missing=new List<Candidate>();
         foreach(var item in candidates)
         {
             var rand=new Random(StableHash(item.Id));
@@ -97,10 +99,82 @@ public static class PopulationSpawnPlanner
                 if(attempt>=70)shifted++;
                 found=true;break;
             }
-            if(!found)GD.Print($"Population: skipped {item.Name} ({item.Place}); no safe, unoccupied ground.");
+            if(!found)missing.Add(item);
+        }
+        // Second pass: bounded, uniformly sampled open ground across the
+        // rendered source patch. This avoids repeatedly testing only the
+        // same cliff or occupied square near an approximate wiki map anchor.
+        int fallbackPlaced=0;
+        var pool=new List<Vector3>();
+        if(missing.Count>0)
+        {
+            float spacing=radius<=10f?2.8f:9f;
+            var random=new Random(0x41fbe2);
+            for(float x=-radius+spacing/2f;x<=radius-spacing/2f;x+=spacing)
+            for(float z=-radius+spacing/2f;z<=radius-spacing/2f;z+=spacing)
+            {
+                float px=x+((float)random.NextDouble()-0.5f)*spacing*0.55f;
+                float pz=z+((float)random.NextDouble()-0.5f)*spacing*0.55f;
+                var h=heightAt(px,pz);
+                if(h is null||!float.IsFinite(h.Value))continue;
+                int cx=Bucket(px),cz=Bucket(pz);
+                bool blocked=false;
+                if(props.TryGetValue(Key(cx,cz),out var nearby))
+                    foreach(var box in nearby)
+                        if(px>=box.MinX-footprintMargin&&px<=box.MaxX+footprintMargin&&
+                            pz>=box.MinZ-footprintMargin&&pz<=box.MaxZ+footprintMargin)
+                        {blocked=true;break;}
+                if(!blocked && raycaster.OpenSkyToTerrain(px,pz,h.Value))
+                    pool.Add(new Vector3(px,h.Value,pz));
+            }
+            // Allocate from each NPCs closest unoccupied safe source-ground
+            // cell. The maximum shift is deliberately finite; a character
+            // without clear ground near their place remains unspawned.
+            foreach(var item in missing)
+            {
+                float maxReach=item.Place.Contains("Docks",StringComparison.OrdinalIgnoreCase)
+                    ? 155f : item.Place.StartsWith("Vulkhel Guard (near ",StringComparison.Ordinal)
+                        ? 430f : 370f;
+                float closest=maxReach*maxReach;
+                int best=-1;
+                for(int i=0;i<pool.Count;i++)
+                {
+                    var point=pool[i];
+                    float dx=point.X-item.AnchorX,dz=point.Z-item.AnchorZ;
+                    float distance=dx*dx+dz*dz;
+                    if(distance>=closest)continue;
+                    int cx=Bucket(point.X),cz=Bucket(point.Z);
+                    bool occupiedHere=false;
+                    for(int nz=-1;nz<=1&&!occupiedHere;nz++)
+                    for(int nx=-1;nx<=1&&!occupiedHere;nx++)
+                    {
+                        if(!occupied.TryGetValue(Key(cx+nx,cz+nz),out var others))continue;
+                        foreach(var other in others)
+                            if(other.DistanceSquaredTo(new Vector2(point.X,point.Z))<
+                                minSeparation*minSeparation)
+                            {occupiedHere=true;break;}
+                    }
+                    if(occupiedHere)continue;
+                    closest=distance;best=i;
+                }
+                if(best<0)
+                {
+                    GD.Print($"Population: skipped {item.Name} ({item.Place}); no source-clear ground within district radius.");
+                    continue;
+                }
+                var choice=pool[best];
+                int gx=Bucket(choice.X),gz=Bucket(choice.Z);
+                if(!occupied.TryGetValue(Key(gx,gz),out var list))
+                    occupied[Key(gx,gz)]=list=new();
+                list.Add(new Vector2(choice.X,choice.Z));
+                placements.Add(new Placement(item.Id,item.Name,item.Race,item.Place,
+                    choice,StableHash(item.Id)*0.000001f%Mathf.Tau,true));
+                fallbackPlaced++;shifted++;
+            }
         }
         return (placements,new Summary(candidates.Count,placements.Count,
-            candidates.Count-placements.Count,shifted,scenery,terrain,crowd));
+            candidates.Count-placements.Count,shifted,scenery,terrain,crowd,
+            fallbackPlaced,pool.Count));
     }
 
     public static int StableHash(string id)

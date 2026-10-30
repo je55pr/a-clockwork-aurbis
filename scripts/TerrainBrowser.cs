@@ -20,10 +20,32 @@ public partial class TerrainBrowser : Node3D
     private bool _showPopulation=true;
     private float _populationDensity=1f;
     private string _populationMessage="";
-    private void FocusPopulationView()
+    private bool _populationCaptureStarted;
+    private async void CaptureVerifiedPopulationView()
     {
-        if(_camera==null||_population?.SuggestedCameraEye is not Vector3 eye||
-            _population.SuggestedCameraTarget is not Vector3 target)return;
+        if(_populationCaptureStarted||_population?.PlacedCount<1)return;
+        _populationCaptureStarted=true;
+        if(System.Environment.GetEnvironmentVariable("ESO_CAPTURE_DOCK_VIEW")=="1")
+            FocusDockView();
+        else FocusPopulationView();
+        if(_toolsPanel!=null)_toolsPanel.Visible=false;
+        if(_atlas!=null)_atlas.Visible=false;
+        if(_referenceMap!=null)_referenceMap.Visible=false;
+        for(int i=0;i<5;i++)await ToSignal(GetTree(),SceneTree.SignalName.ProcessFrame);
+        var image=GetViewport().GetTexture().GetImage();
+        string path=System.Environment.GetEnvironmentVariable("ESO_CAPTURE_OUTPUT")??
+            ProjectSettings.GlobalizePath("res://.research/population-ready.png");
+        GD.Print($"POPULATION VERIFIED SCREENSHOT {image.SavePng(path)} {image.GetWidth()}x{image.GetHeight()} {path}");
+        GetTree().Quit();
+    }
+    private void FocusPopulationView()=>FocusSourceView(
+        _population?.SuggestedCameraEye,_population?.SuggestedCameraTarget,"Population");
+    private void FocusDockView()=>FocusSourceView(
+        _population?.SuggestedDockCameraEye,_population?.SuggestedDockCameraTarget,"Docks");
+    private void FocusSourceView(Vector3? possibleEye,Vector3? possibleTarget,string name)
+    {
+        if(_camera==null||possibleEye is not Vector3 eye||
+            possibleTarget is not Vector3 target)return;
         var forward=(target-eye).Normalized();
         if(forward.LengthSquared()<0.5f)return;
         _flyPosition=eye;
@@ -32,7 +54,7 @@ public partial class TerrainBrowser : Node3D
         _camera.Position=eye;
         _camera.Rotation=new Vector3(-_pitch,_yaw,0f);
         _flySpeed=8f;
-        GD.Print($"POPULATION CAMERA eye={eye} target={target}");
+        GD.Print($"{name.ToUpperInvariant()} CAMERA eye={eye} target={target}");
     }
     private Label _status = null!;
     private Label _briefStatus = null!;
@@ -331,7 +353,7 @@ public partial class TerrainBrowser : Node3D
         var diffuseMode = new CheckButton {
             Text = "Original ESO terrain textures",
             ButtonPressed = _showOriginalLodDiffuse,
-            TooltipText = "Use original diffuse and normal material DDS in 5x5 close-ups, baked LOD diffuse in complete region views. Uncheck for elevation diagnostics."
+            TooltipText = "Use original diffuse and normal material DDS in 8x8 close-ups, baked LOD diffuse in complete region views. Uncheck for elevation diagnostics."
         };
         diffuseMode.Toggled += enabled => {
             _showOriginalLodDiffuse = enabled;
@@ -377,7 +399,7 @@ public partial class TerrainBrowser : Node3D
         patchRow.AddChild(patchZ);
         vbox.AddChild(patchRow);
         var closeButton = new Button {
-            Text = "View 5x5 tiles at FULL heightfield resolution"
+            Text = "View 8x8 tiles at FULL heightfield resolution"
         };
         closeButton.Pressed += () => ShowCompleteSection(
             closeUp: true, tileX: (int)patchX.Value, tileZ: (int)patchZ.Value);
@@ -855,7 +877,7 @@ void fragment() {
         _sceneLabel.AddThemeFontSizeOverride("font_size",12);
         content.AddChild(_sceneLabel);
         var help=new Label{
-            Text="WASD move | Right mouse look | E/Q up/down | Shift sprint | Wheel speed | N: NPCs | J: density | P: crowd | M: Auridon map",
+            Text="WASD move | Right mouse look | E/Q up/down | Shift sprint | Wheel speed | N: NPCs | J: density | P: crowd | K: docks | M: Auridon map",
             AutowrapMode=TextServer.AutowrapMode.WordSmart
         };
         help.AddThemeFontSizeOverride("font_size",11);
@@ -931,7 +953,10 @@ void fragment() {
             var result = AutoRegionRenderer.Create(
                 _archive, _decoder, _bundles, group,
                 sampleStep: closeUp ? 1 : 4,
-                detailCenter: closeUp ? new Vector2I(tileX,tileZ) : null);
+                detailCenter: closeUp ? new Vector2I(tileX,tileZ) : null,
+                detailRadius: closeUp ? 4 : 2,
+                renderFrom: closeUp ? new Vector2I(tileX-3,tileZ-3) : null,
+                renderToExclusive: closeUp ? new Vector2I(tileX+5,tileZ+5) : null);
             var root = new Node3D {
                 Name = closeUp ? "FullResolutionTerrainDetail" : "CompleteOriginalSection"
             };
@@ -974,15 +999,15 @@ void fragment() {
                         TerrainNearFieldColors.Result? sourceColour=null;
                         try
                         {
-                            sourceColour=TerrainNearFieldColors.LoadPatch(
-                                _archive,_decoder,bundle,tileX,tileZ);
+                            sourceColour=TerrainNearFieldColors.LoadRegion(
+                                _archive,_decoder,bundle,tileX-3,tileZ-3,8);
                         }
                         catch(Exception e)
                         {
                             GD.PushWarning("Original tile colour unavailable: "+e.Message);
                         }
-                        var near=TerrainNearFieldMaterials.LoadPatch(
-                            _archive,_decoder,bundle,tileX,tileZ,sourceColour,
+                        var near=TerrainNearFieldMaterials.LoadRegion(
+                            _archive,_decoder,bundle,tileX-3,tileZ-3,8,sourceColour,
                             _showOriginalLodNormals,_showOriginalNearColourTint);
                         selectedMaterial=near.Material;
                         _currentLodMaterial=selectedMaterial;
@@ -1005,8 +1030,8 @@ void fragment() {
                     TerrainNearFieldColors.Result? closeColour=null;
                     if(closeUp) {
                         try {
-                            closeColour=TerrainNearFieldColors.LoadPatch(
-                                _archive,_decoder,bundle,tileX,tileZ);
+                            closeColour=TerrainNearFieldColors.LoadRegion(
+                                _archive,_decoder,bundle,tileX-3,tileZ-3,8);
                             GD.Print($"ORIGINAL TILE COLOUR loaded {closeColour.LoadedTiles} tiles at {tileX},{tileZ}");
                         }
                         catch(Exception colourError){
@@ -1021,7 +1046,7 @@ void fragment() {
                     textureStatus = $"ESO baked LOD diffuse: {lod.OriginalDdsCount} DDS layers" +
                         (lod.HasOriginalNormals ? " + original DXT5 terrain normals" : " (original normal map unavailable)");
                     if(closeColour!=null)
-                        textureStatus += "; 25 original source-colour tiles available for comparison";
+                        textureStatus += "; 64 original source-colour tiles available for comparison";
                     GD.Print($"TERRAIN LOD MATERIAL section={id} " + textureStatus);
                 }
                 catch (Exception textureError)
@@ -1122,6 +1147,9 @@ void fragment() {
                         _briefStatus.Text=message;
                         if(population.PlacedCount>0 && !_userChangedCamera && _showPopulation)
                             FocusPopulationView();
+                        if(population.PlacedCount>0 &&
+                            System.Environment.GetEnvironmentVariable("ESO_CAPTURE_AFTER_POPULATION")=="1")
+                            CaptureVerifiedPopulationView();
                     };
                     root.AddChild(population);
                     _population=population;
@@ -1148,8 +1176,8 @@ void fragment() {
                     _userChangedCamera=false;
                 }
                 GD.Print("POPULATION CAMERA: overhead holding position until prop rays complete");
-                _status.Text="Original source props and native 65x65 terrain loaded.";
-                _briefStatus.Text="Best available 5x5 source scene";
+                _status.Text="Original source props and native 8x8 65x65 terrain loaded.";
+                _briefStatus.Text="Best available 8x8 source scene";
                 if(_sceneLabel!=null)_sceneLabel.Text=
                     $"{props.SourceInstances:N0} original prop placements across "+
                     $"{props.SourceModels} source models. Preparing textures...\n"+
@@ -1596,6 +1624,12 @@ void fragment() {
             if(populationKey.Keycode==Key.P)
             {
                 FocusPopulationView();
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+            if(populationKey.Keycode==Key.K)
+            {
+                FocusDockView();
                 GetViewport().SetInputAsHandled();
                 return;
             }

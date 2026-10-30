@@ -12,7 +12,7 @@ using Process = System.Diagnostics.Process;
 namespace EsoTest;
 
 /// <summary>
-/// Source-only placed props within one original 5x5 terrain patch.
+/// Source-only placed props within one original 8x8 terrain patch.
 /// Model IDs, positions, and angles come from the original 96-byte source
 /// records within channel-21 chunks. Placements are never invented or substituted.
 /// Native GR2 conversion remains in an isolated helper process.
@@ -41,6 +41,8 @@ public partial class SourcePropLayer : Node3D
     public int SourceModels=>_transforms.Count;
     public float? HarbourWaterCandidate {get;private set;}
     public int HarbourAnchorCount {get;private set;}
+    private readonly List<Vector2> _dockStructures=new();
+    public IReadOnlyList<Vector2> DockStructures=>_dockStructures;
     public event Action<string>? Progress;
     public event Action? GeometryPrepared;
     public readonly record struct PropFootprint(float MinX, float MinZ, float MaxX, float MaxZ);
@@ -62,8 +64,8 @@ public partial class SourcePropLayer : Node3D
         // including the vegetation that also appears in descriptor streams.
         // It must replace (not supplement) channels 1/2 to avoid duplicates.
         // Its file IDs index 250-unit chunks; per-instance X/Z are chunk local.
-        float minX=(tileX-2)*100f,maxX=(tileX+3)*100f;
-        float minZ=(tileZ-2)*100f,maxZ=(tileZ+3)*100f;
+        float minX=(tileX-3)*100f,maxX=(tileX+5)*100f;
+        float minZ=(tileZ-3)*100f,maxZ=(tileZ+5)*100f;
         float cx=(tileX+0.5f)*100f;
         float cz=(tileZ+0.5f)*100f;
         var fixtures=new List<Fixture>(12000);
@@ -80,7 +82,7 @@ public partial class SourcePropLayer : Node3D
                 record.UncompressedSize is <8 or >2_000_000)continue;
             int chunkX=(int)(record.FileId>>16);
             int chunkZ=(int)(record.FileId&0xffff);
-            // Only decode chunks overlapping the high-resolution 5x5 view.
+            // Only decode chunks overlapping the high-resolution 8x8 view.
             if(chunkX*250>=maxX||(chunkX+1)*250<=minX||
                 chunkZ*250>=maxZ||(chunkZ+1)*250<=minZ)
                 continue;
@@ -194,6 +196,32 @@ public partial class SourcePropLayer : Node3D
                 _coarsePerModel[fixture.ModelId]=group=new();
             group.Add(coarse);
         }
+        // These are actual ESO source fixture origins, unlike uncalibrated
+        // UESP map image coordinates. Use real dock walkway/ramp structures
+        // as evidence for the harbour vicinity, not a fictional centre point.
+        var dockPilings=filtered.Where(f=>_names[f.ModelId].Contains(
+            "DockPilling",StringComparison.OrdinalIgnoreCase)).ToArray();
+        if(dockPilings.Length>4)
+        {
+            var xs=dockPilings.Select(f=>f.SourcePosition.X).OrderBy(x=>x).ToArray();
+            var zs=dockPilings.Select(f=>f.SourcePosition.Z).OrderBy(z=>z).ToArray();
+            var harbourCentre=new Vector2(xs[xs.Length/2],zs[zs.Length/2]);
+            foreach(var fixture in filtered)
+            {
+                var label=_names[fixture.ModelId];
+                bool structure=label.StartsWith("GEN_DCK_Dock",StringComparison.OrdinalIgnoreCase)
+                    && (label.Contains("Ramp",StringComparison.OrdinalIgnoreCase)
+                       || label.Contains("Narrow",StringComparison.OrdinalIgnoreCase)
+                       || label.Contains("Wide",StringComparison.OrdinalIgnoreCase)
+                       || label.Contains("Low",StringComparison.OrdinalIgnoreCase));
+                if(!structure)continue;
+                var pos=new Vector2(fixture.SourcePosition.X,fixture.SourcePosition.Z);
+                if(pos.DistanceSquaredTo(harbourCentre)>175f*175f)continue;
+                _dockStructures.Add(pos-new Vector2(cx,cz));
+            }
+            GD.Print($"SOURCE DOCK STRUCTURES {_dockStructures.Count} source ramps/walkways, "+
+                $"harbour piling centre {harbourCentre.X:F1},{harbourCentre.Y:F1}");
+        }
         _placements=filtered.Count;
         // Independently authored floating boats identify a likely common
         // harbour-water elevation. This is NOT a decoded ESO water-level
@@ -235,7 +263,7 @@ public partial class SourcePropLayer : Node3D
         Focus=new Vector3(target.X-cx,0f,target.Z-cz);
         GD.Print(string.Format(
             "SOURCE PROPS tiles {0}..{1} / {2}..{3}: {4} placements, {5} models, {6} hedges, camera {7:F1},{8:F1}",
-            tileX-2,tileX+2,tileZ-2,tileZ+2,_placements,
+            tileX-3,tileX+4,tileZ-3,tileZ+4,_placements,
             _transforms.Count,civic.Length,target.X,target.Z));
     }
 

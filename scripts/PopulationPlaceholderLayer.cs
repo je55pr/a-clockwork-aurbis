@@ -16,6 +16,8 @@ public partial class PopulationPlaceholderLayer : Node3D
     private SourcePropLayer _props=null!;
     private PopulationTerrainSampler _surface=null!;
     private readonly List<PopulationSpawnPlanner.Candidate> _town=new();
+    private readonly HashSet<string> _dockNpcIds=new();
+    private readonly List<Vector2> _dockLandings=new();
     private Node3D? _models;
     private float _density=1f;
     private bool _shown=true;
@@ -24,6 +26,8 @@ public partial class PopulationPlaceholderLayer : Node3D
     public int SourceNpcCount=>_town.Count;
     public Vector3? SuggestedCameraEye {get;private set;}
     public Vector3? SuggestedCameraTarget {get;private set;}
+    public Vector3? SuggestedDockCameraEye {get;private set;}
+    public Vector3? SuggestedDockCameraTarget {get;private set;}
     public event Action<string>? Changed;
 
     public void Setup(EsoArchive archive,OodleDecoder decoder,TerrainBundle bundle,
@@ -52,6 +56,8 @@ public partial class PopulationPlaceholderLayer : Node3D
             float z=props.Focus.Z+(v-660000f)*0.00070f;
             string place=town.GetProperty("place").GetString()??"Vulkhel Guard";
             _town.Add(new PopulationSpawnPlanner.Candidate(id,name,race,place,x,z));
+            if(place.Contains("Vulkhel Guard Docks",StringComparison.OrdinalIgnoreCase))
+                _dockNpcIds.Add(id);
         }
         GD.Print($"AURIDON POPULATION: {_town.Count} source-linked Vulkhel NPCs, "+
             $"{_surface.SourceTiles} original ground tiles; provisional map anchors.");
@@ -88,8 +94,14 @@ public partial class PopulationPlaceholderLayer : Node3D
             GD.Print("POPULATION WAITING for source mesh raycasts");
             return;
         }
+        if(_dockNpcIds.Count>0 && _dockLandings.Count==0)PrepareDockShoreLandings();
         var count=(int)MathF.Round(_town.Count*_density);
-        var source=_town.OrderBy(x=>PopulationSpawnPlanner.StableHash(x.Id)).ToArray();
+        var source=_town.Select(c=>{
+            if(!_dockNpcIds.Contains(c.Id)||_dockLandings.Count==0)return c;
+            int site=PopulationSpawnPlanner.StableHash(c.Id)%_dockLandings.Count;
+            var point=_dockLandings[site];
+            return c with {AnchorX=point.X,AnchorZ=point.Y};
+        }).OrderBy(c=>PopulationSpawnPlanner.StableHash(c.Id)).ToArray();
         var candidates=new List<PopulationSpawnPlanner.Candidate>();
         candidates.AddRange(source.Take(count));
         if(count>source.Length)
@@ -108,15 +120,55 @@ public partial class PopulationPlaceholderLayer : Node3D
         var (spawns,stats)=PopulationSpawnPlanner.Generate(candidates,
             _surface.GroundAt,_props.UnresolvedFootprints,_props.Raycaster);
         _requested=stats.Requested;_placed=stats.Placed;
+        int dockPlaced=spawns.Count(x=>_dockNpcIds.Contains(x.Id));
         ChooseCameraAmongCrowd(spawns);
+        ChooseDockCamera(spawns);
         BuildModels(spawns);
         GD.Print($"POPULATION PREVIEW placed={stats.Placed}/{stats.Requested}, "+
             $"rejected={stats.Rejected}, shifted={stats.Shifted}, "+
             $"obstacleAttempts={stats.BlockedByScenery}, terrainAttempts={stats.BlockedByTerrain}, "+
             $"crowdAttempts={stats.BlockedByCrowd}, unresolvedProps={_props.UnresolvedFootprints.Count}, "+
-            $"sourceTriangles={_props.Raycaster.TriangleCount}, sourceMeshesReady={_props.HasPreparedGeometry}");
+            $"sourceTriangles={_props.Raycaster.TriangleCount}, "+
+            $"dockPlaced={dockPlaced}/{_dockNpcIds.Count}, dockLandingSites={_dockLandings.Count}, "+
+            $"poolFallback={stats.FallbackPlacements}, openPool={stats.OpenGroundPool}, "+
+            $"sourceMeshesReady={_props.HasPreparedGeometry}");
         Notify();
     }
+    private void PrepareDockShoreLandings()
+    {
+        // Only actual placed dock ramps/walkways identify the harbour. A landing
+        // site is acceptable only after full source-mesh clearance and source
+        // triangle terrain sampling; over-water pier positions will be rejected.
+        var structures=_props.DockStructures.ToArray();
+        if(structures.Length==0)
+        {
+            GD.PushWarning("No physical dock structures found; retaining map-estimated anchors.");
+            return;
+        }
+        var rng=new Random(521870);
+        foreach(var dock in structures)
+        {
+            if(_dockLandings.Count>=65)break;
+            for(int i=0;i<40;i++)
+            {
+                float bearing=(float)(rng.NextDouble()*Math.Tau);
+                float distance=3f+MathF.Sqrt((float)rng.NextDouble())*76f;
+                float x=dock.X+MathF.Cos(bearing)*distance;
+                float z=dock.Y+MathF.Sin(bearing)*distance;
+                if(x< -350f||x>=450f||z< -350f||z>=450f)continue;
+                var y=_surface.GroundAt(x,z);
+                if(y is null||!_props.Raycaster.OpenSkyToTerrain(x,z,y.Value))continue;
+                var point=new Vector2(x,z);
+                if(_dockLandings.Any(p=>p.DistanceSquaredTo(point)<5.5f*5.5f))continue;
+                _dockLandings.Add(point);
+                break;
+            }
+        }
+        GD.Print($"DOCK SPAWN LANDINGS {_dockLandings.Count} confirmed open-ground "+
+            $"sites near {_props.DockStructures.Count} original dock structures; "+
+            $"{_dockNpcIds.Count} dock-linked NPCs");
+    }
+
     private void Notify()=>Changed?.Invoke(
         $"NPC stand-ins: {_placed}/{_requested} | source town NPCs: {_town.Count} | "+
         $"density: {_density:0.##}x | "+(_props.HasPreparedGeometry?"vertical source-mesh raycasts verified":"waiting for source meshes")+
@@ -124,9 +176,19 @@ public partial class PopulationPlaceholderLayer : Node3D
 
     private void ChooseCameraAmongCrowd(IReadOnlyList<PopulationSpawnPlanner.Placement> points)
     {
-        SuggestedCameraEye=null;SuggestedCameraTarget=null;
-        if(points.Count<2)return;
-        var visible=new List<(int Count, float Distance, Vector3 Eye, Vector3 Target)>();
+        (SuggestedCameraEye,SuggestedCameraTarget)=FindVisibleCamera(points);
+    }
+    private void ChooseDockCamera(IReadOnlyList<PopulationSpawnPlanner.Placement> points)
+    {
+        var docks=points.Where(p=>_dockNpcIds.Contains(p.Id)).ToArray();
+        (SuggestedDockCameraEye,SuggestedDockCameraTarget)=FindVisibleCamera(docks);
+        GD.Print($"DOCK CAMERA clear={SuggestedDockCameraEye.HasValue} dockNPCs={docks.Length}");
+    }
+    private (Vector3? Eye,Vector3? Target) FindVisibleCamera(
+        IReadOnlyList<PopulationSpawnPlanner.Placement> points)
+    {
+        if(points.Count<2)return (null,null);
+        var visible=new List<(int Count,float Distance,Vector3 Eye,Vector3 Target)>();
         foreach(var candidate in points)
         {
             var eye=candidate.Position+new Vector3(0f,1.78f,0f);
@@ -142,16 +204,14 @@ public partial class PopulationPlaceholderLayer : Node3D
             foreach(var other in points)
             {
                 if(other.Id==candidate.Id)continue;
-                var dist=candidate.Position.DistanceTo(other.Position);
-                if(dist<8f||dist>22f)continue;
+                float dist=candidate.Position.DistanceTo(other.Position);
+                if(dist<5f||dist>30f)continue;
                 var target=other.Position+new Vector3(0f,1.28f,0f);
                 if(_props.Raycaster.Intersects(eye,target))continue;
-                // A clear prop ray can still cross a terrain ridge. Reject it.
                 bool clear=true;
                 for(int k=1;k<9;k++)
                 {
-                    float progress=k/9f;
-                    var sample=eye.Lerp(target,progress);
+                    var sample=eye.Lerp(target,k/9f);
                     var ground=_surface.GroundAt(sample.X,sample.Z);
                     if(ground is null||ground.Value>sample.Y-0.6f)
                     {clear=false;break;}
@@ -161,12 +221,10 @@ public partial class PopulationPlaceholderLayer : Node3D
                 break;
             }
         }
-        if(visible.Count==0)return;
-        // Prefer busy, source-clear squares with an unobstructed 8-22m view.
+        if(visible.Count==0)return (null,null);
         var best=visible.OrderByDescending(v=>v.Count)
             .ThenBy(v=>MathF.Abs(v.Distance-13f)).First();
-        SuggestedCameraEye=best.Eye;
-        SuggestedCameraTarget=best.Target;
+        return (best.Eye,best.Target);
     }
     private void BuildModels(IReadOnlyList<PopulationSpawnPlanner.Placement> points)
     {

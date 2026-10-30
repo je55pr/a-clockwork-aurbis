@@ -49,10 +49,39 @@ for(const row of rows){
 const hash=s=>crypto.createHash('sha256').update(s).digest().readUInt32LE(0)/4294967296;
 const knownTown=mainMap.get('vulkhel guard');
 if(!knownTown)throw Error('Vulkhel Guard is not resolved on Auridon world map');
-const guessedTownPoint=(place)=>{
-  // Stable approximate district allocation, not a game coordinate or georeference.
-  const a=hash('house-x:'+place),b=hash('house-y:'+place);
-  return {x:180000+370000*a,y:440000+330000*b,kind:'estimated_district',place};
+// These are settlement overview markers, not exact NPC or walkable locations.
+const dockMarker=townMap.get("vulkhel guard docks");
+if(!dockMarker)throw Error("Vulkhel Guard Docks marker missing from UESP map");
+const outdoors=["Vulkhel Guard Wayshrine","Harborside Market",
+  "Vulkhel Guard Docks","Salted Wings Tavern","Mages Guild (Vulkhel Guard)",
+  "Fighters Guild (Vulkhel Guard)","Vulkhel Guard Manor & Treasury",
+  "Vulkhel Guard Warehouse","Aegis of Auri-El","The Arrowpoint Club",
+  "Temple of Auri-El","Mara's Kiss Public House"];
+const districtMarkers=outdoors.map(name=>({name,marker:townMap.get(norm(name))})).filter(x=>x.marker);
+if(districtMarkers.length<8)throw Error("Missing expected Vulkhel settlement markers");
+const seaJob=/\b(?:dock(?:worker|hand|side)?|wharf(?:rat|worker)?|boatswain|navigator|deckhand|sailor|shipwright|fisher(?:man|woman)?|fishmonger|stevedore|harbour\w*|harbor\w*|seafarer|longshore\w*|sailing|sails)\b/i;
+const findTownAnchor=p=>{
+  for(const key of [p.name,p.title]){
+    const normalized=norm(key);
+    const alias=normalized==="vulkhel docks"?"vulkhel guard docks":normalized;
+    const found=townMap.get(alias);
+    if(found)return {marker:found,aliased:normalized!==alias};
+  }
+  return null;
+};
+const fromMarker=(marker,kind,place,sourcePlace=null)=>({
+  x:marker.x,y:marker.y,kind,markerId:marker.location_id,
+  place,sourcePlace
+});
+const districtPoint=(person)=>{
+  const i=Math.floor(hash("district:"+person.id)*districtMarkers.length);
+  const {name,marker}=districtMarkers[Math.min(i,districtMarkers.length-1)];
+  // Stable 3D-area jitter: ±12 m in world space at current provisional scale.
+  const xNoise=(hash("district-x:"+person.id)-0.5)*34000;
+  const yNoise=(hash("district-y:"+person.id)-0.5)*34000;
+  return {x:marker.x+xNoise,y:marker.y+yNoise,kind:"estimated_city_district",
+    place:"Vulkhel Guard (near "+name+")",sourcePlace:"Online:Vulkhel Guard",
+    district:name};
 };
 const getMain=(p)=>{
  const candidates=[p.name,p.title,p.city,p.settlement];
@@ -78,13 +107,45 @@ for(const person of byId.values()){
  else missing++;
  const target=person.places.find(p=>isVulkhel(p));
  if(target){
-   person.previewTown='Vulkhel Guard';
-   // City-specific wiki locations may have a UESP local-map point.
-   const exact=person.places.map(p=>townMap.get(norm(p.name))||townMap.get(norm(p.title))).find(Boolean);
-   if(exact){
-    person.town={x:exact.x,y:exact.y,kind:'uesp_map_marker',markerId:exact.location_id,place:exact.wiki_page||exact.name};localExact++;
-   } else {
-    person.town=guessedTownPoint(target.title);localEstimated++;
+   person.previewTown="Vulkhel Guard";
+   // Explicit location links outrank profession, which outranks the city-wide
+   // district estimate. "Vulkhel Docks" aliases the actual map label
+   // "Vulkhel Guard Docks", instead of silently falling back to the city.
+   const explicitDock=person.places.find(p=>norm(p.name)==="vulkhel docks"||
+       norm(p.title)==="vulkhel docks");
+   const specific=person.places.map(p=>({place:p,match:findTownAnchor(p)}))
+     .filter(x=>x.match && norm(x.place.name)!=="vulkhel guard");
+   const seaOccupation=seaJob.test([person.name,person.service].join(" "));
+   if(explicitDock)
+   {
+     person.town=fromMarker(dockMarker,"uesp_map_marker_alias",
+       "Vulkhel Guard Docks",explicitDock.title);
+     localExact++;
+   }
+   else if(seaOccupation && specific.length===0)
+   {
+     person.town=fromMarker(dockMarker,"inferred_profession",
+       "Vulkhel Guard Docks (dock-related occupation)",target.title);
+     localEstimated++;
+   }
+   else if(specific.length)
+   {
+     const {place,match}=specific[0];
+     person.town=fromMarker(match.marker,match.aliased
+       ?"uesp_map_marker_alias":"uesp_map_marker",
+       match.marker.wiki_page||match.marker.name,place.title);
+     localExact++;
+   }
+   else if(seaOccupation)
+   {
+     person.town=fromMarker(dockMarker,"inferred_profession",
+       "Vulkhel Guard Docks (dock-related occupation)",target.title);
+     localEstimated++;
+   }
+   else
+   {
+     person.town=districtPoint(person);
+     localEstimated++;
    }
  }
 }

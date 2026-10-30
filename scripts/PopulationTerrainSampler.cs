@@ -21,7 +21,7 @@ public sealed class PopulationTerrainSampler
         foreach(var record in bundle.Tiles)
         {
             int x=(int)(record.FileId>>16),z=(int)(record.FileId&0xffff);
-            if(x<tileX-2||x>tileX+2||z<tileZ-2||z>tileZ+2)continue;
+            if(x<tileX-3||x>tileX+4||z<tileZ-3||z>tileZ+4)continue;
             if(LandTile.TryParse(archive.ReadDecoded(record,decoder),out var terrain)&&
                 terrain is { Width:65,Height:65 })
                 _tiles[(x,z)]=terrain;
