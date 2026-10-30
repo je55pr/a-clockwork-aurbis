@@ -17,8 +17,13 @@ public partial class PopulationPlaceholderLayer : Node3D
     private PopulationTerrainSampler _surface=null!;
     private readonly List<PopulationSpawnPlanner.Candidate> _town=new();
     private readonly HashSet<string> _dockNpcIds=new();
+    private readonly Dictionary<string,JsonElement> _sourcePeople=new();
+    private NpcHoverInspector? _hoverInspector;
+    private Func<bool>? _hoverAllowed;
+    public void SetHoverGate(Func<bool> allowed) => _hoverAllowed=allowed;
     private readonly List<Vector2> _dockLandings=new();
     private Node3D? _models;
+    private readonly List<PopulationSpawnPlanner.Placement> _visibleSpawns=new();
     private float _density=1f;
     private bool _shown=true;
     private int _placed,_requested;
@@ -49,7 +54,9 @@ public partial class PopulationPlaceholderLayer : Node3D
             if(!person.TryGetProperty("town",out var town)||town.ValueKind!=JsonValueKind.Object)
                 continue;
             string name=person.GetProperty("name").GetString()??"Unknown";
+            var clonedPerson=person.Clone();
             string id=person.GetProperty("id").GetString()??name;
+            _sourcePeople[id]=clonedPerson;
             string race=person.TryGetProperty("race",out var r)&&r.ValueKind==JsonValueKind.String
                 ? r.GetString()??"" : "";
             float u=town.GetProperty("x").GetSingle(),v=town.GetProperty("y").GetSingle();
@@ -72,6 +79,10 @@ public partial class PopulationPlaceholderLayer : Node3D
     public override void _Ready()
     {
         _props.GeometryPrepared+=Rebuild;
+        _hoverInspector=new NpcHoverInspector {Name="NpcCursorInspector"};
+        _hoverInspector.Setup(_props.Raycaster,
+            ()=>_shown&&(_hoverAllowed?.Invoke()??true));
+        AddChild(_hoverInspector);
         Rebuild();
     }
 
@@ -84,6 +95,7 @@ public partial class PopulationPlaceholderLayer : Node3D
     {
         _shown=shown;
         if(_models!=null)_models.Visible=shown;
+        _hoverInspector?.SetEnabled(shown);
         Notify();
     }
     public bool Shown=>_shown;
@@ -296,11 +308,41 @@ public partial class PopulationPlaceholderLayer : Node3D
             .ThenBy(v=>MathF.Abs(v.Distance-13f)).First();
         return (best.Eye,best.Target);
     }
+    public void PreviewPinForScreenshot() => _hoverInspector?.PreviewPinForScreenshot();
+
+    public bool PreviewHoverForScreenshot(Camera3D camera, out string npcName)
+    {
+        npcName=string.Empty;
+        if(_hoverInspector==null)return false;
+        var viewport=GetViewport().GetVisibleRect().Size;
+        foreach(var p in _visibleSpawns.OrderBy(p=>
+            camera.GlobalPosition.DistanceSquaredTo(ToGlobal(p.Position))))
+        {
+            var head=ToGlobal(p.Position+new Vector3(0,1.35f,0));
+            if(camera.IsPositionBehind(head))continue;
+            Vector2 screen=camera.UnprojectPosition(head);
+            if(screen.X<80||screen.Y<50||screen.X>viewport.X-80||screen.Y>viewport.Y-50)
+                continue;
+            // In a crowd the frontmost selectable mannequin may overlap
+            // this projected world point. Selecting that nearer NPC is correct.
+            if(_hoverInspector.PreviewHoverAt(screen)&&_hoverInspector.HoveredId is string selected)
+            {
+                npcName=_visibleSpawns.FirstOrDefault(x=>x.Id==selected).Name;
+                GD.Print($"NPC HOVER GPU TARGET expected={p.Name}, selected={npcName}");
+                return true;
+            }
+        }
+        return false;
+    }
     private void BuildModels(IReadOnlyList<PopulationSpawnPlanner.Placement> points)
     {
+        _visibleSpawns.Clear();
+        _visibleSpawns.AddRange(points);
         if(_models!=null){_models.QueueFree();_models=null;}
         var root=new Node3D{Name="ApproximateNPCStandIns",Visible=_shown};
         AddChild(root);_models=root;
+        _hoverInspector?.SetPopulation(points.Select(p=>
+            p with {Position=ToGlobal(p.Position)}).ToArray(),_sourcePeople);
         var body=new CylinderMesh {TopRadius=0.27f,BottomRadius=0.31f,
             Height=0.88f,RadialSegments=7};
         var head=new SphereMesh {Radius=0.21f,Height=0.42f,RadialSegments=8,Rings=4};

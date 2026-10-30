@@ -25,7 +25,8 @@ public partial class TerrainBrowser : Node3D
     {
         if(_populationCaptureStarted||_population?.PlacedCount<1)return;
         _populationCaptureStarted=true;
-        if(System.Environment.GetEnvironmentVariable("ESO_CAPTURE_GUILD_VIEW")=="1")
+        if(System.Environment.GetEnvironmentVariable("ESO_CAPTURE_GUILD_VIEW")=="1" ||
+            System.Environment.GetEnvironmentVariable("ESO_CAPTURE_NPC_HOVER")=="1")
             FocusGuildView();
         else if(System.Environment.GetEnvironmentVariable("ESO_CAPTURE_DOCK_VIEW")=="1")
             FocusDockView();
@@ -34,6 +35,16 @@ public partial class TerrainBrowser : Node3D
         if(_atlas!=null)_atlas.Visible=false;
         if(_referenceMap!=null)_referenceMap.Visible=false;
         for(int i=0;i<5;i++)await ToSignal(GetTree(),SceneTree.SignalName.ProcessFrame);
+        if(System.Environment.GetEnvironmentVariable("ESO_CAPTURE_NPC_HOVER")=="1")
+        {
+            bool hit=_camera!=null&&_population?.PreviewHoverForScreenshot(
+                _camera,out var hoverName)==true;
+            GD.Print($"NPC HOVER GPU INSPECTION visibleNPC={hit}");
+            if(!hit)GD.PushError("No NPC tooltip target could be selected in the completed GPU scene");
+            if(hit && System.Environment.GetEnvironmentVariable("ESO_CAPTURE_NPC_PINNED")=="1")
+                _population?.PreviewPinForScreenshot();
+            for(int i=0;i<3;i++)await ToSignal(GetTree(),SceneTree.SignalName.ProcessFrame);
+        }
         var image=GetViewport().GetTexture().GetImage();
         string path=System.Environment.GetEnvironmentVariable("ESO_CAPTURE_OUTPUT")??
             ProjectSettings.GlobalizePath("res://.research/population-ready.png");
@@ -881,7 +892,7 @@ void fragment() {
         _sceneLabel.AddThemeFontSizeOverride("font_size",12);
         content.AddChild(_sceneLabel);
         var help=new Label{
-            Text="WASD move | Right mouse look | E/Q up/down | Shift sprint | Wheel speed | N: NPCs | J: density | P: crowd | G: guilds | K: docks | M: Auridon map",
+            Text="WASD move | Right mouse look | E/Q up/down | Shift sprint | Wheel speed | Hover NPC: details | Click NPC: pin | N: NPCs | J: density | P: crowd | G: guilds | K: docks | M: Auridon map",
             AutowrapMode=TextServer.AutowrapMode.WordSmart
         };
         help.AddThemeFontSizeOverride("font_size",11);
@@ -1142,6 +1153,8 @@ void fragment() {
                     population.Setup(_archive,_decoder,bundle,props,result.LowestHeight,tileX,tileZ);
                     population.SetDensity(_populationDensity);
                     population.SetShown(_showPopulation);
+                    population.SetHoverGate(()=>_bestView&&_simpleHud?.Visible==true&&
+                        _referenceMap?.Visible!=true&&_atlas?.Visible!=true);
                     population.Changed+=message=>
                     {
                         if(_terrainRoot!=root)return;

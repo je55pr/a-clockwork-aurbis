@@ -150,6 +150,58 @@ for(const person of byId.values()){
  }
 }
 const people=[...byId.values()].sort((a,b)=>a.pageId-b.pageId);
+// Preserve original structured fields and source article wikitext without
+// inventing character statistics or rewriting source template notation.
+const npcIds=people.map(p=>p.pageId);
+const idFilter=" WHERE page_id IN ("+npcIds.join(",")+")";
+const byPage=rows=>new Map(rows.map(row=>[row.page_id,row]));
+const groupPage=rows=>{
+ const groups=new Map();
+ for(const row of rows){
+  if(!groups.has(row.page_id))groups.set(row.page_id,[]);
+  groups.get(row.page_id).push(row);
+ }
+ return groups;
+};
+// Use one read per source table. These tables are not all indexed by page ID.
+const npcDetails=byPage(db.prepare("SELECT * FROM npcs"+idFilter).all());
+const wikiDetails=byPage(db.prepare("SELECT page_id,revision_id,revision_timestamp,wikitext FROM wiki_pages"+idFilter).all());
+const npcSummaries=groupPage(db.prepare("SELECT page_id,summary_number,fields_json FROM npc_summaries"+idFilter+" ORDER BY page_id,summary_number").all());
+const npcQuests=groupPage(db.prepare("SELECT page_id,quest_label,raw_markup FROM npc_quest_links"+idFilter+" ORDER BY page_id,sequence_number").all());
+const haveStandard=db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE type='table' AND name='standard_npc_profiles_v1'").get().n>0;
+const standardDetails=haveStandard?byPage(db.prepare("SELECT page_id,profile_json FROM standard_npc_profiles_v1"+idFilter).all()):new Map();
+for(const person of people){
+ const raw=npcDetails.get(person.pageId);
+ const article=wikiDetails.get(person.pageId);
+ const variants=(npcSummaries.get(person.pageId)||[]).map(x=>({
+   number:x.summary_number,fields:JSON.parse(x.fields_json||'{}')
+ }));
+ let standardized=null;
+ if(standardDetails){
+   const matching=standardDetails.get(person.pageId);
+   if(matching?.profile_json){
+     try {
+       const profile=JSON.parse(matching.profile_json);
+       standardized={identity:profile.identity,society:profile.society,combat:profile.combat,
+         conflicts:profile.conflicts,locations:profile.locations,references:profile.references};
+     }catch(e){throw Error('Cannot read standardized profile '+person.pageId+': '+e.message)}
+   }
+ }
+ person.details={
+   sourcePage:'https://en.uesp.net/wiki/'+(raw?.wiki_title||('Online:'+person.name)).replaceAll(' ','_').split('/').map(part=>encodeURIComponent(part).replace('%3A',':')).join('/'),
+   wikiTitle:raw?.wiki_title||null,
+   revisionId:article?.revision_id??null,
+   revisionTimestamp:article?.revision_timestamp??null,
+   sourceFields:Object.fromEntries(Object.entries(raw||{}).filter(([k,v])=>
+     k.startsWith('npc_')&&v!=null&&v!=='').map(([k,v])=>[k.slice(4),v])),
+   sourceRecord:{pageId:raw?.page_id??null,sourceFile:raw?.source_file??null,
+     summaryCount:raw?.summary_count??null},
+   summaryVariants:variants,
+   quests:npcQuests.get(person.pageId)||[],
+   standardized,
+   articleWikitext:article?.wikitext??null
+ };
+}
 const payload={
  schemaVersion:1,source:'UESP Online NPC summary + place associations + gamemap locations',
  disclaimer:'NPC coordinates are estimated around linked places. Map markers are place positions, never NPC coordinates. 3D terrain alignment is not calibrated.',

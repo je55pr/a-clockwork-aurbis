@@ -4,6 +4,16 @@ const data=JSON.parse(fs.readFileSync(process.argv[2]||path.resolve(__dirname,'.
 assert.equal(data.schemaVersion,1);
 assert.equal(data.population,data.people.length);
 const town=data.people.filter(p=>p.town);
+for(const person of data.people){
+ assert.ok(person.details && person.details.wikiTitle && person.details.sourcePage,
+   "missing linked UESP page provenance for "+person.id);
+ assert.ok(person.details.summaryVariants?.length>=1,
+   "missing original infobox data for "+person.id);
+ assert.equal(typeof person.details.articleWikitext,"string",
+   "missing full source article for "+person.id);
+ assert.ok(person.details.sourceFields && typeof person.details.sourceFields==="object",
+   "missing source field dictionary for "+person.id);
+}
 assert.equal(new Set(data.people.map(p=>p.id)).size,data.people.length,'no duplicate NPC profile IDs');
 assert.equal(town.length,data.coverage.vulkhelTownNpcCount);
 assert.equal(data.population,893,'expected island-wide source query coverage');
