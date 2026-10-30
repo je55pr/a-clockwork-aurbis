@@ -45,3 +45,22 @@ jobs:
         run: dotnet build tools/ModelNameIndexer/ModelNameIndexer.csproj --configuration Debug --nologo
       - name: Verify indexer help without game data
         run: dotnet run --no-build --project tools/ModelNameIndexer/ModelNameIndexer.csproj -- --help
+
+  simulation:
+    name: Independent headless simulation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up standalone .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.0.x"
+      - name: Build engine without Godot
+        run: dotnet build src/AClockworkAurbis.Simulation/AClockworkAurbis.Simulation.csproj --configuration Release --nologo
+      - name: Run simulation invariants and deterministic tests
+        run: dotnet run --project tests/SimulationTests/SimulationTests.csproj --configuration Release
+      - name: Exercise 10000 agents across three days
+        run: dotnet run --project tools/SimulationRunner/SimulationRunner.csproj --configuration Release -- --people 10000 --days 3 --json

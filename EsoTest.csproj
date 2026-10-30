@@ -8,6 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- The CLI uses original archives but is not part of the Godot assembly. -->
-    <Compile Remove="tools/**/*.cs" />
+    <Compile Remove="tools/**/*.cs;src/**/*.cs;tests/**/*.cs" />
   </ItemGroup>
 </Project>
