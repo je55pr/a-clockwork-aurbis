@@ -16,6 +16,24 @@ public partial class TerrainBrowser : Node3D
     private IReadOnlyList<TerrainBundle> _bundles = null!;
     private TerrainHierarchyIndex _hierarchy = null!;
     private Node3D? _terrainRoot;
+    private PopulationPlaceholderLayer? _population;
+    private bool _showPopulation=true;
+    private float _populationDensity=1f;
+    private string _populationMessage="";
+    private void FocusPopulationView()
+    {
+        if(_camera==null||_population?.SuggestedCameraEye is not Vector3 eye||
+            _population.SuggestedCameraTarget is not Vector3 target)return;
+        var forward=(target-eye).Normalized();
+        if(forward.LengthSquared()<0.5f)return;
+        _flyPosition=eye;
+        _yaw=Mathf.Atan2(-forward.X,-forward.Z);
+        _pitch=Mathf.Clamp(Mathf.Asin(forward.Y),-1.45f,1.45f);
+        _camera.Position=eye;
+        _camera.Rotation=new Vector3(-_pitch,_yaw,0f);
+        _flySpeed=8f;
+        GD.Print($"POPULATION CAMERA eye={eye} target={target}");
+    }
     private Label _status = null!;
     private Label _briefStatus = null!;
     private LineEdit _jump = null!;
@@ -45,6 +63,7 @@ public partial class TerrainBrowser : Node3D
     // Free-flight: _focus/_distance are retained only for initial framing when switching scenes.
     private Vector3 _flyPosition;
     private bool _mouseLooking;
+    private bool _userChangedCamera;
     private bool _bestView;
     public bool IsBestView => _bestView;
     private CanvasLayer? _simpleHud;
@@ -525,7 +544,8 @@ public partial class TerrainBrowser : Node3D
         if (int.TryParse(System.Environment.GetEnvironmentVariable("ESO_CAPTURE_DELAY_MS"),out int delay) && delay>0)
             await ToSignal(GetTree().CreateTimer(Math.Min(delay,20000)/1000.0),SceneTreeTimer.SignalName.Timeout);
         var image = GetViewport().GetTexture().GetImage();
-        string path = ProjectSettings.GlobalizePath("res://.research/terrain-preview.png");
+        string path = System.Environment.GetEnvironmentVariable("ESO_CAPTURE_OUTPUT") ??
+            ProjectSettings.GlobalizePath("res://.research/terrain-preview.png");
         GD.Print($"Debug screenshot status: {image.SavePng(path)} {image.GetWidth()}x{image.GetHeight()}");
         GetTree().Quit();
     }
@@ -835,7 +855,7 @@ void fragment() {
         _sceneLabel.AddThemeFontSizeOverride("font_size",12);
         content.AddChild(_sceneLabel);
         var help=new Label{
-            Text="WASD move | Right mouse look | E/Q up/down | Shift sprint | Wheel speed",
+            Text="WASD move | Right mouse look | E/Q up/down | Shift sprint | Wheel speed | N: NPCs | J: density | P: crowd | M: Auridon map",
             AutowrapMode=TextServer.AutowrapMode.WordSmart
         };
         help.AddThemeFontSizeOverride("font_size",11);
@@ -1035,6 +1055,8 @@ void fragment() {
                 });
             }
             if (_terrainRoot != null) _terrainRoot.QueueFree();
+            _population=null;
+            _populationMessage="";
             AddChild(root);
             _terrainRoot = root;
             for (int i = 0; i < _bundles.Count; i++)
@@ -1080,18 +1102,58 @@ void fragment() {
                     {
                         _status.Text=message;
                         _briefStatus.Text=message;
-                        if(_sceneLabel!=null)_sceneLabel.Text=message+"\n"+waterNote;
+                        if(_sceneLabel!=null)_sceneLabel.Text=message+"\n"+waterNote+
+                        (_populationMessage.Length>0?"\n"+_populationMessage:"");
                     }
                 };
                 root.AddChild(props);
-                PositionGroundCameraAtSource(bundle,tileX,tileZ,
-                    result.LowestHeight,props.Focus);
+                try
+                {
+                    var population=new PopulationPlaceholderLayer {Name="AuridonNpcPlaceholders"};
+                    population.Setup(_archive,_decoder,bundle,props,result.LowestHeight,tileX,tileZ);
+                    population.SetDensity(_populationDensity);
+                    population.SetShown(_showPopulation);
+                    population.Changed+=message=>
+                    {
+                        if(_terrainRoot!=root)return;
+                        _populationMessage=message;
+                        if(_sceneLabel!=null)_sceneLabel.Text=
+                            $"Southern Auridon approximate NPC population\n{message}";
+                        _briefStatus.Text=message;
+                        if(population.PlacedCount>0 && !_userChangedCamera && _showPopulation)
+                            FocusPopulationView();
+                    };
+                    root.AddChild(population);
+                    _population=population;
+                }
+                catch(Exception error)
+                {
+                    GD.PushWarning("NPC population preview unavailable: "+error.Message);
+                }
+                // Until all actual prop meshes are decoded, no ground camera point
+                // can be certified unobstructed. Start above the scene instead.
+                // Once raycast placements are ready, auto-focus only if the user
+                // has NOT moved or looked around in the meantime.
+                if(_camera!=null)
+                {
+                    _flyPosition=new Vector3(props.Focus.X,
+                        Math.Max(450f,result.HighestHeight-result.LowestHeight+300f),
+                        props.Focus.Z+140f);
+                    var direction=(props.Focus+new Vector3(0f,30f,0f)-_flyPosition).Normalized();
+                    _yaw=Mathf.Atan2(-direction.X,-direction.Z);
+                    _pitch=Mathf.Asin(direction.Y);
+                    _camera.Position=_flyPosition;
+                    _camera.Rotation=new Vector3(-_pitch,_yaw,0f);
+                    _flySpeed=24f;
+                    _userChangedCamera=false;
+                }
+                GD.Print("POPULATION CAMERA: overhead holding position until prop rays complete");
                 _status.Text="Original source props and native 65x65 terrain loaded.";
                 _briefStatus.Text="Best available 5x5 source scene";
                 if(_sceneLabel!=null)_sceneLabel.Text=
                     $"{props.SourceInstances:N0} original prop placements across "+
                     $"{props.SourceModels} source models. Preparing textures...\n"+
-                    waterNote;
+                    waterNote+(_populationMessage.Length>0?"\n"+_populationMessage:"");
             }
             if(fullWorldspaceDetail && !closeUp)
             {
@@ -1503,6 +1565,7 @@ void fragment() {
         }
         else if(@event is InputEventMouseMotion motion && _camera!=null)
         {
+            _userChangedCamera=true;
             _yaw-=motion.Relative.X*0.003f;
             _pitch=Mathf.Clamp(_pitch+motion.Relative.Y*0.003f,-1.52f,1.52f);
             _camera.Rotation=new Vector3(-_pitch,_yaw,0f);
@@ -1512,6 +1575,37 @@ void fragment() {
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        if(@event is InputEventKey populationKey && populationKey.Pressed &&
+            !populationKey.Echo && (_simpleHud?.Visible==true || _terrainUiLayer?.Visible==true))
+        {
+            if(populationKey.Keycode==Key.N)
+            {
+                _showPopulation=!_showPopulation;
+                _population?.SetShown(_showPopulation);
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+            if(populationKey.Keycode==Key.J)
+            {
+                _populationDensity=_populationDensity<0.75f?1f:
+                    _populationDensity<1.5f?2f:0.5f;
+                _population?.SetDensity(_populationDensity);
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+            if(populationKey.Keycode==Key.P)
+            {
+                FocusPopulationView();
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+            if(populationKey.Keycode==Key.M)
+            {
+                if(_referenceMap!=null)_referenceMap.Visible=!_referenceMap.Visible;
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+        }
         if (_terrainUiLayer?.Visible==true &&
             @event is InputEventKey key && key.Pressed && !key.Echo && key.Keycode == Key.H)
         {
@@ -1575,6 +1669,7 @@ void fragment() {
         float speed=_flySpeed;
         if(Input.IsKeyPressed(Key.Shift))speed*=5f;
         if(Input.IsKeyPressed(Key.Alt))speed*=0.2f;
+        _userChangedCamera=true;
         _flyPosition+=movement.Normalized()*speed*(float)delta;
         _camera.Position=_flyPosition;
     }

@@ -42,6 +42,15 @@ public partial class SourcePropLayer : Node3D
     public float? HarbourWaterCandidate {get;private set;}
     public int HarbourAnchorCount {get;private set;}
     public event Action<string>? Progress;
+    public event Action? GeometryPrepared;
+    public readonly record struct PropFootprint(float MinX, float MinZ, float MaxX, float MaxZ);
+    private readonly List<PropFootprint> _propFootprints = new();
+    public IReadOnlyList<PropFootprint> PropFootprints => _propFootprints;
+    public bool HasPreparedGeometry { get; private set; }
+    public SourceGeometryRaycaster Raycaster { get; } = new();
+    private readonly Dictionary<uint,List<PropFootprint>> _coarsePerModel = new();
+    private readonly List<PropFootprint> _unresolvedFootprints = new();
+    public IReadOnlyList<PropFootprint> UnresolvedFootprints => _unresolvedFootprints;
 
     public void Setup(EsoArchive archive,OodleDecoder decoder,TerrainBundle bundle,
         float lowestHeight,int tileX,int tileZ)
@@ -170,6 +179,21 @@ public partial class SourcePropLayer : Node3D
             list.Add(new Transform3D(basis,
                 fixture.SourcePosition-new Vector3(cx,lowestHeight,cz)));
         }
+        // Fast provisional clearance while genuine mesh bounds load asynchronously.
+        // Large architectural models receive conservative exclusion radii.
+        foreach(var fixture in filtered)
+        {
+            string label=_names[fixture.ModelId];
+            float padding=IsArchitecture(label)?10f:
+                label.Contains("Tree",StringComparison.OrdinalIgnoreCase)?3.4f:
+                label.Contains("Boat",StringComparison.OrdinalIgnoreCase)?5.5f:1.5f;
+            float x=fixture.SourcePosition.X-cx,z=fixture.SourcePosition.Z-cz;
+            var coarse=new PropFootprint(x-padding,z-padding,x+padding,z+padding);
+            _propFootprints.Add(coarse);
+            if(!_coarsePerModel.TryGetValue(fixture.ModelId,out var group))
+                _coarsePerModel[fixture.ModelId]=group=new();
+            group.Add(coarse);
+        }
         _placements=filtered.Count;
         // Independently authored floating boats identify a likely common
         // harbour-water elevation. This is NOT a decoded ESO water-level
@@ -288,6 +312,8 @@ public partial class SourcePropLayer : Node3D
             catch(Exception e)
             {
                 _missingModels++;
+                if(_coarsePerModel.TryGetValue(ready.ModelId,out var footprintGroup))
+                    _unresolvedFootprints.AddRange(footprintGroup);
                 GD.PushWarning($"ESO prop model 0x{ready.ModelId:X8} not rendered: {e.Message}");
             }
             if((_loadedModels+_missingModels)%5==0||
@@ -301,8 +327,16 @@ public partial class SourcePropLayer : Node3D
                 GD.Print("SOURCE PROPS "+message);
             }
         }
-        if(_loadedModels+_missingModels==_transforms.Count)
+        if(_loadedModels+_missingModels==_transforms.Count && !HasPreparedGeometry)
+        {
+            HasPreparedGeometry=true;
+            GD.Print($"SOURCE RAYCAST READY: {Raycaster.MeshCount} source meshes, "+
+                $"{Raycaster.InstanceCount} transformed instances, "+
+                $"{Raycaster.TriangleCount} source triangles, "+
+                $"{_unresolvedFootprints.Count} undecoded placements blocked.");
+            GeometryPrepared?.Invoke();
             SetProcess(false);
+        }
     }
 
     private void InstallGeometry(uint id,string path)
@@ -385,6 +419,31 @@ public partial class SourcePropLayer : Node3D
                 mesh.SurfaceSetMaterial(mesh.GetSurfaceCount()-1,mat);
             }
             var placements=_transforms[id];
+            // MultiMeshInstance3D has NO physics collider: register its exact source
+            // triangles and its transforms with the CPU spatial/BVH raycaster.
+            var faceVertices=mesh.GetFaces();
+            if(faceVertices.Length==0)throw new InvalidDataException("Empty source prop mesh");
+            Raycaster.AddMesh(faceVertices,placements);
+            // Project each rendered prop bounding box onto the ground plane.
+            var bounds=mesh.GetAabb();
+            foreach(var transform in placements)
+            {
+                float minX=float.PositiveInfinity,minZ=float.PositiveInfinity;
+                float maxX=float.NegativeInfinity,maxZ=float.NegativeInfinity;
+                for(int corner=0;corner<8;corner++)
+                {
+                    var local=bounds.Position+new Vector3(
+                        (corner&1)==0?0f:bounds.Size.X,
+                        (corner&2)==0?0f:bounds.Size.Y,
+                        (corner&4)==0?0f:bounds.Size.Z);
+                    var world=transform*local;
+                    minX=Math.Min(minX,world.X);minZ=Math.Min(minZ,world.Z);
+                    maxX=Math.Max(maxX,world.X);maxZ=Math.Max(maxZ,world.Z);
+                }
+                if(float.IsFinite(minX)&&float.IsFinite(maxX)&&
+                    float.IsFinite(minZ)&&float.IsFinite(maxZ))
+                    _propFootprints.Add(new PropFootprint(minX,minZ,maxX,maxZ));
+            }
             var multimesh=new MultiMesh{
                 TransformFormat=MultiMesh.TransformFormatEnum.Transform3D,
                 Mesh=mesh,
