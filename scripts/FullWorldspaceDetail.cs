@@ -133,6 +133,18 @@ public partial class FullWorldspaceDetail : Node3D
                 sampleStep:1,detailCenter:patchCenter,
                 renderFrom:new Vector2I(next.DrawX,next.DrawZ),
                 renderToExclusive:new Vector2I(next.EndX,next.EndZ));
+            // A full-detail mask is safe only when every source quad in the
+            // draw range has valid triangles. Otherwise the original LOD
+            // must remain visible, even when the patch itself was decodable.
+            int requiredTiles=(next.EndX-next.DrawX)*(next.EndZ-next.DrawZ);
+            int requiredTriangles=requiredTiles*64*64*2;
+            if(fine.CellsRendered!=requiredTiles||fine.Triangles!=requiredTriangles)
+            {
+                fine.Mesh.Dispose();
+                throw new InvalidOperationException(
+                    $"Incomplete detailed geometry: {fine.CellsRendered}/{requiredTiles} tiles, "+
+                    $"{fine.Triangles}/{requiredTriangles} triangles");
+            }
             TerrainNearFieldColors.Result? colour=null;
             try
             {
