@@ -309,6 +309,18 @@ public partial class NpcHoverInspector : CanvasLayer
                     "No individual NPC source record was collected for it.\n" +
                     $"Preview district: {placement.Place}",
                     null, null);
+            if(_firstPersonAim && EsoHumanoidVisualLayer.CanUseHumanoidBody(placement.Race))
+            {
+                _people.TryGetValue(placement.Id,out var profile);
+                int kit=EsoHumanoidWardrobe.Choose(placement.Id,profile);
+                int hair=(PopulationSpawnPlanner.StableHash(placement.Id+":hair-model")/127)%4;
+                int armourStyle=EsoHumanoidWardrobe.ArmourStyle(placement.Id);
+                string detail=kit==2 && armourStyle<EsoHumanoidWardrobe.AccessoryStyles.Length
+                    ? EsoHumanoidWardrobe.AccessoryStyles[armourStyle]+" source helmet/shoulders"
+                    : "hairstyle "+(hair+1);
+                _card=_card with { Body=$"VISUAL TEST ONLY: {EsoHumanoidWardrobe.KitNames[kit]} / {detail}. " +
+                    "This is not documented ESO gear or appearance.\n\n"+_card.Body };
+            }
             _cache[placement.Id] = _card;
         }
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using Godot;
 
@@ -21,22 +22,35 @@ public partial class EsoHumanoidSmoke : Node3D
             _decoder = OodleDecoder.FromEnvironment(
                 ProjectSettings.GlobalizePath("res://.research/ooz.dll"))
                 ?? throw new FileNotFoundException("Local Oodle library unavailable");
-            var poses = new[]
-            {
-                new PopulationSpawnPlanner.Placement("test:male","Source man","Altmer",
-                    "Test",new Vector3(-0.9f,0,-4),0f,false),
-                new PopulationSpawnPlanner.Placement("test:female","Source woman","Dunmer",
-                    "Test",new Vector3(0.9f,0,-4),0f,false),
-                new PopulationSpawnPlanner.Placement("test:beast","Source Khajiit","Khajiit",
-                    "Test",new Vector3(3,0,-4),0f,false)
-            };
+            var poses = new List<PopulationSpawnPlanner.Placement>();
             using var doc = JsonDocument.Parse(
                 """{"male":{"gender":"Male"},"female":{"gender":"Female"}}""");
-            var people = new Dictionary<string,JsonElement>
+            var people = new Dictionary<string,JsonElement>();
+            for(int gender=0;gender<2;gender++)
             {
-                ["test:male"] = doc.RootElement.GetProperty("male").Clone(),
-                ["test:female"] = doc.RootElement.GetProperty("female").Clone()
-            };
+                var profile=doc.RootElement.GetProperty(gender==0?"male":"female").Clone();
+                for(int kit=0;kit<EsoHumanoidWardrobe.KitCount;kit++)
+                {
+                    string id="";
+                    for(int seed=0;seed<4000;seed++)
+                    {
+                        string candidate=$"test:source:{gender}:{seed}";
+                        if(EsoHumanoidWardrobe.Choose(candidate,profile)==kit &&
+                            (PopulationSpawnPlanner.StableHash(candidate+":hair-model")/127)%4==kit &&
+                            (kit!=2 || EsoHumanoidWardrobe.ArmourStyle(candidate)==gender))
+                        {id=candidate;break;}
+                    }
+                    if(id.Length==0)throw new Exception($"Could not select wardrobe kit {kit}");
+                    poses.Add(new PopulationSpawnPlanner.Placement(id,
+                        $"{(gender==0?"Man":"Woman")} kit {kit}",
+                        gender==0?"Altmer":"Dunmer","Test",
+                        new Vector3((kit-1.5f)*1.65f,0,gender==0?-5f:-8.2f),
+                        0f,false));
+                    people[id]=profile;
+                }
+            }
+            poses.Add(new PopulationSpawnPlanner.Placement("test:beast",
+                "Khajiit","Khajiit","Test",new Vector3(5,0,-4),0f,false));
             if (EsoHumanoidVisualLayer.HeadSourceId(0) != 0x000E2CFF ||
                 EsoHumanoidVisualLayer.HeadSourceId(1) != 0x000E2D77)
                 throw new Exception("Skull-like Head_502/Head_503 mistakenly selected instead of Head_004");
@@ -51,13 +65,15 @@ public partial class EsoHumanoidSmoke : Node3D
             AddChild(model);
             for (int i = 0; i < 2400 && !model.HasOriginalBodies; i++)
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-            if (!model.HasOriginalBodies || model.OriginalBodyCount != 2 ||
-                model.SourcePartTypes != 16)
+            if (!model.HasOriginalBodies || model.OriginalBodyCount != 8 ||
+                model.SourcePartTypes != 66)
                 throw new Exception($"Source bodies incomplete: {model.OriginalBodyCount} people, {model.SourcePartTypes} parts");
-            if (!model.HasRenderedPerson("test:male") ||
-                !model.HasRenderedPerson("test:female") ||
+            if (people.Keys.Any(id=>!model.HasRenderedPerson(id)) ||
                 model.HasRenderedPerson("test:beast"))
                 throw new Exception("Source humanoid race/gender selection wrong");
+            for(int kit=0;kit<EsoHumanoidWardrobe.KitCount;kit++)
+                if(model.OutfitCounts[kit]!=2)
+                    throw new Exception($"Outfit kit {kit} did not render both genders");
             int meshes = 0, totalInstances = 0;
             foreach (var node in model.GetChildren())
                 if (node is MultiMeshInstance3D instance)
@@ -69,9 +85,19 @@ public partial class EsoHumanoidSmoke : Node3D
                         (aabb.End.Y > 2.6f || aabb.Position.Y < -0.20f))
                         throw new Exception("Original source body part geometry not at bind pose");
                 }
-            if (meshes != 26 || totalInstances != 32)
-                throw new Exception($"Expected 16 source parts plus 10 face-detail batches, got {meshes} batches, {totalInstances} instances");
-            GD.Print("PASS original ESO 8-part humanoids (two variants), gender metadata, race fallback and GPU batching");
+            if (meshes != 70 || totalInstances != 130)
+                throw new Exception($"Expected 48 outfits, 2 heads, 6 hairstyles, 4 named armor accessories and 10 faces, got {meshes} batches, {totalInstances} instances");
+            for(int gender=0;gender<2;gender++)
+            {
+                var preferred=gender==0?"LegionZero_":"HonorGuardHvy_FEM";
+                string helm=gender==0?"LegionZero_Helmet_A":"HonorGuardHvy_FEMHelmet_A";
+                uint source=EsoHumanoidWardrobe.Accessory(gender,gender,0);
+                if(!EsoHumanoidWardrobe.TryGetAccessoryName(source,out string expected) ||
+                    expected!=helm || !model.GetChildren().Any(n=>
+                    n.Name.ToString().Contains("ESO_Helmet_Kit2_Variant"+gender)))
+                    throw new Exception($"Named source helmet {helm} not rendered");
+            }
+            GD.Print("PASS 4 ESO source wardrobe variations, named Legion Zero/Honor Guard accessories, 4 hairstyles, fallback and GPU batching");
             string? screenshot = System.Environment.GetEnvironmentVariable("ESO_NPC_PREVIEW_PATH");
             if (!string.IsNullOrWhiteSpace(screenshot) && DisplayServer.GetName() != "headless")
             {
@@ -89,10 +115,10 @@ public partial class EsoHumanoidSmoke : Node3D
                     BackgroundColor = new Color("#344353")
                 };
                 AddChild(new WorldEnvironment { Environment = environment });
-                var camera = new Camera3D { Current = true, Fov = 38f,
-                    Position = new Vector3(-0.9f,2.12f,-2.15f) };
+                var camera = new Camera3D { Current = true, Fov = 48f,
+                    Position = new Vector3(0f,2.4f,4.5f) };
                 AddChild(camera);
-                camera.LookAt(new Vector3(-0.9f,2.07f,-4));
+                camera.LookAt(new Vector3(0f,1.1f,-6.5f));
                 for (int i = 0; i < 4; i++)
                     await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
                 var image=GetViewport().GetTexture().GetImage();

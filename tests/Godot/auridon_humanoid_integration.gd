@@ -49,5 +49,16 @@ func _run() -> void:
         push_error("Too few source-backed humanoid instances appeared: " + str(instances))
         quit(1)
         return
-    print("PASS integrated Auridon NPC replacement using genuine source body meshes (", instances, " anatomy-part instances)")
+    var wardrobe_kits := 0
+    for kit in 4:
+        for part in ready.get_children():
+            if str(part.name).begins_with("ESO_Torso_Kit%d_" % kit):
+                wardrobe_kits += 1
+                break
+    if wardrobe_kits != 4:
+        push_error("Source NPC wardrobe did not display all four original-geometry test kits")
+        quit(1)
+        return
+    print("PASS integrated Auridon NPC replacement (", instances,
+        " rendered anatomy/face instances, 4 different source wardrobe kits)")
     quit(0)

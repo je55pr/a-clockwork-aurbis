@@ -29,7 +29,12 @@ public partial class EsoHumanoidVisualLayer : Node3D
             0x000DEDDD, 0x000DEDA3, 0x000E2D77, 0x0009FB4D }
     };
     private static readonly string[] Names =
-        { "Feet", "Lower legs", "Upper legs", "Torso", "Upper arms", "Lower arms", "Head", "Hair" };
+        { "Feet", "Lower legs", "Upper legs", "Torso", "Upper arms", "Lower arms", "Head", "Hair", "Helmet", "Shoulders" };
+    private static readonly uint[][] HairStyles =
+    {
+        new uint[] {0x0009EC43,0x0029B6EB,0x0011EEE7,0x0029B2AF},
+        new uint[] {0x0009FB4D,0x0029B6ED,0x0011EEE9,0x0029A87F}
+    };
     private static readonly string[] SourcePrefixes =
         { "Feet_", "LegsLower_", "LegsUpper_", "Torso_", "ArmsUpper_", "ArmsLower_", "Head_004", "HAR_" };
     private readonly ConcurrentQueue<(uint Id, string Path, string Error)> _prepared = new();
@@ -46,6 +51,8 @@ public partial class EsoHumanoidVisualLayer : Node3D
     public bool HasOriginalBodies { get; private set; }
     public int OriginalBodyCount { get; private set; }
     public int SourcePartTypes => _meshes.Count;
+    public IReadOnlyList<int> OutfitCounts => _outfitCounts;
+    private readonly int[] _outfitCounts=new int[EsoHumanoidWardrobe.KitCount];
     public static uint HeadSourceId(int variant) => Parts[variant][6];
     public bool HasRenderedPerson(string id) => _renderedIds.Contains(id);
     public event Action? Completed;
@@ -74,7 +81,8 @@ public partial class EsoHumanoidVisualLayer : Node3D
         _placements.AddRange(placements);
         foreach (var kv in people) _people[kv.Key] = kv.Value;
         var sources = new List<(uint, EsoRecord)>();
-        foreach (uint id in Parts.SelectMany(x => x).Distinct())
+        foreach (uint id in Parts.SelectMany(x => x).Concat(EsoHumanoidWardrobe.Sources)
+            .Concat(HairStyles.SelectMany(x=>x)).Concat(EsoHumanoidWardrobe.AccessorySources).Distinct())
         {
             var record = archive.FindId(id).FirstOrDefault(r =>
                 archive.GetIdIndexFields(r.Ordinal).Flags == 0);
@@ -170,6 +178,10 @@ public partial class EsoHumanoidVisualLayer : Node3D
         for(int variant=0;variant<Parts.Length;variant++)
             for(int part=0;part<Parts[variant].Length;part++)
                 if(Parts[variant][part]==id)return SourcePrefixes[part];
+        if(EsoHumanoidWardrobe.TryGetPart(id,out int wardrobePart))
+            return SourcePrefixes[wardrobePart];
+        if(HairStyles.Any(styles=>styles.Contains(id)))return "HAR_";
+        if(EsoHumanoidWardrobe.TryGetAccessoryName(id,out string name))return name;
         throw new InvalidDataException($"Unknown source body-part ID 0x{id:X8}");
     }
 
@@ -368,57 +380,136 @@ public partial class EsoHumanoidVisualLayer : Node3D
         }
     }
 
+    private static Color WardrobeColour(string id,int part,int kit)
+    {
+        // Colour is a test tint only; ESO customization textures have not
+        // been mapped to these GR2 part files yet.
+        Color[] town={new("#556a7b"),new("#816451"),new("#63775d"),
+            new("#836e80"),new("#8a7a5c")};
+        Color[] travel={new("#5c573e"),new("#67624c"),new("#476453"),
+            new("#795e42"),new("#585a51")};
+        Color[] armour={new("#778087"),new("#757367"),new("#6d7883"),
+            new("#837a6d"),new("#63686b")};
+        Color[] ceremonial={new("#7a5161"),new("#466880"),new("#876c43"),
+            new("#65618c"),new("#6c7e62")};
+        var palette=kit switch {1=>travel,2=>armour,3=>ceremonial,_=>town};
+        Color colour=palette[PopulationSpawnPlanner.StableHash(id+":fabric")%palette.Length];
+        if(part==0 || part==1) return colour.Darkened(0.25f);
+        if(part==4 || part==5) return colour.Darkened(0.08f);
+        return colour;
+    }
+
+    private void RenderPartBatch(int gender,int kit,int part,
+        IReadOnlyList<PopulationSpawnPlanner.Placement> people,uint id,int style=-1)
+    {
+        var multi=new MultiMesh
+        {
+            Mesh=_meshes[id],
+            TransformFormat=MultiMesh.TransformFormatEnum.Transform3D,
+            UseColors=true,
+            InstanceCount=people.Count
+        };
+        for(int i=0;i<people.Count;i++)
+        {
+            var spawn=people[i];
+            float size=0.86f+
+                (PopulationSpawnPlanner.StableHash(spawn.Id+":size")%10)*0.007f;
+            var basis=Basis.FromEuler(new Vector3(0f,spawn.Facing,0f))
+                .Scaled(Vector3.One*size);
+            multi.SetInstanceTransform(i,new Transform3D(basis,spawn.Position));
+            Color colour=part==7 ? HairColour(spawn.Id)
+                : part==6 || (part==5 && kit==0) ? SkinColour(spawn.Race)
+                : WardrobeColour(spawn.Id,part,Math.Max(0,kit));
+            multi.SetInstanceColor(i,colour);
+        }
+        bool metal=kit==2 && (part<EsoHumanoidWardrobe.PartCount || part>=8);
+        var material=new StandardMaterial3D
+        {
+            AlbedoColor=Colors.White,
+            VertexColorUseAsAlbedo=true,
+            Roughness=metal?0.58f:0.86f,
+            Metallic=metal?0.33f:0.02f,
+            CullMode=BaseMaterial3D.CullModeEnum.Disabled
+        };
+        AddChild(new MultiMeshInstance3D
+        {
+            Name=$"ESO_{Names[part].Replace(" ","")}_Kit{kit}_Variant{gender}"+
+                (style>=0?$"_Style{style}":""),
+            Multimesh=multi,
+            MaterialOverride=material
+        });
+    }
+
+    private bool HasNamedHelmet(PopulationSpawnPlanner.Placement npc,int gender)
+    {
+        _people.TryGetValue(npc.Id,out var profile);
+        if(EsoHumanoidWardrobe.Choose(npc.Id,profile)!=2)return false;
+        int style=EsoHumanoidWardrobe.ArmourStyle(npc.Id);
+        return style<2 && _meshes.ContainsKey(
+            EsoHumanoidWardrobe.Accessory(gender,style,0));
+    }
+
     private void RenderHumanoids()
     {
-        for (int variant = 0; variant < Parts.Length; variant++)
+        for(int gender=0;gender<Parts.Length;gender++)
         {
-            if (Parts[variant].Any(id => !_meshes.ContainsKey(id))) continue;
-            var matches = _placements.Where(p => CanUseHumanoidBody(p.Race) &&
-                Variant(p, _people) == variant).ToArray();
-            if (matches.Length == 0) continue;
-            for (int part = 0; part < Names.Length; part++)
+            if(Parts[gender].Any(id=>!_meshes.ContainsKey(id)))continue;
+            var rendered=new List<PopulationSpawnPlanner.Placement>();
+            for(int kit=0;kit<EsoHumanoidWardrobe.KitCount;kit++)
             {
-                var multi = new MultiMesh
+                var matches=_placements.Where(p=>
                 {
-                    Mesh = _meshes[Parts[variant][part]],
-                    TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
-                    UseColors = true,
-                    InstanceCount = matches.Length
-                };
-                for (int i = 0; i < matches.Length; i++)
+                    if(!CanUseHumanoidBody(p.Race) || Variant(p,_people)!=gender)
+                        return false;
+                    _people.TryGetValue(p.Id,out var profile);
+                    return EsoHumanoidWardrobe.Choose(p.Id,profile)==kit;
+                }).ToArray();
+                if(matches.Length==0)continue;
+                for(int part=0;part<EsoHumanoidWardrobe.PartCount;part++)
                 {
-                    var spawn = matches[i];
-                    float size = 0.86f +
-                        (PopulationSpawnPlanner.StableHash(spawn.Id + ":size") % 10) * 0.007f;
-                    var basis = Basis.FromEuler(new Vector3(0f, spawn.Facing, 0f))
-                        .Scaled(Vector3.One * size);
-                    multi.SetInstanceTransform(i, new Transform3D(basis, spawn.Position));
-                    multi.SetInstanceColor(i, part == 7 ? HairColour(spawn.Id) :
-                        part is 6 or 5 ? SkinColour(spawn.Race) :
-                        OutfitColour(spawn.Id, part));
+                    uint source=EsoHumanoidWardrobe.Source(gender,kit,part);
+                    if(!_meshes.ContainsKey(source))
+                        source=Parts[gender][part]; // Partial archive failures never dismember NPCs
+                    RenderPartBatch(gender,kit,part,matches,source);
                 }
-                var material = new StandardMaterial3D
-                {
-                    Roughness = 0.88f,
-                    AlbedoColor = Colors.White,
-                    VertexColorUseAsAlbedo = true,
-                    CullMode = BaseMaterial3D.CullModeEnum.Disabled
-                };
-                AddChild(new MultiMeshInstance3D
-                {
-                    Name = $"ESO_{Names[part].Replace(" ", "")}_Variant{variant}",
-                    Multimesh = multi,
-                    MaterialOverride = material
-                });
+                rendered.AddRange(matches);
+                _outfitCounts[kit]+=matches.Length;
             }
-            RenderFaceFeatures(variant,matches);
-            foreach (var person in matches) _renderedIds.Add(person.Id);
-            OriginalBodyCount += matches.Length;
+            if(rendered.Count==0)continue;
+            for(int style=0;style<2;style++)
+            {
+                int selectedStyle=style;
+                var protectedHeads=rendered.Where(p=>HasNamedHelmet(p,gender) &&
+                    EsoHumanoidWardrobe.ArmourStyle(p.Id)==selectedStyle).ToArray();
+                if(protectedHeads.Length==0)continue;
+                for(int accessoryPart=0;accessoryPart<2;accessoryPart++)
+                {
+                    uint item=EsoHumanoidWardrobe.Accessory(gender,style,accessoryPart);
+                    if(_meshes.ContainsKey(item))
+                        RenderPartBatch(gender,2,8+accessoryPart,protectedHeads,item,style);
+                }
+            }
+            RenderPartBatch(gender,-1,6,rendered,Parts[gender][6]);
+            for(int style=0;style<HairStyles[gender].Length;style++)
+            {
+                int selectedStyle=style;
+                var haircut=rendered.Where(p=>!HasNamedHelmet(p,gender) &&
+                    (PopulationSpawnPlanner.StableHash(p.Id+":hair-model")/127)%
+                        HairStyles[gender].Length==selectedStyle).ToArray();
+                if(haircut.Length==0)continue;
+                uint source=HairStyles[gender][style];
+                if(!_meshes.ContainsKey(source))source=Parts[gender][7];
+                RenderPartBatch(gender,-1,7,haircut,source,style);
+            }
+            RenderFaceFeatures(gender,rendered);
+            foreach(var person in rendered)_renderedIds.Add(person.Id);
+            OriginalBodyCount+=rendered.Count;
         }
-        HasOriginalBodies = OriginalBodyCount > 0;
+        HasOriginalBodies=OriginalBodyCount>0;
         GD.Print($"ESO HUMANOID VISUALS: {OriginalBodyCount}/{_placements.Count} " +
-            $"people assembled from {_meshes.Count} original GR2 part meshes (incl. hair); " +
-            "static original bind poses, provisional skin/face details; ESO skin materials not imported");
+            $"people, {_meshes.Count} GR2 meshes, " +
+            $"wardrobe [{string.Join(",",_outfitCounts)}]; " +
+            "original static body shapes with test outfit tints and provisional face details");
     }
 
     public override void _ExitTree() { _stopping = true; }

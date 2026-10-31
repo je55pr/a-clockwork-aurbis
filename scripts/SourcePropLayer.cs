@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Godot;
 using Process = System.Diagnostics.Process;
@@ -30,11 +31,19 @@ public partial class SourcePropLayer : Node3D
     private readonly Dictionary<uint,string> _names=new();
     private readonly Dictionary<uint,string> _cacheKeys=new();
     private readonly Dictionary<uint,Texture2D?> _textures=new();
+    // A single source-manifest scan avoids 1.29M-row FindId searches
+    // for every unique DDS referenced by the scenery meshes.
+    private readonly Dictionary<uint,int> _sourceOrdinals=new();
     private EsoArchive _archive=null!;
     private OodleDecoder _decoder=null!;
     private TerrainBundle _bundle=null!;
     private string _root="";
     private int _loadedModels,_missingModels,_placements,_meshBatches;
+    private long _installTicks,_rayTicks,_surfaceTicks,_textureTicks,_facesTicks,_instanceTicks;
+    private int _uploadCount;
+    private readonly ConcurrentQueue<(uint Id, Vector3[] Faces, Transform3D[] Placements)> _rayJobs=new();
+    private readonly ConcurrentQueue<(uint Id,string Error)> _rayFailures=new();
+    private int _rayPending,_rayWorkerRunning;
     private volatile bool _running;
     public Vector3 Focus {get;private set;}
     public int SourceInstances=>_placements;
@@ -142,8 +151,10 @@ public partial class SourcePropLayer : Node3D
         for(int i=0;i<archive.Count;i++)
         {
             var record=archive.GetRecord(i);
-            if(!modelIds.Contains(record.FileId)||
-                archive.GetIdIndexFields(i).Flags!=0)continue;
+            if(archive.GetIdIndexFields(i).Flags!=0)continue;
+            if(record.UncompressedSize is >=128 and <=20_000_000)
+                _sourceOrdinals.TryAdd(record.FileId,i);
+            if(!modelIds.Contains(record.FileId))continue;
             if(!candidateRecords.TryGetValue(record.FileId,out var records))
                 candidateRecords[record.FileId]=records=new List<EsoRecord>();
             records.Add(record);
@@ -377,13 +388,24 @@ public partial class SourcePropLayer : Node3D
 
     public override void _Process(double delta)
     {
-        // Strictly time-slice mesh creation and GPU resource uploads.
-        for(int n=0;n<1 && _prepared.TryDequeue(out var ready);n++)
+        // The original one-mesh-per-frame cap imposed a ~18s minimum on a
+        // 1,072-model Auridon, even when every source mesh was already cached.
+        // Upload several prepared meshes while respecting a per-frame time budget:
+        // slow complex architecture costs more, small props fill the remainder.
+        long batchStart=Stopwatch.GetTimestamp();
+        const int maxModelsPerFrame=32;
+        const double uploadBudgetMs=7.0;
+        for(int n=0;n<maxModelsPerFrame &&
+            (n==0 || Stopwatch.GetElapsedTime(batchStart).TotalMilliseconds<uploadBudgetMs) &&
+            _prepared.TryDequeue(out var ready);n++)
         {
             try
             {
                 if(ready.Error.Length>0)throw new InvalidDataException(ready.Error);
+                long t0=Stopwatch.GetTimestamp();
                 InstallGeometry(ready.ModelId,ready.Path);
+                _installTicks+=Stopwatch.GetTimestamp()-t0;
+                _uploadCount++;
                 _loadedModels++;
             }
             catch(Exception e)
@@ -404,15 +426,78 @@ public partial class SourcePropLayer : Node3D
                 GD.Print("SOURCE PROPS "+message);
             }
         }
-        if(_loadedModels+_missingModels==_transforms.Count && !HasPreparedGeometry)
+        while(_rayFailures.TryDequeue(out var failure))
+        {
+            if(_coarsePerModel.TryGetValue(failure.Id,out var affected))
+                _unresolvedFootprints.AddRange(affected);
+            GD.PushWarning($"ESO raycaster 0x{failure.Id:X8}: {failure.Error}");
+        }
+        if(_loadedModels+_missingModels==_transforms.Count &&
+            Volatile.Read(ref _rayPending)==0 && _rayJobs.IsEmpty &&
+            _rayFailures.IsEmpty && !HasPreparedGeometry)
         {
             HasPreparedGeometry=true;
+            // No further DDS lookups are needed after all source models are
+            // installed. Return the large temporary index memory to the GC.
+            _sourceOrdinals.Clear();
+            _sourceOrdinals.TrimExcess();
+            GD.Print($"SOURCE PROFILE: {Stopwatch.GetElapsedTime(0,_installTicks).TotalSeconds:F2}s main-thread upload CPU, " +
+                $"{Stopwatch.GetElapsedTime(0,Interlocked.Read(ref _rayTicks)).TotalSeconds:F2}s background raycaster CPU, " +
+                $"{_uploadCount} models (surfaces " +
+                $"{Stopwatch.GetElapsedTime(0,_surfaceTicks).TotalSeconds:F2}s, " +
+                $"DDS {Stopwatch.GetElapsedTime(0,_textureTicks).TotalSeconds:F2}s, " +
+                $"faces {Stopwatch.GetElapsedTime(0,_facesTicks).TotalSeconds:F2}s, " +
+                $"instances {Stopwatch.GetElapsedTime(0,_instanceTicks).TotalSeconds:F2}s)");
             GD.Print($"SOURCE RAYCAST READY: {Raycaster.MeshCount} source meshes, "+
                 $"{Raycaster.InstanceCount} transformed instances, "+
                 $"{Raycaster.TriangleCount} source triangles, "+
                 $"{_unresolvedFootprints.Count} undecoded placements blocked.");
             GeometryPrepared?.Invoke();
             SetProcess(false);
+        }
+    }
+
+    // Raycaster BVHs are pure CPU structures. Building the 1.3M triangle
+    // spatial index on the main thread used ~11s during each warm start.
+    // A single worker preserves source order and avoids concurrent mutation.
+    // No gameplay lookup is allowed until pending reaches zero.
+    private void ScheduleRaycast(uint id,Vector3[] faces,
+        IReadOnlyList<Transform3D> placements)
+    {
+        Interlocked.Increment(ref _rayPending);
+        _rayJobs.Enqueue((id,faces,placements.ToArray()));
+        if(Interlocked.CompareExchange(ref _rayWorkerRunning,1,0)==0)
+            _=Task.Run(DrainRayJobs);
+    }
+
+    private void DrainRayJobs()
+    {
+        while(true)
+        {
+            while(_rayJobs.TryDequeue(out var job))
+            {
+                try
+                {
+                    if(_running)
+                    {
+                        long begin=Stopwatch.GetTimestamp();
+                        Raycaster.AddMesh(job.Faces,job.Placements);
+                        Interlocked.Add(ref _rayTicks,Stopwatch.GetTimestamp()-begin);
+                    }
+                }
+                catch(Exception e)
+                {
+                    _rayFailures.Enqueue((job.Id,e.Message));
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _rayPending);
+                }
+            }
+            Interlocked.Exchange(ref _rayWorkerRunning,0);
+            if(_rayJobs.IsEmpty ||
+                Interlocked.CompareExchange(ref _rayWorkerRunning,1,0)!=0)
+                return;
         }
     }
 
@@ -482,7 +567,9 @@ public partial class SourcePropLayer : Node3D
                     arrays[(int)Mesh.ArrayType.Tangent]=tangents;
                 }
                 arrays[(int)Mesh.ArrayType.Index]=part;
+                long surfaceStart=Stopwatch.GetTimestamp();
                 mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles,arrays);
+                _surfaceTicks+=Stopwatch.GetTimestamp()-surfaceStart;
                 var mat=new StandardMaterial3D{
                     AlbedoColor=Colors.White,
                     Roughness=0.88f,
@@ -490,7 +577,9 @@ public partial class SourcePropLayer : Node3D
                     Transparency=BaseMaterial3D.TransparencyEnum.AlphaScissor,
                     AlphaScissorThreshold=0.4f
                 };
+                long textureStart=Stopwatch.GetTimestamp();
                 var diffuse=LoadDiffuse(g.Diffuse);
+                _textureTicks+=Stopwatch.GetTimestamp()-textureStart;
                 if(diffuse!=null)mat.AlbedoTexture=diffuse;
                 else GD.Print($"Source diffuse 0x{g.Diffuse:X8} unavailable for "+name);
                 mesh.SurfaceSetMaterial(mesh.GetSurfaceCount()-1,mat);
@@ -499,14 +588,16 @@ public partial class SourcePropLayer : Node3D
             NearbyCollisions?.Register(mesh, placements, _names[id]);
             // MultiMeshInstance3D has NO physics collider: register its exact source
             // triangles and its transforms with the CPU spatial/BVH raycaster.
+            long faceStart=Stopwatch.GetTimestamp();
             var faceVertices=mesh.GetFaces();
+            _facesTicks+=Stopwatch.GetTimestamp()-faceStart;
             if(faceVertices.Length==0)throw new InvalidDataException("Empty source prop mesh");
             // Some placed models are rendered visual effects, not physical
             // scenery. Their large flat effect meshes can falsely reject
             // otherwise valid town streets. Keep rendering them but do not
             // turn them into impenetrable collision geometry.
             if(BlocksNpcSpawn(_names[id]))
-                Raycaster.AddMesh(faceVertices,placements);
+                ScheduleRaycast(id,faceVertices,placements);
             // Project each rendered prop bounding box onto the ground plane.
             var bounds=mesh.GetAabb();
             foreach(var transform in placements)
@@ -527,6 +618,7 @@ public partial class SourcePropLayer : Node3D
                     float.IsFinite(minZ)&&float.IsFinite(maxZ))
                     _propFootprints.Add(new PropFootprint(minX,minZ,maxX,maxZ));
             }
+            long instanceStart=Stopwatch.GetTimestamp();
             var multimesh=new MultiMesh{
                 TransformFormat=MultiMesh.TransformFormatEnum.Transform3D,
                 Mesh=mesh,
@@ -538,6 +630,7 @@ public partial class SourcePropLayer : Node3D
                 Name=$"Source_{id:X8}_{meshIndex}",Multimesh=multimesh
             });
             _meshBatches++;
+            _instanceTicks+=Stopwatch.GetTimestamp()-instanceStart;
         }
         if(reader.BaseStream.Position!=reader.BaseStream.Length)
             throw new InvalidDataException("Unexpected trailing bytes in source mesh");
@@ -550,10 +643,12 @@ public partial class SourcePropLayer : Node3D
         Texture2D? result=null;
         try
         {
-            var record=_archive.FindId(id).FirstOrDefault(r=>
-                _archive.GetIdIndexFields(r.Ordinal).Flags==0&&
-                r.UncompressedSize is >=128 and <=20_000_000);
-            if(record.UncompressedSize==0)return null;
+            if(!_sourceOrdinals.TryGetValue(id,out int ordinal))
+            {
+                _textures[id]=null;
+                return null;
+            }
+            var record=_archive.GetRecord(ordinal);
             var bytes=_archive.ReadDecoded(record,_decoder);
             if(bytes.Length<128||BinaryPrimitives.ReadUInt32LittleEndian(bytes)!=0x20534444)
                 return null;
