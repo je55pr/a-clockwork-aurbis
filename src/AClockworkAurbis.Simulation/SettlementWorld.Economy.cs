@@ -12,6 +12,9 @@ public sealed partial class SettlementWorld
         actor.WorkRemainderMinutes%=60;
         if(hours<=0)return;
         business.WorkHours+=hours;
+        if(Detailed && business.Kind is BusinessKinds.FoodRetail or
+            BusinessKinds.GoodsRetail)
+            business.ServiceHoursWorkedToday+=hours;
         long payment=checked((long)hours*_settings.HourlyWage);
         bool paid = business.Gold>=payment;
         if(paid)

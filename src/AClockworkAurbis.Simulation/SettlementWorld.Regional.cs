@@ -178,7 +178,8 @@ public sealed partial class SettlementWorld
         int distance = int.MaxValue;
         foreach (var farm in _farms)
         {
-            if (farm.LandYieldRemaining < 2) continue;
+            if (farm.LandYieldRemaining < 2 ||
+                Detailed && farm.ForageRemaining < 2) continue;
             int trip = JourneyDuration(actor, farm.Id);
             if (trip < distance)
             {
@@ -254,6 +255,11 @@ public sealed partial class SettlementWorld
         else RegionalWholesaleAndTrade();
     }
 
+    private bool IsDetailedProcessor(BusinessState business) =>
+        Detailed && business.Kind is BusinessKinds.Bakery or BusinessKinds.Sawmill
+            or BusinessKinds.Smeltery or BusinessKinds.Tannery
+            or BusinessKinds.Workshop or BusinessKinds.Leatherworker;
+
     private void DistributeRegionalSurplus()
     {
         foreach (var business in _businesses)
@@ -277,12 +283,15 @@ public sealed partial class SettlementWorld
                 }
             }
             else if (business.Kind is BusinessKinds.ImportHub or
-                BusinessKinds.GoodsRetail or BusinessKinds.FoodRetail)
+                BusinessKinds.GoodsRetail or BusinessKinds.FoodRetail ||
+                IsDetailedProcessor(business))
             {
-                // Progressive port revenue recirculation avoids permanent
-                // currency traps in a monopolistic export gateway.
+                // Recycle some surplus without removing operating reserves.
+                // Processors also participate, rather than capturing the
+                // entire island's cash in a few profitable bakeries.
+                int cap = IsDetailedProcessor(business) ? 600 : 100;
                 long levy = business.Kind == BusinessKinds.ImportHub ?
-                    surplus / 3 : Math.Min(surplus / 10, 100);
+                    surplus / 3 : Math.Min(surplus / 10,cap);
                 if (levy <= 0) continue;
                 business.Gold -= levy;
                 _publicGold += levy;
@@ -368,8 +377,11 @@ public sealed partial class SettlementWorld
         for (int i = 0; i < count && _publicGold > 0; i++)
         {
             var person = _residents[(start + i) % count];
-            if (person.Gold >= _settings.MealPrice * 2) continue;
-            long need = _settings.MealPrice * 2 - person.Gold;
+            int target = _settings.MealPrice * 2 +
+                (Detailed && person.HousingId is not null ?
+                    _settings.DailySharedRent * 2 : 0);
+            if (person.Gold >= target) continue;
+            long need = target - person.Gold;
             long grant = Math.Min(_publicGold, Math.Min(need,
                 _settings.DailyAssistanceLimit));
             if (grant == 0) continue;

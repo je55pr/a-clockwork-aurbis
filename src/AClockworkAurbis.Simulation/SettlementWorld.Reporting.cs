@@ -18,9 +18,15 @@ public sealed partial class SettlementWorld
             +TransitCount("food"));
 
     private long TotalMaterials() =>
+        Detailed ? CommodityRecipes.Prices.Keys
+            .Where(s=>!CommodityRecipes.Edible(s) &&
+                !CommodityRecipes.FinishedGoods.Contains(s,StringComparer.Ordinal))
+            .Sum(s=>CommodityStockOnHand(s)+InboundAll(s)) :
         checked(_businesses.Sum(b=>(long)b.Materials)+TransitCount("materials"));
 
     private long TotalGoods() =>
+        Detailed ? CommodityRecipes.FinishedGoods.Sum(s=>
+            CommodityStockOnHand(s)+InboundAll(s)) :
         checked(_businesses.Sum(b=>(long)b.Goods)+_residents.Sum(r=>(long)r.Goods)
             +TransitCount("goods"));
 
@@ -87,6 +93,9 @@ public sealed partial class SettlementWorld
             RecipesCompleted=_recipeBatches,ToolsWornOut=_toolsWorn,
             FirewoodBurned=_fuelBurned,
             FreightDelayedForGear=_carriageEquipmentDelays,
+            IdleProductionHoursAvoided=_idleProductionHoursAvoided,
+            ScarcityPricePremiumGold=_scarcityPremiumGold,
+            SurplusPriceDiscountGold=_surplusDiscountGold,
             ShipmentsSent=_shipmentsSent,ShipmentsDelivered=_shipmentsDelivered,
             ShipmentsInTransit=_freight.Count,FreightUnitsDelivered=_freightUnitsDelivered,
             FoodInTransit=TransitCount("food"),MaterialsInTransit=TransitCount("materials"),

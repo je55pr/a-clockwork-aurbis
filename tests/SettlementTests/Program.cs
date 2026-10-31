@@ -29,6 +29,9 @@ var tests=new (string Name,Action Run)[]
     ("Missing smeltery blocks new ingots despite abundant ore", MissingSmeltery),
     ("Commodity world is deterministic with physical freight and consumption", CommodityDeterminism),
     ("No port means no invented depot and less efficient freight", PortlessCommodityRegion),
+    ("Idle processing and unsold retail shifts do not burn full payroll", DemandDrivenLabour),
+    ("Scarcity pricing and essential household purchases conserve accounts", CommodityPriceAndDemand),
+    ("Public foraging cannot bypass finite commercial agriculture", FinitePublicForaging),
     ("Deterministic regional simulations can run in time chunks", RegionalDeterminism),
     ("Large 10k actor headless performance and integrity", Stress)
 };
@@ -678,7 +681,8 @@ static void CommodityChains()
 {
     var world=new SettlementWorld(CommodityFixture(),new SettlementSettings
         {Economy=EconomyMode.CommodityProduction,
-         EnableExternalTrade=false,MaxCommodityStockPerSite=80});
+         EnableExternalTrade=false,MaxCommodityStockPerSite=80,
+         FirewoodDaysPerHousehold=100});
     world.AdvanceTo(1440L*25);
     world.CheckInvariants();
     var report=world.Report();
@@ -691,12 +695,22 @@ static void CommodityChains()
     Expect(Item(report,"logs").Extracted>0 &&
         Item(report,"lumber").Crafted>0 &&
         Item(report,"firewood").Crafted>0 &&
-        Item(report,"firewood").Consumed>0,
-        "felled logs become timber and household/industrial fuel");
+        Item(report,"firewood").UsedAsIngredient>0,
+        "felled logs become timber and fuel consumed by processors");
     Expect(Item(report,"raw_hide").Extracted>0 &&
         Item(report,"leather").Crafted>0 &&
         Item(report,"leather_goods").Crafted>0,
-        "hunters supply hides to tanners and leatherworkers");
+        "hunters supply hides to tanners and leatherworkers: raw="+
+        Item(report,"raw_hide").Extracted+" leather="+Item(report,"leather").Crafted+
+        " goods="+Item(report,"leather_goods").Crafted+
+        " tannery="+string.Join(",",world.Businesses.Where(x=>x.Kind==BusinessKinds.Tannery)
+            .Select(x=>"gold="+x.Gold+" hrs="+x.WorkHours+" "+
+                string.Join(";",x.CommodityStock.Select(k=>k.Key+":"+k.Value))))+
+        " sawmills="+string.Join("|",world.Businesses.Where(x=>x.Kind==BusinessKinds.Sawmill)
+            .Select(x=>x.Gold+"/"+x.WorkHours+"/"+
+                string.Join(";",x.CommodityStock.Select(k=>k.Key+":"+k.Value))))+
+        " fuelCrafted="+Item(report,"firewood").Crafted+
+        " fuelUsed="+Item(report,"firewood").UsedAsIngredient);
     Expect(Item(report,"fish").Extracted>0 &&
         Item(report,"wheat").Extracted>0 &&
         Item(report,"onion").Extracted>0 &&
@@ -781,4 +795,83 @@ static void PortlessCommodityRegion()
     CheckCommodityBalance(r);
     Expect(r.ShipmentsSent>12 && r.FreightDelayedForGear>0,
         "domestic freight can still operate but inadequate carrier equipment delays long routes");
+}
+
+static void DemandDrivenLabour()
+{
+    var world=new SettlementWorld(CommodityFixture(),new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false,
+        EnableLocalProduction=false,EnablePublicAssistance=false
+    });
+    world.AdvanceTo(1440L*15);
+    world.CheckInvariants();
+    var report=world.Report();
+    CheckCommodityBalance(report);
+    var producers=world.Businesses.Where(b=>b.Kind is
+        BusinessKinds.FoodProducer or BusinessKinds.ResourceProducer or
+        BusinessKinds.Hunter or BusinessKinds.Fishery or
+        BusinessKinds.Smeltery or BusinessKinds.Sawmill or
+        BusinessKinds.Tannery or BusinessKinds.Bakery or
+        BusinessKinds.Leatherworker or BusinessKinds.Workshop).ToArray();
+    Expect(producers.All(b=>b.WagesPaid==0 && b.WorkHours==0),
+        "employees do not receive a full manufacturing wage for missing inputs");
+    var retailers=world.Businesses.Where(b=>b.Kind is
+        BusinessKinds.FoodRetail or BusinessKinds.GoodsRetail).ToArray();
+    Expect(retailers.Any(b=>b.WorkHours<15*8),
+        "retailers with sparse sales do not staff empty eight-hour days");
+    Expect(report.IdleProductionHoursAvoided>0 && report.RecipesCompleted==0,
+        "unscheduled idle shifts and blocked recipes are visible");
+}
+
+static void CommodityPriceAndDemand()
+{
+    var world=new SettlementWorld(CommodityFixture(),new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false,
+        MaxCommodityStockPerSite=90
+    });
+    world.AdvanceTo(1440L*30);
+    world.CheckInvariants();
+    var r=world.Report();
+    CheckCommodityBalance(r);
+    Expect(r.ScarcityPricePremiumGold>0 && r.ShipmentsSent>0,
+        "low supplier inventory changes real paid wholesale quotes");
+    Expect(r.RetailGoodsSales>0 && r.FirewoodBurned>0,
+        "households buy useful goods and fuel gets consumed");
+    Expect(r.AllAccountsGold==r.InitialAllAccountsGold,
+        "scarcity premiums and production levies move existing gold only");
+    Expect(r.FoodRemaining+r.MaterialsRemaining+r.GoodsRemaining==
+        r.CommodityDetails.Sum(c=>c.StockOnHand+c.InTransit),
+        "aggregated reports must include every commodity on hand or in transit");
+}
+
+static void FinitePublicForaging()
+{
+    const int days=12;
+    const int perFarm=2;
+    var catalog=CommodityFixture();
+    var limited=new SettlementWorld(catalog,new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableExternalTrade=false,EnablePublicAssistance=false,
+        PublicForagePerFarmPerDay=perFarm
+    });
+    limited.AdvanceTo(days*1440L);
+    limited.CheckInvariants();
+    var r=limited.Report();
+    CheckCommodityBalance(r);
+    Expect(r.FoodHarvestedForSubsistence<=days*perFarm*r.FoodProducers,
+        "public gleaning must not exceed the daily forage allowance per farm");
+
+    var forbidden=new SettlementWorld(catalog,new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableExternalTrade=false,EnablePublicAssistance=false,
+        PublicForagePerFarmPerDay=0
+    });
+    forbidden.AdvanceTo(days*1440L);
+    forbidden.CheckInvariants();
+    Expect(forbidden.Report().FoodHarvestedForSubsistence==0,
+        "commercial farmland cannot provide unlimited free meals");
 }

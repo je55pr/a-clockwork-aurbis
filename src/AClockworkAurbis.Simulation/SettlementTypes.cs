@@ -223,11 +223,15 @@ public sealed class BusinessState
     public long WholesaleRevenue { get; internal set; }
     public long WholesaleSpending { get; internal set; }
     public int RetailSales { get; internal set; }
+    internal int LastRetailSalesAtDay { get; set; }
+    internal int ServiceHoursBudget { get; set; } = 2;
+    internal int ServiceHoursWorkedToday { get; set; }
     public int WorkHours { get; internal set; }
     public int ItemsCrafted { get; internal set; }
     public int FoodProduced { get; internal set; }
     public int MaterialsExtracted { get; internal set; }
     public int LandYieldRemaining { get; internal set; }
+    public int ForageRemaining { get; internal set; }
     public int MineralReserve { get; internal set; }
     public int WorkerCount { get; internal set; }
     public int CargoCapacity { get; internal set; }
@@ -268,6 +272,7 @@ public sealed record SettlementSettings
     public int ToolWorkHoursPerWear { get; init; } = 24;
     public int FirewoodDaysPerHousehold { get; init; } = 5;
     public int MaxCommodityStockPerSite { get; init; } = 160;
+    public int PublicForagePerFarmPerDay { get; init; } = 8;
     public int BaseFreightFee { get; init; } = 1;
     public int FreightFeePer90Minutes { get; init; } = 1;
     public int MealPrice { get; init; } = 6;
@@ -401,4 +406,7 @@ public sealed record SettlementReport
     public long ToolsWornOut { get; init; }
     public long FirewoodBurned { get; init; }
     public long FreightDelayedForGear { get; init; }
+    public long IdleProductionHoursAvoided { get; init; }
+    public long ScarcityPricePremiumGold { get; init; }
+    public long SurplusPriceDiscountGold { get; init; }
 }

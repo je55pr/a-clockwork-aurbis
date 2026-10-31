@@ -16,6 +16,7 @@ public sealed partial class SettlementWorld
         new(StringComparer.Ordinal);
     private long _recipeBatches, _toolsWorn, _fuelBurned;
     private long _carriageEquipmentDelays, _longFreightRuns;
+    private long _scarcityPremiumGold, _surplusDiscountGold, _idleProductionHoursAvoided;
 
     private CommodityAccount Account(string id) =>
         _commodityAccounts.TryGetValue(id,out var a) ? a :
@@ -125,6 +126,46 @@ public sealed partial class SettlementWorld
         return crops.Length==0?["wheat","potato"]:crops;
     }
 
+    private bool CanScheduleCommodityWork(BusinessState company)
+    {
+        if(!_settings.EnableLocalProduction &&
+           company.Kind is not (BusinessKinds.FoodRetail or
+               BusinessKinds.GoodsRetail or BusinessKinds.Institution))
+            return false;
+        switch(company.Kind)
+        {
+            case BusinessKinds.FoodProducer:
+                return company.LandYieldRemaining>0 &&
+                    CropMix(company).Any(c=>Quantity(company.Stock,c)<
+                        _settings.MaxCommodityStockPerSite);
+            case BusinessKinds.ResourceProducer:
+                return company.MineralReserve>0 &&
+                    Quantity(company.Stock,IsLoggingSite(company)?"felling_axe":"pickaxe")>0 &&
+                    Quantity(company.Stock,IsLoggingSite(company)?"logs":"iron_ore")<
+                        _settings.MaxCommodityStockPerSite;
+            case BusinessKinds.Hunter:
+                return company.LandYieldRemaining>0 &&
+                    Quantity(company.Stock,"raw_hide")<_settings.MaxCommodityStockPerSite &&
+                    Quantity(company.Stock,"game_meat")<_settings.MaxCommodityStockPerSite;
+            case BusinessKinds.Fishery:
+                return company.LandYieldRemaining>0 &&
+                    Quantity(company.Stock,"fish")<_settings.MaxCommodityStockPerSite;
+            case BusinessKinds.Smeltery or BusinessKinds.Sawmill or BusinessKinds.Tannery
+                or BusinessKinds.Bakery or BusinessKinds.Leatherworker
+                or BusinessKinds.Workshop:
+                return CommodityRecipes.For(company).Any(r=>
+                    r.Ingredients.All(x=>Quantity(company.Stock,x.Key)>=x.Value) &&
+                    r.Products.All(x=>Quantity(company.Stock,x.Key)+x.Value<=
+                        _settings.MaxCommodityStockPerSite));
+            case BusinessKinds.ImportHub:
+                return false; // Domestic common-carrier freight is not dock work.
+            case BusinessKinds.FoodRetail or BusinessKinds.GoodsRetail:
+                return company.ServiceHoursWorkedToday < company.ServiceHoursBudget;
+            default:
+                return true; // Other public services remain funded separately.
+        }
+    }
+
     private bool CompleteCommodityWork(ResidentState actor,BusinessState company,int hours)
     {
         if(!_settings.EnableLocalProduction || hours<=0)return true;
@@ -135,12 +176,17 @@ public sealed partial class SettlementWorld
                 var crops=CropMix(company);
                 for(int n=0;n<hours && company.LandYieldRemaining>0;n++)
                 {
-                    string crop=crops[(company.WorkHours-hours+n)%crops.Length];
-                    int capacity=Math.Max(0,_settings.MaxCommodityStockPerSite-
-                        Quantity(company.Stock,crop));
+                    int start=(company.WorkHours-hours+n)%crops.Length;
+                    string? crop=Enumerable.Range(0,crops.Length)
+                        .Select(offset=>crops[(start+offset)%crops.Length])
+                        .FirstOrDefault(c=>Quantity(company.Stock,c)<
+                            _settings.MaxCommodityStockPerSite);
+                    if(crop is null)break;
+                    int capacity=_settings.MaxCommodityStockPerSite-
+                        Quantity(company.Stock,crop);
                     int picked=Math.Min(capacity,Math.Min(company.LandYieldRemaining,
                         _settings.RenewableFoodPerWorkHour));
-                    if(picked==0)continue;
+                    if(picked==0)break;
                     company.LandYieldRemaining-=picked;
                     Extract(company.Stock,crop,picked);
                     company.FoodProduced+=picked;
@@ -245,14 +291,37 @@ public sealed partial class SettlementWorld
     private void RunCommodityDay()
     {
         int day=checked((int)(Minute/DayMinutes));
+        // Staff retailers for demand observed the preceding day. With no
+        // customers, retain one management hour instead of paying for
+        // multiple empty eight-hour shifts.
+        foreach(var store in _businesses.Where(b=>b.Kind is
+            BusinessKinds.FoodRetail or BusinessKinds.GoodsRetail))
+        {
+            int yesterday=Math.Max(0,store.RetailSales-store.LastRetailSalesAtDay);
+            store.LastRetailSalesAtDay=store.RetailSales;
+            int margin=store.Kind==BusinessKinds.FoodRetail ?
+                Math.Max(1,_settings.MealPrice-_settings.FoodSalesTax-3) :
+                Math.Max(1,_settings.GoodsPrice-_settings.GoodsSalesTax-7);
+            int affordableHours=checked((int)Math.Min(int.MaxValue,
+                (long)yesterday*margin/Math.Max(1,_settings.HourlyWage)));
+            store.ServiceHoursBudget=Math.Clamp(affordableHours,1,
+                Math.Max(1,ContractCapacity(store)*8));
+            store.ServiceHoursWorkedToday=0;
+        }
         if(_settings.EnableLocalProduction)
         {
             int perFarm=_farms.Length==0?0:
                 Math.Max(10,checked(_residents.Count*
                     _settings.DailyLandRegrowthPerResident/_farms.Length));
             foreach(var farm in _farms)
+            {
                 farm.LandYieldRemaining=Math.Min(checked(perFarm*2),
                     farm.LandYieldRemaining+perFarm);
+                // Gleaning is a separate, small communal opportunity.
+                // It never grants unlimited access to commercial crops.
+                farm.ForageRemaining=Math.Min(farm.LandYieldRemaining,
+                    _settings.PublicForagePerFarmPerDay);
+            }
             foreach(var producer in _extractors.Where(IsLoggingSite))
                 producer.MineralReserve=Math.Min(_settings.InitialMineralReservePerSite,
                     producer.MineralReserve+32);
@@ -306,9 +375,10 @@ public sealed partial class SettlementWorld
                 return Pair("leather","iron_ingot");
             case BusinessKinds.FoodRetail:
                 return Pair("bread","vegetable_stew","garden_salad","fish_meal","roast_meat")
-                    .Select(x=>(x.Item1,24));
+                    .Select(x=>(x.Item1,12));
             case BusinessKinds.GoodsRetail:
-                return Pair("firewood","iron_tools","leather_goods","furnishings");
+                return new (string,int)[]{("firewood",9),("iron_tools",5),
+                    ("leather_goods",5),("furnishings",2)};
             case BusinessKinds.ImportHub:
                 return Pair("horseshoes");
             default:return [];
@@ -333,18 +403,54 @@ public sealed partial class SettlementWorld
             _ => false // Retail stock, input stores, tools and carriers aren't a magic wholesaler.
         };
 
+    private int QuoteCommodityWholesalePrice(BusinessState supplier,string sku)
+    {
+        int baseline=CommodityRecipes.Prices[sku];
+        int stock=Quantity(supplier.Stock,sku);
+        // Small observable local price response to the supplier's own stock.
+        // Scarce inputs become more valuable, but finished-food retailers
+        // must still have room to cover sales tax and operating costs.
+        int premium=stock<12?1:stock>90?-1:0;
+        int quoted=Math.Max(1,baseline+premium);
+        if(CommodityRecipes.Meals.Contains(sku,StringComparer.Ordinal))
+            quoted=Math.Min(quoted,_settings.MealPrice-_settings.FoodSalesTax);
+        return quoted;
+    }
+
+    private int CommodityOrderPriority(BusinessState buyer,string sku)
+    {
+        if(CommodityRecipes.For(buyer).Any(recipe=>
+            recipe.Ingredients.ContainsKey(sku) &&
+            recipe.Ingredients.Where(x=>x.Key!=sku).All(x=>
+                Quantity(buyer.Stock,x.Key)>=x.Value) &&
+            recipe.Products.All(x=>Quantity(buyer.Stock,x.Key)+x.Value<=
+                _settings.MaxCommodityStockPerSite)))
+            return Quantity(buyer.Stock,sku)==0?0:1;
+        return buyer.Kind switch
+        {
+            BusinessKinds.FoodRetail => 2,
+            BusinessKinds.GoodsRetail => 5,
+            BusinessKinds.ImportHub => 6,
+            _ => 3
+        };
+    }
+
     private void CommodityWholesaleDay()
     {
         int day=checked((int)(Minute/DayMinutes));
-        // Within each day every business requests inputs independently.
-        // The nearest actual stocked supplier wins; nothing teleports.
-        foreach(var buyer in _businesses
-            .OrderBy(b=>StableRandom.Hash(b.Id,unchecked(_settings.Seed+day))))
-        foreach(var (sku,target) in CommodityOrders(buyer))
+        // Pay attention to production chains, not arbitrary business IDs.
+        // A tannery holding hides but lacking fuel is a blocked production
+        // line; it competes ahead of retailers filling optional inventories.
+        // All ties rotate deterministically by day and seed.
+        var orders=_businesses.SelectMany(b=>CommodityOrders(b)
+            .Select(o=>(Buyer:b,Sku:o.Sku,Target:o.Target)))
+            .OrderBy(o=>CommodityOrderPriority(o.Buyer,o.Sku))
+            .ThenBy(o=>StableRandom.Hash(o.Buyer.Id+o.Sku,
+                unchecked(_settings.Seed+day))).ToArray();
+        foreach(var (buyer,sku,target) in orders)
         {
             int need=Math.Max(0,target-Quantity(buyer.Stock,sku)-Inbound(buyer,sku));
             if(need==0)continue;
-            int unitPrice=CommodityRecipes.Prices[sku];
             var sellers=_businesses.Where(b=>b.Id!=buyer.Id &&
                     CanSellCommodity(b,sku) &&
                     Quantity(b.Stock,sku)>0)
@@ -355,6 +461,7 @@ public sealed partial class SettlementWorld
             {
                 if(need==0)break;
                 int available=Quantity(seller.Stock,sku);
+                int unitPrice=QuoteCommodityWholesalePrice(seller,sku);
                 int minutes=PlaceTravelMinutes(seller.Place,buyer.Place);
                 int charge=checked(_settings.BaseFreightFee+
                     (int)Math.Ceiling(minutes/90d)*_settings.FreightFeePer90Minutes);
@@ -372,6 +479,10 @@ public sealed partial class SettlementWorld
                 _freightFees+=charge;
                 buyer.WholesaleSpending+=payment;
                 seller.WholesaleRevenue+=payment;
+                int priceDelta=unitPrice-CommodityRecipes.Prices[sku];
+                if(priceDelta>0)_scarcityPremiumGold+=checked((long)units*priceDelta);
+                else if(priceDelta<0)
+                    _surplusDiscountGold+=checked((long)units*(-priceDelta));
                 StockRemove(seller.Stock,sku,units);
                 // Freight still uses abstract common carriers, but long
                 // cart journeys cause real horseshoe wear at the closest
@@ -405,23 +516,58 @@ public sealed partial class SettlementWorld
     private bool HasPreparedMeal(BusinessState shop) =>
         CommodityRecipes.Meals.Any(s=>Quantity(shop.Stock,s)>0);
 
-    private bool HasHouseholdSupply(BusinessState shop) =>
-        CommodityRecipes.HouseholdGoods.Any(s=>Quantity(shop.Stock,s)>0);
+    // A home needing fuel or replacement tools can buy them even if it still
+    // owns durable furniture. Purchases are limited by the usual shopping
+    // cooldown and cash, rather than one undifferentiated Goods counter.
+    private bool NeedsHeatingFuel(ResidentState resident)
+    {
+        long day=Minute/DayMinutes;
+        long untilBurn=_settings.FirewoodDaysPerHousehold-
+            day%_settings.FirewoodDaysPerHousehold;
+        return resident.HousingId is not null &&
+            Quantity(resident.Stock,"firewood")==0 && untilBurn<=2;
+    }
+
+    private bool WantsHouseholdSupply(ResidentState resident)
+    {
+        long day=Minute/DayMinutes;
+        return NeedsHeatingFuel(resident) ||
+            day>=10 && Quantity(resident.Stock,"iron_tools")==0 ||
+            day>=20 && Quantity(resident.Stock,"leather_goods")==0 ||
+            day>=30 && Quantity(resident.Stock,"furnishings")==0;
+    }
+
+    private string? NeededSupplyAtShop(ResidentState resident,BusinessState shop)
+    {
+        long day=Minute/DayMinutes;
+        if(NeedsHeatingFuel(resident) &&
+            Quantity(shop.Stock,"firewood")>0)return "firewood";
+        if(day>=10 && Quantity(resident.Stock,"iron_tools")==0 &&
+            Quantity(shop.Stock,"iron_tools")>0)return "iron_tools";
+        if(day>=20 && Quantity(resident.Stock,"leather_goods")==0 &&
+            Quantity(shop.Stock,"leather_goods")>0)return "leather_goods";
+        if(day>=30 && Quantity(resident.Stock,"furnishings")==0 &&
+            Quantity(shop.Stock,"furnishings")>0)return "furnishings";
+        return null;
+    }
 
     private void CompleteCommodityPurchase(ResidentState resident,bool food)
     {
         if(!_byBusiness.TryGetValue(resident.CurrentPlaceId,out var shop))return;
-        if(food && shop.Kind!=BusinessKinds.FoodRetail ||
-            !food && shop.Kind is not (BusinessKinds.GoodsRetail or BusinessKinds.Workshop))
+        if(food && shop.Kind is not (BusinessKinds.FoodRetail or BusinessKinds.Bakery) ||
+            !food && shop.Kind is not (BusinessKinds.GoodsRetail or BusinessKinds.Workshop or
+                BusinessKinds.Sawmill or BusinessKinds.Leatherworker))
             return;
         int cost=food?_settings.MealPrice:_settings.GoodsPrice;
         if(resident.Gold<cost)return;
         string[] candidates=food?CommodityRecipes.Meals:
             ["firewood","iron_tools","leather_goods","furnishings"];
-        string? sku=candidates.Where(s=>Quantity(shop.Stock,s)>0)
-            .OrderBy(s=>Quantity(resident.Stock,s))
-            .ThenBy(s=>StableRandom.Hash(s+resident.Source.Id,_settings.Seed))
-            .FirstOrDefault();
+        string? sku=food
+            ? candidates.Where(s=>Quantity(shop.Stock,s)>0)
+                .OrderBy(s=>Quantity(resident.Stock,s))
+                .ThenBy(s=>StableRandom.Hash(s+resident.Source.Id,_settings.Seed))
+                .FirstOrDefault()
+            : NeededSupplyAtShop(resident,shop);
         if(sku is null)return;
         StockRemove(shop.Stock,sku,1);
         StockAdd(resident.Stock,sku,1);
@@ -464,9 +610,11 @@ public sealed partial class SettlementWorld
 
     private void HarvestCommoditySubsistence(ResidentState resident,BusinessState plot)
     {
-        int amount=Math.Min(2,plot.LandYieldRemaining);
+        int amount=Math.Min(2,
+            Math.Min(plot.LandYieldRemaining,plot.ForageRemaining));
         if(amount<=0)return;
         plot.LandYieldRemaining-=amount;
+        plot.ForageRemaining-=amount;
         Extract(resident.Stock,"foraged_greens",amount);
         resident.Food+=amount;
         resident.SubsistenceFoodHarvested+=amount;

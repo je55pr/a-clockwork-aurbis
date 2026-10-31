@@ -63,6 +63,7 @@ public sealed partial class SettlementWorld
            _settings.MaxFreightLoad<1 || _settings.BaseFreightFee<0 ||
            _settings.ToolWorkHoursPerWear<1 || _settings.FirewoodDaysPerHousehold<1 ||
            _settings.MaxCommodityStockPerSite<1 ||
+           _settings.PublicForagePerFarmPerDay<0 ||
            _settings.FreightFeePer90Minutes<0 ||
            _settings.ExternalFoodImportPrice<0 ||
            _settings.ExternalMaterialImportPrice<0 || _settings.DailyAssistanceLimit<0)
@@ -115,8 +116,11 @@ public sealed partial class SettlementWorld
         // The wiki identifies vendors, not legal owners. A vendor may be
         // assigned a *simulated* leaseholding role without ever changing
         // the source OwnerId field or claiming this is ESO canon.
-        _foodShops=_businesses.Where(b=>b.Kind==BusinessKinds.FoodRetail).ToArray();
-        _goodsShops=_businesses.Where(b=>b.Kind is BusinessKinds.GoodsRetail or BusinessKinds.Workshop).ToArray();
+        _foodShops=_businesses.Where(b=>b.Kind==BusinessKinds.FoodRetail ||
+            Detailed && b.Kind==BusinessKinds.Bakery).ToArray();
+        _goodsShops=_businesses.Where(b=>b.Kind is BusinessKinds.GoodsRetail or
+            BusinessKinds.Workshop || Detailed && b.Kind is
+            BusinessKinds.Sawmill or BusinessKinds.Leatherworker).ToArray();
         foreach(var business in _businesses)
         {
             if(business.OwnerId is not null)

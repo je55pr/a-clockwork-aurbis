@@ -49,6 +49,21 @@ public sealed partial class SettlementWorld
            localMinute<(actor.WorkStart+8)*60 &&
            actor.Energy>=18)
         {
+            if(Detailed && _byBusiness.TryGetValue(actor.WorkId,out var employer))
+            {
+                if(employer.Gold<_settings.HourlyWage)
+                {
+                    FurloughForInsolvency(actor,employer);
+                    Enqueue(index,60,SettlementAction.Idle);
+                    return;
+                }
+                if(!CanScheduleCommodityWork(employer))
+                {
+                    _idleProductionHoursAvoided++;
+                    Enqueue(index,60,SettlementAction.Idle);
+                    return;
+                }
+            }
             if(actor.CurrentPlaceId!=actor.WorkId)
                 Travel(index,actor,actor.WorkId);
             else
@@ -62,7 +77,9 @@ public sealed partial class SettlementWorld
 
         // Household tool/general-goods purchases are deliberately modest.
         // We do not assert which specific TES items residents need yet.
-        if(actor.Goods==0 && actor.Gold>=_settings.GoodsPrice+_settings.MealPrice &&
+        if((Detailed?WantsHouseholdSupply(actor):actor.Goods==0) &&
+           actor.Gold>=_settings.GoodsPrice+_settings.MealPrice+
+               (Detailed && actor.HousingId is not null ? _settings.DailySharedRent*3 : 0) &&
            Minute/DayMinutes>actor.LastGoodsShoppingDay+2 &&
            hour>=9&&hour<20 && actor.Satiation>=37)
         {
@@ -97,11 +114,12 @@ public sealed partial class SettlementWorld
         {
             if(food)
             {
-                if(shop.Kind!=BusinessKinds.FoodRetail||
+                if(shop.Kind is not (BusinessKinds.FoodRetail or BusinessKinds.Bakery) ||
                     (Detailed?!HasPreparedMeal(shop):shop.Food<1))continue;
             }
-            else if(shop.Kind is not (BusinessKinds.GoodsRetail or BusinessKinds.Workshop)||
-                    (Detailed?!HasHouseholdSupply(shop):shop.Goods<1))continue;
+            else if(shop.Kind is not (BusinessKinds.GoodsRetail or BusinessKinds.Workshop
+                    or BusinessKinds.Sawmill or BusinessKinds.Leatherworker) ||
+                    (Detailed?NeededSupplyAtShop(actor,shop) is null:shop.Goods<1))continue;
             // Source-backed map proximity outranks an arbitrary source-ID hash.
             // Stable small jitter breaks ties without drawing everyone into
             // one vendor on the same city-centre marker.
