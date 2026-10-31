@@ -12,23 +12,29 @@ extends CharacterBody3D
 
 var _gravity := 19.6
 var _jump_held := false
+var _mouse_look_enabled := true
 
 func _ready() -> void:
     _gravity = float(ProjectSettings.get_setting("physics/3d/default_gravity"))
     floor_snap_length = 0.3
+    camera.current = true
     Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
-func _unhandled_input(event: InputEvent) -> void:
-    if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+# Use _input, not _unhandled_input: world HUD/Control nodes consume mouse
+# events before they can reach unhandled callbacks.
+func _input(event: InputEvent) -> void:
+    if event is InputEventMouseMotion and _mouse_look_enabled:
         rotate_y(-event.relative.x * mouse_sensitivity)
         head.rotate_x(-event.relative.y * mouse_sensitivity)
         head.rotation.x = clampf(head.rotation.x, deg_to_rad(-85.0), deg_to_rad(85.0))
         get_viewport().set_input_as_handled()
     elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+        _mouse_look_enabled = false
         Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
         get_viewport().set_input_as_handled()
     elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-        if Input.mouse_mode == Input.MOUSE_MODE_VISIBLE:
+        if not _mouse_look_enabled:
+            _mouse_look_enabled = true
             Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
             get_viewport().set_input_as_handled()
 

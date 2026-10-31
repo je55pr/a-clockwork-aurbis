@@ -12,7 +12,7 @@ func _key(key: Key, pressed: bool) -> void:
     Input.parse_input_event(event)
 
 func _check() -> void:
-    var packed := load("res://scenes/first_person_lab.tscn") as PackedScene
+    var packed := load("res://scenes/model_animation_lab.tscn") as PackedScene
     if packed == null:
         push_error("Cannot load first-person lab scene")
         quit(1)

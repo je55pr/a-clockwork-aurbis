@@ -7,6 +7,7 @@ namespace EsoTest;
 
 public partial class ArchiveWorld : Node3D
 {
+    [Export] public bool FirstPersonLab { get; set; }
     private EsoArchive? _archive;
     private OodleDecoder? _decoder;
 
@@ -59,13 +60,17 @@ public partial class ArchiveWorld : Node3D
 
             var browser = new TerrainBrowser();
             browser.Setup(_archive, _decoder, bundles, referenceMap);
+            browser.FirstPersonLab = FirstPersonLab;
             AddChild(browser);
 
-            // Keep the authoritative source catalogue available even while
-            // the user's depot update temporarily prevents 3D rendering.
-            var catalogue = new EsoAssetBrowser();
-            catalogue.Setup(_archive, _decoder, names, bundles, browser);
-            AddChild(catalogue);
+            // The walking scene stays focused on source terrain and movement.
+            // Keep the independent model/animation inspector in its own scene.
+            if (!FirstPersonLab)
+            {
+                var catalogue = new EsoAssetBrowser();
+                catalogue.Setup(_archive, _decoder, names, bundles, browser);
+                AddChild(catalogue);
+            }
         }
         catch (Exception e)
         {

@@ -5,7 +5,7 @@ func _initialize() -> void:
     call_deferred("_check")
 
 func _check() -> void:
-    var lab := (load("res://scenes/first_person_lab.tscn") as PackedScene).instantiate()
+    var lab := (load("res://scenes/model_animation_lab.tscn") as PackedScene).instantiate()
     root.add_child(lab)
     var stage := lab.get_node("SourceModelStage")
     var loaded := false
