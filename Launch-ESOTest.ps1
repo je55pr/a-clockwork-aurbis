@@ -2,7 +2,8 @@ param(
     [switch]$BuildOnly,
     [switch]$ForceBuild,
     [switch]$FirstPersonLab,
-    [switch]$ModelLab
+    [switch]$ModelLab,
+    [switch]$RigLab
 )
 
 $ErrorActionPreference = 'Stop'
@@ -143,6 +144,7 @@ try {
     $arguments = '--path "' + $projectRoot + '"'
     if ($FirstPersonLab) { $arguments += ' "res://scenes/first_person_lab.tscn"' }
     if ($ModelLab) { $arguments += ' "res://scenes/model_animation_lab.tscn"' }
+    if ($RigLab) { $arguments += ' "res://scenes/source_rig_lab.tscn"' }
     $process = Start-Process -FilePath $godotExe -ArgumentList $arguments -WorkingDirectory $projectRoot -PassThru
     Add-Content -LiteralPath $logFile -Value "Started Godot PID $($process.Id): $godotExe"
     exit 0

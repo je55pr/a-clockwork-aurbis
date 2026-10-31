@@ -185,7 +185,7 @@ public partial class EsoHumanoidVisualLayer : Node3D
         throw new InvalidDataException($"Unknown source body-part ID 0x{id:X8}");
     }
 
-    private static ArrayMesh LoadMesh(string path,string expectedPrefix)
+    internal static ArrayMesh LoadMesh(string path,string expectedPrefix,EsoSourceRig? rig=null)
     {
         if (new FileInfo(path).Length is < 64 or > 72_000_000)
             throw new InvalidDataException("Invalid character mesh cache size");
@@ -196,6 +196,8 @@ public partial class EsoHumanoidVisualLayer : Node3D
         if (meshCount != 1)
             throw new InvalidDataException("Expected a single customization body part");
         string sourceName = reader.ReadString();
+        if(rig!=null && sourceName!=rig.MeshName)
+            throw new InvalidDataException("Source rig/mesh identity mismatch");
         if(!sourceName.StartsWith(expectedPrefix,StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException($"Expected {expectedPrefix} but source named {sourceName}");
         int nv = reader.ReadInt32(), ni = reader.ReadInt32(), ng = reader.ReadInt32();
@@ -248,6 +250,7 @@ public partial class EsoHumanoidVisualLayer : Node3D
                 arrays[(int)Mesh.ArrayType.Tangent] = tangents;
             }
             arrays[(int)Mesh.ArrayType.Index] = part;
+            rig?.AddInfluences(arrays,nv);
             model.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
         }
         if (reader.BaseStream.Position != reader.BaseStream.Length)
