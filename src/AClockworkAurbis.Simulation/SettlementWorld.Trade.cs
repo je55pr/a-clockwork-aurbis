@@ -11,21 +11,30 @@ public sealed partial class SettlementWorld
         var sources = _farms.Concat(_ports).ToArray();
         int foodTarget = _foodShops.Length == 0 ? 0 :
             Math.Max(8, checked(_residents.Count * 2 / _foodShops.Length));
-        foreach (var shop in _foodShops)
+        // Urgent stockouts are served before well-stocked firms. Rotate ties
+        // by day so the first source page ID never has a permanent monopoly.
+        int day = checked((int)(Minute / DayMinutes));
+        foreach (var shop in _foodShops
+            .OrderBy(b => b.Food + Inbound(b, "food"))
+            .ThenBy(b => StableRandom.Hash(b.Id, unchecked(_settings.Seed + day))))
             RegionalWholesale(shop, ClosestSuppliers(shop, sources), foodTarget,
                 BusinessKinds.FoodRetail);
 
         int materialTarget = _workshops.Length == 0 ? 0 :
             Math.Max(5, checked(_residents.Count / 2 / _workshops.Length));
         var materialSources = _extractors.Concat(_ports).ToArray();
-        foreach (var workshop in _workshops)
+        foreach (var workshop in _workshops
+            .OrderBy(b => b.Materials + Inbound(b, "materials"))
+            .ThenBy(b => StableRandom.Hash(b.Id, unchecked(_settings.Seed + day + 1))))
             RegionalWholesale(workshop, ClosestSuppliers(workshop, materialSources),
                 materialTarget, BusinessKinds.Workshop);
 
         var goodsStores = _businesses.Where(b => b.Kind == BusinessKinds.GoodsRetail).ToArray();
         int goodsTarget = goodsStores.Length == 0 ? 0 :
             Math.Max(4, checked(_residents.Count / 4 / goodsStores.Length));
-        foreach (var shop in goodsStores)
+        foreach (var shop in goodsStores
+            .OrderBy(b => b.Goods + Inbound(b, "goods"))
+            .ThenBy(b => StableRandom.Hash(b.Id, unchecked(_settings.Seed + day + 2))))
             RegionalWholesale(shop, ClosestSuppliers(shop, _workshops),
                 goodsTarget, BusinessKinds.GoodsRetail);
 
