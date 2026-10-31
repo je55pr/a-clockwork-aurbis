@@ -6,6 +6,13 @@ namespace AClockworkAurbis.Simulation;
 public sealed partial class SettlementWorld
 {
     private readonly Dictionary<string,int> _unfilledMarketOrders = new(StringComparer.Ordinal);
+    // Last day's published shortages remain visible during both production
+    // planning and this day's wholesale purchasing. The working dictionary
+    // receives only today's actual unfilled orders.
+    private readonly Dictionary<string,int> _publishedUnfilledOrders =
+        new(StringComparer.Ordinal);
+    internal int PublishedUnfilledDemand(string sku) =>
+        _publishedUnfilledOrders.GetValueOrDefault(sku);
     private long _plansMade,_plansRevised,_unprofitablePlans;
     private readonly List<BusinessPlanSnapshot> _latestPlans = new();
 
@@ -21,7 +28,7 @@ public sealed partial class SettlementWorld
     {
         decimal sales=business.RecentDemand.GetValueOrDefault(sku);
         int sellers=Math.Max(1,_businesses.Count(b=>CanSellCommodity(b,sku)));
-        int unmet=_unfilledMarketOrders.GetValueOrDefault(sku)/sellers;
+        int unmet=PublishedUnfilledDemand(sku)/sellers;
         return Math.Max(1,checked((int)Math.Ceiling(sales*2)+Math.Min(40,unmet)));
     }
 
@@ -109,7 +116,7 @@ public sealed partial class SettlementWorld
     private int PlannedTarget(BusinessState firm,string sku,int baseline)
     {
         int recent=checked((int)Math.Ceiling(firm.RecentDemand.GetValueOrDefault(sku)));
-        int shortage=Math.Min(40,_unfilledMarketOrders.GetValueOrDefault(sku)/
+        int shortage=Math.Min(40,PublishedUnfilledDemand(sku)/
             Math.Max(1,_businesses.Count(b=>CanSellCommodity(b,sku))));
         int perDay=Math.Max(recent,shortage);
         // Demand-sensitive safety stock: unfamiliar luxury dishes receive
@@ -126,6 +133,10 @@ public sealed partial class SettlementWorld
     private void PlanMarketDay()
     {
         int day=checked((int)(Minute/DayMinutes));
+        _publishedUnfilledOrders.Clear();
+        foreach(var (sku,quantity) in _unfilledMarketOrders)
+            _publishedUnfilledOrders[sku]=quantity;
+        _unfilledMarketOrders.Clear();
         _latestPlans.Clear();
         foreach(var business in _businesses)
         {
@@ -269,9 +280,8 @@ public sealed partial class SettlementWorld
             _latestPlans.Add(new BusinessPlanSnapshot(business.Id,business.Name,
                 day,choice,business.PlannedHours,estimatedMargin,reason));
         }
-        // The following wholesale clearing round publishes new unfilled
-        // orders for tomorrow, never future information for today's plans.
-        _unfilledMarketOrders.Clear();
+        // This day's wholesale clearing fills _unfilledMarketOrders,
+        // which is published at the start of tomorrow's planning.
     }
 
     private int MarketTarget(BusinessState firm,string sku,int baseline)

@@ -62,6 +62,10 @@ public static class CommodityRecipes
     [
         new("saw_logs",BusinessKinds.Sawmill,
             Stock(("logs",2)),Stock(("lumber",2),("firewood",3))),
+        // A stocked lumber yard must still be able to split logs for fuel.
+        // Both recipes consume actual logs and pay actual work hours.
+        new("split_firewood",BusinessKinds.Sawmill,
+            Stock(("logs",2)),Stock(("firewood",5))),
         new("smelt_iron",BusinessKinds.Smeltery,
             Stock(("iron_ore",2),("firewood",1)),Stock(("iron_ingot",2))),
         new("tan_hide",BusinessKinds.Tannery,

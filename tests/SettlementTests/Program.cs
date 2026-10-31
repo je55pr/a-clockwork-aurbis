@@ -37,6 +37,8 @@ var tests=new (string Name,Action Run)[]
     ("Bread prices respond to local stock and logistics", BreadScarcityPricing),
     ("Fractional septims really settle and all accounts reconcile", FractionalMarketSettlement),
     ("Businesses plan production and labour using observed market data", AdaptiveBusinessPlanning),
+    ("Unmet wholesale demand is published for the next purchasing round", PublishedShortagePlanning),
+    ("Lumber-full sawmills keep supplying paid, physical firewood", SawmillFuelRecovery),
     ("Capital upgrades consume funded materials and real construction hours", FundedCapitalConstruction),
     ("Households cook with real ingredients at lower yields than chefs", HouseholdCookingAndChefs),
     ("Deterministic regional simulations can run in time chunks", RegionalDeterminism),
@@ -1128,6 +1130,60 @@ static void AdaptiveBusinessPlanning()
         "production-disabled scenarios do not create paid production plans");
     Expect(halted.Report().RecipesCompleted==0,
         "production plans cannot create physical goods without production");
+}
+
+static void PublishedShortagePlanning()
+{
+    var world=new SettlementWorld(CommodityFixture(),new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableExternalTrade=false,EnableLocalProduction=false
+    });
+    world.AdvanceTo(1440L);
+    Expect(CommodityRecipes.Prices.Keys.All(sku=>
+        world.PublishedUnfilledDemand(sku)==0),
+        "the initial plan cannot know tomorrow's failed wholesale orders");
+    world.AdvanceTo(2L*1440);
+    Expect(CommodityRecipes.Prices.Keys.Sum(sku=>
+        (long)world.PublishedUnfilledDemand(sku))>0,
+        "yesterday's unfilled orders remain visible to wholesale purchasing");
+    world.AdvanceTo(3L*1440);
+    world.CheckInvariants();
+    Expect(world.Report().UnfilledCommodityOrderUnits>0,
+        "an unsupplied island still records real shortages without phantom deliveries");
+}
+
+static void SawmillFuelRecovery()
+{
+    var split=CommodityRecipes.All.Single(r=>r.Id=="split_firewood");
+    Expect(split.Industry==BusinessKinds.Sawmill &&
+        split.Ingredients.GetValueOrDefault("logs")>0 &&
+        split.Products.GetValueOrDefault("firewood")>0 &&
+        !split.Products.ContainsKey("lumber"),
+        "splitting logs for fuel never invents or requires surplus lumber storage");
+    var world=new SettlementWorld(CommodityFixture(),new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableExternalTrade=false,MaxCommodityStockPerSite=40
+    });
+    world.AdvanceTo(35L*1440);
+    var mills=world.Businesses.Where(b=>b.Kind==BusinessKinds.Sawmill).ToArray();
+    var timberFull=new Dictionary<string,int>(StringComparer.Ordinal)
+    {
+        ["lumber"]=40,["logs"]=4,["firewood"]=0
+    };
+    Expect(split.Ingredients.All(x=>timberFull.GetValueOrDefault(x.Key)>=x.Value) &&
+        split.Products.All(x=>timberFull.GetValueOrDefault(x.Key)+x.Value<=40),
+        "a full lumber store cannot block a fuel-only splitting recipe");
+    Expect(mills.Length>0 && mills.Any(b=>b.WorkHours>0),
+        "the fixture has a staffed sawmill performing actual work");
+    long fuelBefore=Item(world.Report(),"firewood").Crafted;
+    world.AdvanceTo(50L*1440);
+    world.CheckInvariants();
+    var report=world.Report();
+    CheckCommodityBalance(report);
+    Expect(Item(report,"firewood").Crafted>fuelBefore,
+        "sawmill fuel production continues after lumber storage fills");
 }
 
 static void FundedCapitalConstruction()
