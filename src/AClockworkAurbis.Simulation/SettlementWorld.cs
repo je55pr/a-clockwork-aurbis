@@ -78,7 +78,11 @@ public sealed partial class SettlementWorld
            _settings.OpenLogsPerResidentPerDay is <0 or >1000 ||
            _settings.OpenFishPerResidentPerDay is <0 or >1000 ||
            _settings.OpenGamePerResidentPerDay is <0 or >1000 ||
-           _settings.MaxPersonalCommodityStock is <1 or >10000)
+           _settings.MaxPersonalCommodityStock is <1 or >10000 ||
+           _settings.AutonomousParticipationPercent is <0 or >100 ||
+           _settings.AutonomousDailyActionLimit is <0 or >8 ||
+           _settings.AutonomousMaxTravelMinutes is <1 or >1440 ||
+           _settings.AutonomousToolPurchaseGoldReserve is <0m or >1000000m)
             throw new ArgumentOutOfRangeException(nameof(settings));
 
         _sourcePlaces=catalog.Places.ToDictionary(p=>p.Id,StringComparer.Ordinal);

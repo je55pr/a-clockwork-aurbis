@@ -69,7 +69,10 @@ public sealed partial class SettlementWorld
 
         // Explicitly requested work for personal ownership takes precedence
         // over employment; the request is still subject to travel and time.
-        if(Detailed && SchedulePersonalTask(index,actor))return;
+        if(Detailed &&
+           (!_personalTasks.TryGetValue(actor.Source.Id,out var personalTask) ||
+            !personalTask.Autonomous) &&
+           SchedulePersonalTask(index,actor))return;
 
         if(actor.WorkId is not null &&
            localMinute>=actor.WorkStart*60&&
@@ -110,6 +113,11 @@ public sealed partial class SettlementWorld
         // when low on cash; the site still needs resources and payroll.
         if(Detailed && hour>=10 && hour<18 && actor.Gold<12 &&
            actor.Energy>=20 && TryCasualShift(index,actor))return;
+
+        // Autonomously chosen personal jobs cannot displace a guaranteed
+        // employment shift; explicit player-directed actions still can.
+        if(Detailed && SchedulePersonalTask(index,actor))return;
+        if(Detailed && TryAutonomousAction(index,actor))return;
 
         // Household tool/general-goods purchases are deliberately modest.
         // We do not assert which specific TES items residents need yet.

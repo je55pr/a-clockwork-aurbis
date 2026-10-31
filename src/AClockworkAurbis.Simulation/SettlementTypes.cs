@@ -207,6 +207,14 @@ public sealed class ResidentState
     public int CasualHoursToday { get; internal set; }
     public int RegularHoursToday { get; internal set; }
     public string? PersonalTask { get; internal set; }
+    public string? AutonomousGoal { get; internal set; }
+    public string? AutonomousLastReason { get; internal set; }
+    public long AutonomousChoices { get; internal set; }
+    public long AutonomousCompleted { get; internal set; }
+    public long AutonomousFailed { get; internal set; }
+    internal int AutonomousDay { get; set; } = -1;
+    internal int AutonomousActionsToday { get; set; }
+    internal long LastAutonomousConsideredMinute { get; set; } = -10000;
     public string? EquippedWeaponSku { get; internal set; }
     public long PersonalGathered { get; internal set; }
     public long PersonalCrafts { get; internal set; }
@@ -338,6 +346,13 @@ public sealed record SettlementSettings
     public int OpenFishPerResidentPerDay { get; init; } = 1;
     public int OpenGamePerResidentPerDay { get; init; } = 1;
     public int MaxPersonalCommodityStock { get; init; } = 100;
+    // Personal economic initiative is opt-in per scenario and deterministic
+    // per resident. It never changes the resource/transaction mechanics.
+    public bool EnableAutonomousPersonalEconomy { get; init; } = true;
+    public int AutonomousParticipationPercent { get; init; } = 22;
+    public int AutonomousDailyActionLimit { get; init; } = 2;
+    public int AutonomousMaxTravelMinutes { get; init; } = 130;
+    public decimal AutonomousToolPurchaseGoldReserve { get; init; } = 20m;
     public bool EnableLocalProduction { get; init; } = true;
     public bool EnableExternalTrade { get; init; } = true;
     public bool EnablePublicAssistance { get; init; } = true;
@@ -391,6 +406,9 @@ public sealed record CapitalProjectSnapshot(
     string InvestorId,string InvestorName,string BuilderName,
     int CompletedHours,int RequiredHours,long MaterialCostMilli,
     decimal LabourPayment);
+
+public sealed record AutonomousActivitySnapshot(
+    string Activity,long Chosen,long Completed,long Failed);
 
 public sealed record BusinessPlanSnapshot(
     string BusinessId,string BusinessName,int Day,string? Product,
@@ -471,6 +489,11 @@ public sealed record SettlementReport
     public long PersonalTrades { get; init; }
     public decimal PersonalSaleIncome { get; init; }
     public int OpenResourceSites { get; init; }
+    public int AutonomousParticipants { get; init; }
+    public long AutonomousChoices { get; init; }
+    public long AutonomousCompleted { get; init; }
+    public long AutonomousFailed { get; init; }
+    public AutonomousActivitySnapshot[] AutonomousActivities { get; init; } = [];
     public long RawMaterialsExtracted { get; init; }
     public long FoodExported { get; init; }
     public long GoodsExported { get; init; }

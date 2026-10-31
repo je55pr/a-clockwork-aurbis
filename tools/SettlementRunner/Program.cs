@@ -6,7 +6,7 @@ try
 {
     string? catalogPath=null,trace=null;
     int days=3,seed=42,rentReserve=20;
-    int regularHours=2,casualWage=2,casualHours=4,wildForage=2;
+    int regularHours=2,casualWage=2,casualHours=4,wildForage=2,autonomyPercent=22;
     string? economicMode=null;
     bool traceFirst=false,details=false,allResidents=false;
     bool disableTrade=false,disableProduction=false,disableAid=false;
@@ -24,6 +24,7 @@ try
             case "--casual-wage":casualWage=int.Parse(Next());break;
             case "--casual-hours":casualHours=int.Parse(Next());break;
             case "--wild-forage":wildForage=int.Parse(Next());break;
+            case "--autonomy-percent":autonomyPercent=int.Parse(Next());break;
             case "--trace":trace=Next();break;
             case "--trace-first":traceFirst=true;break;
             case "--details":details=true;break;
@@ -39,7 +40,8 @@ try
                     "[--economy prototype|production|commodities] [--no-foreign-trade] "+
                     "[--no-local-production] [--no-assistance] [--rent-reserve GOLD] "+
                     "[--regular-hours N] [--casual-wage GOLD] [--casual-hours N] "+
-                    "[--wild-forage UNITS] [--trace NPC_ID] [--details] [--resident-details]");
+                    "[--wild-forage UNITS] [--autonomy-percent 0..100] "+
+                    "[--trace NPC_ID] [--details] [--resident-details]");
                 return 0;
             default:throw new ArgumentException("Unknown parameter "+args[i]);
         }
@@ -62,7 +64,8 @@ try
         RentGoldReserve=rentReserve,
         RegularGuaranteedHoursPerDay=regularHours,
         CasualHourlyWage=casualWage,MaxCasualHoursPerDay=casualHours,
-        WildForagePerResidentPerDay=wildForage});
+        WildForagePerResidentPerDay=wildForage,
+        AutonomousParticipationPercent=autonomyPercent});
     loading.Stop();
     if(traceFirst && world.Residents.Count>0)trace=world.Residents[0].Source.Id;
     if(trace is not null)
@@ -97,6 +100,7 @@ try
         RegularGuaranteedHoursPerDay=regularHours,
         CasualHourlyWage=casualWage,MaxCasualHoursPerDay=casualHours,
         WildForagePerResidentPerDay=wildForage,
+        AutonomousParticipationPercent=autonomyPercent,
         summary.Settlement,
         summary.SourcePlaces,
         summary.SimulatedPlaces,
@@ -200,6 +204,9 @@ try
         summary.OpenResourceSites,summary.PersonalGatherHours,
         summary.PersonalCraftBatches,summary.PersonalTrades,
         summary.PersonalSaleIncome,
+        summary.AutonomousParticipants,summary.AutonomousChoices,
+        summary.AutonomousCompleted,summary.AutonomousFailed,
+        summary.AutonomousActivities,
         summary.RawMaterialsExtracted,
         summary.FoodExported,
         summary.MaterialsExported,
@@ -269,6 +276,8 @@ try
             r.CasualWageIncome,r.CasualHoursToday,r.RegularHoursToday,
             r.PersonalTask,r.EquippedWeaponSku,r.PersonalGathered,
             r.PersonalCrafts,r.PersonalSaleIncome,
+            r.AutonomousGoal,r.AutonomousLastReason,
+            r.AutonomousChoices,r.AutonomousCompleted,r.AutonomousFailed,
             r.DividendIncome,r.CooperativeIncome,r.AssistanceGold,
             r.SubsistenceFoodHarvested,r.UnpaidHours,r.WorkMinutes,
             r.SleepMinutes,r.JourneyMinutes,r.OnUnpaidLeave,r.InsolvencyJobChanges

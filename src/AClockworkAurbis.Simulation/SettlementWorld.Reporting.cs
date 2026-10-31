@@ -70,6 +70,15 @@ public sealed partial class SettlementWorld
             PersonalCraftBatches=_personalCraftBatches,
             PersonalTrades=_personalTrades,PersonalSaleIncome=_personalSaleIncome,
             OpenResourceSites=_openResourceSites.Count,
+            AutonomousParticipants=_autonomousParticipants.Count,
+            AutonomousChoices=_autonomousChoices,
+            AutonomousCompleted=_autonomousCompleted,
+            AutonomousFailed=_autonomousFailed,
+            AutonomousActivities=Enum.GetValues<PersonalTaskKind>()
+                .Select(kind=>new AutonomousActivitySnapshot(
+                    kind.ToString(),_autonomousChosenKinds[(int)kind],
+                    _autonomousCompletedKinds[(int)kind],
+                    _autonomousFailedKinds[(int)kind])).ToArray(),
             RawMaterialsExtracted=_localMaterials,
             FoodExported=_foodExports,GoodsExported=_goodsExports,
             MaterialsExported=_materialsExports,
@@ -222,7 +231,17 @@ public sealed partial class SettlementWorld
            _casualWages>_wages || _casualHours<0)
             throw new InvalidOperationException("Casual payroll does not reconcile");
         if(_personalSaleIncome!=_residents.Sum(r=>r.PersonalSaleIncome) ||
-           _personalCraftBatches!=_residents.Sum(r=>r.PersonalCrafts))
+           _personalCraftBatches!=_residents.Sum(r=>r.PersonalCrafts) ||
+           _autonomousChoices!=_residents.Sum(r=>r.AutonomousChoices) ||
+           _autonomousCompleted!=_residents.Sum(r=>r.AutonomousCompleted) ||
+           _autonomousFailed!=_residents.Sum(r=>r.AutonomousFailed) ||
+           _autonomousCompleted+_autonomousFailed>_autonomousChoices ||
+           _autonomousChosenKinds.Sum()!=_autonomousChoices ||
+           _autonomousCompletedKinds.Sum()!=_autonomousCompleted ||
+           _autonomousFailedKinds.Sum()!=_autonomousFailed ||
+           _autonomousParticipants.Count!=_residents.Count(r=>r.AutonomousChoices>0) ||
+           _autonomousChoices!=_autonomousCompleted+_autonomousFailed+
+               _personalTasks.Values.Count(t=>t.Autonomous))
             throw new InvalidOperationException("Personal economy ledger mismatch");
         if(_openResourceSites.Values.Any(s=>s.Ore<0 || s.Logs<0 ||
             s.Fish<0 || s.Game<0))

@@ -39,6 +39,9 @@ var tests=new (string Name,Action Run)[]
     ("Cancelled personal actions cannot duplicate or shortcut gathering", PersonalCancellationAndExhaustion),
     ("Commodity-market tax rates are configurable and cannot mint gold", ConfigurableDetailedTaxes),
     ("Crop failure blocks harvesting but not existing personal trade", PersonalTradeDuringCropFailure),
+    ("Autonomous fisher earns real income from catch and buyers", AutonomousFisher),
+    ("Autonomous smith builds and equips a personally owned sword", AutonomousSmith),
+    ("Concurrent personal gather requests reserve finite ore", AutonomousResourceReservation),
     ("One septim bread is a full meal with sustainable producer yields", BreadSeptimBenchmark),
     ("Bread prices respond to local stock and logistics", BreadScarcityPricing),
     ("Fractional septims really settle and all accounts reconcile", FractionalMarketSettlement),
@@ -1087,7 +1090,8 @@ static void PersonalOwnershipAndSword()
         Economy=EconomyMode.CommodityProduction,
         EnableExternalTrade=false,EnablePublicAssistance=false,
         EnableHousing=false,ToolWorkHoursPerWear=24,
-        OpenOrePerResident=8,FirewoodDaysPerHousehold=100
+        OpenOrePerResident=8,FirewoodDaysPerHousehold=100,
+        AutonomousParticipationPercent=0
     };
     var world=new SettlementWorld(catalog,settings);
     var person=world.Residents.Single(r=>r.Source.Id==id);
@@ -1177,7 +1181,8 @@ static void PersonalCancellationAndExhaustion()
     {
         Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false,
         EnableHousing=false,OpenOrePerResident=0,
-        OpenFishPerResidentPerDay=1
+        OpenFishPerResidentPerDay=1,
+        AutonomousParticipationPercent=0
     };
     var world=new SettlementWorld(catalog,settings);
     var person=world.Residents.Single(p=>p.Source.Id==id);
@@ -1255,6 +1260,130 @@ static void PersonalTradeDuringCropFailure()
     CheckCommodityBalance(report);
     Expect(report.PersonalTrades==1 && report.AllAccountsGold==report.InitialAllAccountsGold,
         "actual purchase settles despite production closure with balanced accounts");
+}
+
+static SettlementCatalog AutonomousFixture(string profession,bool tools)
+{
+    var source=CommodityFixture();
+    var who=source.Residents.OrderBy(r=>r.Id,StringComparer.Ordinal).First();
+    var items=new Dictionary<string,int> {["provisions"]=60};
+    if(tools){items["pickaxe"]=1;items["felling_axe"]=1;}
+    return source with
+    {
+        Places=source.Places.Select(p=>p with
+        { MapX=10000,MapY=10000,District="Exampleton" }).ToArray(),
+        Residents=[who with
+        {
+            Profession=profession,WorkPlaceId=null,WorkEvidence="none",
+            HomePlaceId="home:1",HomeEvidence="test_explicit",
+            AnchorPlaceId="home:1",AnchorEvidence="test",
+            SimulatedStartingItems=items
+        }]
+    };
+}
+
+static SettlementSettings AutonomousFixtureSettings(int participation=100) => new()
+{
+    Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false,
+    EnablePublicAssistance=false,EnableHousing=false,
+    AutonomousParticipationPercent=participation,
+    AutonomousDailyActionLimit=3,AutonomousMaxTravelMinutes=200,
+    ToolWorkHoursPerWear=100,FirewoodDaysPerHousehold=100,
+    OpenOrePerResident=8
+};
+
+static void AutonomousFisher()
+{
+    var cat=AutonomousFixture("Fisher",tools:false);
+    var world=new SettlementWorld(cat,AutonomousFixtureSettings());
+    var decisions=new List<SimObservation>();
+    world.Observer=o=>{if(o.Action.StartsWith("autonomous_",StringComparison.Ordinal) ||
+        o.Action is "personal_gather" or "personal_sell")decisions.Add(o);};
+    world.AdvanceTo(21L*1440);
+    world.CheckInvariants();
+    var r=world.Report();
+    CheckCommodityBalance(r);
+    var fisher=world.Residents.Single();
+    Expect(fisher.AutonomousGoal=="fish" && fisher.AutonomousChoices>=2 &&
+        fisher.PersonalGathered>0 && fisher.PersonalSaleIncome>0,
+        "an unemployed fisher should gather, keep, then sell real fish stock: "+
+        string.Join(" | ",decisions.Take(14).Select(x=>x.Action+":"+x.Detail)));
+    Expect(r.AutonomousCompleted>0 && r.AutonomousParticipants==1 &&
+        r.AutonomousActivities.Sum(a=>a.Chosen)==r.AutonomousChoices &&
+        r.AutonomousActivities.Sum(a=>a.Completed)==r.AutonomousCompleted &&
+        r.AutonomousCompleted+r.AutonomousFailed<=r.AutonomousChoices &&
+        r.AllAccountsGold==r.InitialAllAccountsGold,
+        "decision outcomes and cash transfers must reconcile");
+    Expect(decisions.Any(x=>x.Action=="autonomous_decision" &&
+        x.Detail.Contains("buyer has funded demand",StringComparison.Ordinal)),
+        "fishing sale decision explains its funded buyer");
+
+    var off=new SettlementWorld(cat,AutonomousFixtureSettings(0));
+    off.AdvanceTo(21L*1440);
+    off.CheckInvariants();
+    CheckCommodityBalance(off.Report());
+    Expect(off.Report().AutonomousChoices==0 && off.Report().AutonomousParticipants==0,
+        "setting participation to zero fully disables independent AI choices");
+    var replay=new SettlementWorld(cat,AutonomousFixtureSettings());
+    replay.AdvanceTo(21L*1440);
+    replay.CheckInvariants();
+    Expect(replay.Report().AutonomousChoices==r.AutonomousChoices &&
+        replay.Report().AutonomousCompleted==r.AutonomousCompleted &&
+        replay.Report().PersonalSaleIncome==r.PersonalSaleIncome,
+        "personal planning must reproduce exact outcomes for identical seeds");
+}
+
+static void AutonomousSmith()
+{
+    var cat=AutonomousFixture("Swordsmith",tools:true);
+    var world=new SettlementWorld(cat,AutonomousFixtureSettings());
+    var decisions=new List<SimObservation>();
+    world.Observer=o=>{if(o.Action.StartsWith("autonomous_",StringComparison.Ordinal) ||
+        o.Action=="personal_craft")decisions.Add(o);};
+    world.AdvanceTo(35L*1440);
+    world.CheckInvariants();
+    CheckCommodityBalance(world.Report());
+    var actor=world.Residents.Single();
+    Expect(actor.EquippedWeaponSku=="iron_sword" &&
+        actor.CommodityStock.GetValueOrDefault("iron_sword")==1 &&
+        actor.PersonalCrafts>=3,
+        "swordsmith should gather two resources, saw, smelt, forge and equip: "+
+        string.Join(" | ",decisions.Take(24).Select(x=>x.Action+":"+x.Detail)));
+    Expect(decisions.Any(x=>x.Action=="autonomous_goal" &&
+        x.Detail.Contains("equipped personally forged iron sword")),
+        "the planner explains completion of the personal weapon goal");
+    Expect(world.Report().AllAccountsGold==world.Report().InitialAllAccountsGold,
+        "personal sword forging must conserve all gold");
+}
+
+static void AutonomousResourceReservation()
+{
+    var first=AutonomousFixture("Miner",tools:true);
+    var original=first.Residents.Single();
+    var second=original with {Id="npc:second:mining",Name="Second miner"};
+    var catalog=first with {Residents=[original,second]};
+    // A dedicated scenario with one ore per resident and no free stock.
+    var world=new SettlementWorld(catalog,new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableHousing=false,
+        EnableExternalTrade=false,EnablePublicAssistance=false,
+        AutonomousParticipationPercent=0,OpenOrePerResident=1,
+        FirewoodDaysPerHousehold=100,ToolWorkHoursPerWear=100
+    });
+    Expect(world.OpenResources.Sum(s=>s.Ore)==2,
+        "two residents have a single finite two-ore local commons");
+    Expect(world.RequestPersonalGather(original.Id,"iron_ore"),
+        "first miner reserves their expected two-ore harvest");
+    Expect(!world.RequestPersonalGather(second.Id,"iron_ore"),
+        "a second miner cannot reserve the same finite deposit");
+    world.AdvanceTo(2L*1440);
+    world.CheckInvariants();
+    var r=world.Report();
+    CheckCommodityBalance(r);
+    Expect(world.Residents.Single(x=>x.Source.Id==original.Id)
+               .CommodityStock.GetValueOrDefault("iron_ore")==2 &&
+        r.PersonalGatherHours==1 && world.OpenResources.Sum(s=>s.Ore)==0,
+        "one timed gather consumes the reserved ore exactly once");
 }
 
 static void BreadSeptimBenchmark()
