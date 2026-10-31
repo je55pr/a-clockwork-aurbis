@@ -60,6 +60,8 @@ public sealed partial class SettlementWorld
            _settings.DailyImportCapPerTenResidents<0 ||
            _settings.DailySharedRent<0 || _settings.PortCargoUnitsPerWorkHour<0 ||
            _settings.MaxPortCargoCapacity<0 ||
+           _settings.MaxFreightLoad<1 || _settings.BaseFreightFee<0 ||
+           _settings.FreightFeePer90Minutes<0 ||
            _settings.ExternalFoodImportPrice<0 ||
            _settings.ExternalMaterialImportPrice<0 || _settings.DailyAssistanceLimit<0)
             throw new ArgumentOutOfRangeException(nameof(settings));
@@ -174,6 +176,11 @@ public sealed partial class SettlementWorld
             {
                 DeliverImportsAndRestock();
                 _queue.Enqueue(-1,(checked(Minute+DayMinutes),_sequence++));
+                continue;
+            }
+            if(index <= -2)
+            {
+                DeliverFreight(index);
                 continue;
             }
             var actor=_residents[index];

@@ -87,9 +87,16 @@ try{
  assert.equal(whole.counts.eligibleSingleAppearanceCharacters,3,'reject multiple-appearance person');
  assert.equal(whole.counts.placesWithExactMapMarkers,3);
  assert.ok(whole.businesses.some(b=>b.kind==='food_producer' &&
-   b.evidence.includes('SIMULATION DEFAULT')),'synthetic co-ops distinguish source evidence');
- assert.ok(whole.places.some(p=>p.name==='Community allotments near Seabright Grove'),
-   'NPC concentrations receive services even at locations not labelled towns');
+   b.evidence.includes('SIMULATION HYPOTHESIS')),'synthetic co-ops distinguish source evidence');
+ assert.ok(whole.places.some(p=>p.name==='Simulated growing grounds near Seabright Grove'),
+   'a mapped grove can be a productive hypothesis even without a town designation');
+ assert.ok(whole.places.filter(p=>p.role==='food_producer').length<
+   whole.places.filter(p=>p.mapX!==null).length,
+   'not every mapped population site receives a farm');
+ assert.ok(!whole.places.some(p=>p.role==='food_producer'&&
+   p.settlement==='Exampleton'),'the city is not automatically a farm');
+ assert.ok(!whole.places.some(p=>p.sourceType==='simulation_inferred_market'),
+   'tiny settlements receive no fictitious free market or forge');
  assert.ok(whole.counts.placesWithEstimatedMapMarkers>=1);
  assert.equal(whole.residents.find(x=>x.name==='Cedar').anchorPlaceId,'uesp:place:9');
  assert.ok(whole.places.find(x=>x.name==='Waterfront Market').mapEvidence==='estimated_parent_settlement_marker');

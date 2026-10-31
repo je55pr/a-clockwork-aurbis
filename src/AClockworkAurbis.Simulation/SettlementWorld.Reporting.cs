@@ -12,12 +12,15 @@ public sealed partial class SettlementWorld
         checked(_businesses.Sum(b=>b.Gold)+_residents.Sum(r=>r.Gold)+_publicGold);
 
     private long TotalFood() =>
-        checked(_businesses.Sum(b=>(long)b.Food)+_residents.Sum(r=>(long)r.Food));
+        checked(_businesses.Sum(b=>(long)b.Food)+_residents.Sum(r=>(long)r.Food)
+            +TransitCount("food"));
 
-    private long TotalMaterials() => _businesses.Sum(b=>(long)b.Materials);
+    private long TotalMaterials() =>
+        checked(_businesses.Sum(b=>(long)b.Materials)+TransitCount("materials"));
 
     private long TotalGoods() =>
-        checked(_businesses.Sum(b=>(long)b.Goods)+_residents.Sum(r=>(long)r.Goods));
+        checked(_businesses.Sum(b=>(long)b.Goods)+_residents.Sum(r=>(long)r.Goods)
+            +TransitCount("goods"));
 
     public SettlementReport Report()
     {
@@ -78,6 +81,17 @@ public sealed partial class SettlementWorld
                 _residents.Count(r=>r.HousingId is null) : 0,
             RentCollected=_rentCollected,TotalEvictions=_evictions,
             TotalRelocations=_relocations,TotalRehousings=_rehousings,
+            ShipmentsSent=_shipmentsSent,ShipmentsDelivered=_shipmentsDelivered,
+            ShipmentsInTransit=_freight.Count,FreightUnitsDelivered=_freightUnitsDelivered,
+            FoodInTransit=TransitCount("food"),MaterialsInTransit=TransitCount("materials"),
+            GoodsInTransit=TransitCount("goods"),FreightFees=_freightFees,
+            FreightRoutes=_deliveredByRoute.OrderByDescending(x=>x.Value)
+                .ThenBy(x=>x.Key.From,StringComparer.Ordinal)
+                .ThenBy(x=>x.Key.To,StringComparer.Ordinal)
+                .ThenBy(x=>x.Key.Commodity,StringComparer.Ordinal)
+                .Select(x=>new FreightRouteSnapshot(x.Key.From,
+                    _placeNames[x.Key.From], x.Key.To,_placeNames[x.Key.To],
+                    x.Key.Commodity,x.Value)).ToArray(),
             InitialFood=_initialFood,InitialMaterials=_initialMaterials,
             InitialGoods=_initialGoods,InitialGold=_initialGold,TotalGold=TotalGold(),
             BusinessDetails=_businesses.OrderBy(b=>b.Id,StringComparer.Ordinal)
@@ -132,6 +146,9 @@ public sealed partial class SettlementWorld
                r.Energy is <0 or >100||r.WorkRemainderMinutes is <0 or >=60)
                 throw new InvalidOperationException("Invalid resident state: "+r.Source.Id);
         }
+        if (_freight.Any(s => s.Value.Quantity <= 0 || s.Value.ArriveMinute <= Minute) ||
+            _shipmentsSent != _shipmentsDelivered + _freight.Count)
+            throw new InvalidOperationException("Regional freight schedule invalid");
         foreach(var b in _businesses)
         {
             if(b.Gold<0||b.Food<0||b.Materials<0||b.Goods<0||b.MineralReserve<0||b.LandYieldRemaining<0)

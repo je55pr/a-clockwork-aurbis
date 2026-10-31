@@ -232,6 +232,9 @@ public sealed record SettlementSettings
     public int DailySharedRent { get; init; } = 2;
     public int PortCargoUnitsPerWorkHour { get; init; } = 50;
     public int MaxPortCargoCapacity { get; init; } = 2000;
+    public int MaxFreightLoad { get; init; } = 40;
+    public int BaseFreightFee { get; init; } = 1;
+    public int FreightFeePer90Minutes { get; init; } = 1;
     public int MealPrice { get; init; } = 6;
     public int GoodsPrice { get; init; } = 12;
     public int FoodWholesalePrice { get; init; } = 2;
@@ -257,6 +260,9 @@ public sealed record BusinessSnapshot(
     int RetailSales, int WorkHours, int ItemsCrafted, long WagesPaid,
     long DividendsPaid,
     int CargoCapacity = 0, long CargoHandled = 0);
+
+public sealed record FreightRouteSnapshot(
+    string FromId, string From, string ToId, string To, string Commodity, long Units);
 
 public sealed record SettlementReport
 {
@@ -341,4 +347,13 @@ public sealed record SettlementReport
     public int TotalEvictions { get; init; }
     public int TotalRelocations { get; init; }
     public int TotalRehousings { get; init; }
+    public long ShipmentsSent { get; init; }
+    public long ShipmentsDelivered { get; init; }
+    public long FreightUnitsDelivered { get; init; }
+    public int ShipmentsInTransit { get; init; }
+    public int FoodInTransit { get; init; }
+    public int MaterialsInTransit { get; init; }
+    public int GoodsInTransit { get; init; }
+    public long FreightFees { get; init; }
+    public FreightRouteSnapshot[] FreightRoutes { get; init; } = [];
 }

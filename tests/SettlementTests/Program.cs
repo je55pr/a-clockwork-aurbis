@@ -24,6 +24,7 @@ var tests=new (string Name,Action Run)[]
     ("Unemployed residents can move towns for solvent jobs", EconomicMigration),
     ("Dock cargo needs paid handling and respects zero capacity", DockLabour),
     ("Competing ports attract cargo from their own productive hinterland", TwoPortCompetition),
+    ("Wholesale stock moves as finite, delayed and conserved freight", DelayedFreight),
     ("Deterministic regional simulations can run in time chunks", RegionalDeterminism),
     ("Large 10k actor headless performance and integrity", Stress)
 };
@@ -320,6 +321,8 @@ static void ClosedRegion()
     Expect(report.TotalGold==report.InitialGold,
         "closed region gold moves only between residents, firms and treasury");
     Expect(report.Meals>0,"locally generated food is eaten");
+    Expect(report.ShipmentsSent>0 && report.FreightUnitsDelivered>0,
+        "domestic freight continues even when all foreign trade is disabled");
 }
 
 static void NoSupply()
@@ -382,8 +385,8 @@ static void FundedAssistance()
     world.AdvanceTo(1440L*30);
     world.CheckInvariants();
     var r=world.Report();
-    Expect(r.AssistanceGoldPaid <= r.RevenueTaxed,
-        "with no opening treasury, assistance is limited by tax receipts");
+    Expect(r.AssistanceGoldPaid <= r.RevenueTaxed + r.FreightFees,
+        "with no opening treasury, assistance is limited by tax and carrier receipts");
     Expect(r.PublicGold>=0,"public budget cannot run negative");
 }
 
@@ -569,4 +572,49 @@ static void TwoPortCompetition()
         "both docks can earn real shipping work from nearby farm exports");
     Expect(report.FoodExported>0 && report.FoodImported==0,
         "transport comes from domestic farm labour, not free imports");
+}
+
+static void DelayedFreight()
+{
+    var original=Fixture(100,production:true);
+    var places=original.Places.Select(p=>p.Id switch
+    {
+        "sim:fields"=>p with {MapX=1000,MapY=1000,District="Rural Fields"},
+        "b:market"=>p with {MapX=800000,MapY=1000,District="Town Market"},
+        "b:tavern"=>p with {MapX=801000,MapY=1000,District="Town Market"},
+        "b:forge"=>p with {MapX=801000,MapY=1000,District="Town Market"},
+        _=>p
+    }).ToArray();
+    var world=new SettlementWorld(original with {Places=places},
+        new SettlementSettings{Economy=EconomyMode.RegionalProduction,
+            EnableExternalTrade=false,MaxFreightLoad=9});
+    bool observedPending=false;
+    long deliveredBefore=0;
+    long sentBefore=0;
+    for(long minute=0;minute<1440L*15;minute+=30)
+    {
+        world.AdvanceTo(minute);
+        var report=world.Report();
+        if(report.ShipmentsInTransit>0 && report.FoodInTransit>0)
+        {
+            observedPending=true;
+            deliveredBefore=report.ShipmentsDelivered;
+            sentBefore=report.ShipmentsSent;
+            Expect(report.FoodInTransit<=report.ShipmentsInTransit*9,
+                "every shipment has a finite vehicle carrying capacity");
+            world.CheckInvariants();
+            world.AdvanceTo(minute+1440);
+            break;
+        }
+    }
+    var after=world.Report();
+    world.CheckInvariants();
+    Expect(observedPending,"remote wholesale dispatches actual in-transit food");
+    Expect(after.ShipmentsDelivered>deliveredBefore,
+        "a delivery cannot be credited until the simulated trip finishes");
+    Expect(after.ShipmentsSent>=sentBefore&&
+        after.ShipmentsSent==after.ShipmentsDelivered+after.ShipmentsInTransit,
+        "all freight is either moving or arrived, never duplicated");
+    Expect(after.FreightFees>0,
+        "the distance-dependent common carrier charges for delivery");
 }

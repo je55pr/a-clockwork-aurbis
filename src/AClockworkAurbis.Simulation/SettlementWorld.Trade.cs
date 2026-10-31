@@ -12,21 +12,21 @@ public sealed partial class SettlementWorld
         int foodTarget = _foodShops.Length == 0 ? 0 :
             Math.Max(8, checked(_residents.Count * 2 / _foodShops.Length));
         foreach (var shop in _foodShops)
-            Wholesale(shop, ClosestSuppliers(shop, sources), foodTarget,
+            RegionalWholesale(shop, ClosestSuppliers(shop, sources), foodTarget,
                 BusinessKinds.FoodRetail);
 
         int materialTarget = _workshops.Length == 0 ? 0 :
             Math.Max(5, checked(_residents.Count / 2 / _workshops.Length));
         var materialSources = _extractors.Concat(_ports).ToArray();
         foreach (var workshop in _workshops)
-            Wholesale(workshop, ClosestSuppliers(workshop, materialSources),
+            RegionalWholesale(workshop, ClosestSuppliers(workshop, materialSources),
                 materialTarget, BusinessKinds.Workshop);
 
         var goodsStores = _businesses.Where(b => b.Kind == BusinessKinds.GoodsRetail).ToArray();
         int goodsTarget = goodsStores.Length == 0 ? 0 :
             Math.Max(4, checked(_residents.Count / 4 / goodsStores.Length));
         foreach (var shop in goodsStores)
-            Wholesale(shop, ClosestSuppliers(shop, _workshops),
+            RegionalWholesale(shop, ClosestSuppliers(shop, _workshops),
                 goodsTarget, BusinessKinds.GoodsRetail);
 
         if (_settings.EnableExternalTrade)

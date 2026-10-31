@@ -131,68 +131,89 @@ try{
      .map(l=>'npc:uesp-online:'+l.npc_page_id)),
   evidence:'UESP place type and npc_store links; finances and inventory are simulation defaults'
  }));
- // The source contains very few documented farms. Model hypothetical
- // agricultural co-ops near the densest source-associated NPC concentrations,
- // including ruins and outposts rather than just officially named towns.
- // None of these facilities is a claim that the ESO location had a farm.
+ // Real ESO workplaces remain as documented. Additional agriculture and
+ // provision stalls are hypotheses, not an amenity automatically given to
+ // every population centre. Availability now follows sparse geographic
+ // evidence/proxies; most settlements must obtain food from elsewhere.
  if(wholeZone){
-   // Allocate hypothetical services based on observed character density,
-   // regardless of whether ESO labels a place City, Town, ruin or campsite.
+   const sourceSites=[...resultPlaces];
+   const distance=(a,b)=>a.mapX===null||b.mapX===null?Infinity:
+     Math.hypot(a.mapX-b.mapX,a.mapY-b.mapY);
    const anchorPriority={npc_house:0,npc_store:1,npc_ship:2,npc_loc:3,
      npc_settlement:4,npc_city:5};
-   const anchored=new Map();
-   const direct=new Map();
+   const counts=new Map();
    for(const sourceLinks of byNpc.values()){
      const candidates=sourceLinks.filter(l=>l.relation!=='npc_city' ||
        !sourceLinks.some(q=>q.relation!=='npc_city'&&q.relation!=='npc_settlement'));
      candidates.sort((a,b)=>(anchorPriority[a.relation]??10)-
        (anchorPriority[b.relation]??10)||a.place_page_id-b.place_page_id);
-     const place=resultPlaces.find(p=>p.sourcePageId===candidates[0]?.place_page_id);
-     if(!place||place.mapX===null)continue;
-     const key=place.mapX+','+place.mapY;
-     anchored.set(key,(anchored.get(key)||0)+1);
-     direct.set(place.id,(direct.get(place.id)||0)+1);
+     const anchor=candidates.length ? resultPlaces.find(p=>
+       p.sourcePageId===candidates[0].place_page_id) : null;
+     if(anchor?.mapX===null||!anchor)continue;
+     const key=anchor.mapX+','+anchor.mapY;
+     counts.set(key,(counts.get(key)||0)+1);
    }
-   const sites=resultPlaces.filter(p=>p.mapX!==null &&
-       !['Zone','Treasure Map','Survey Report'].includes(p.sourceType))
-     .map(p=>({place:p,density:[...anchored].reduce((sum,[key,n])=>{
-       const [x,y]=key.split(',').map(Number);
-       return sum+(Math.hypot(x-p.mapX,y-p.mapY)<35000?n:0);
-     },0),direct:direct.get(p.id)||0}))
-     .sort((a,b)=>b.density-a.density||b.direct-a.direct||
-       a.place.id.localeCompare(b.place.id));
-   const centersOfActivity=[];
-   for(const {place,density} of sites){
-     if(density===0||centersOfActivity.length>=26)break;
-     if(centersOfActivity.some(x=>Math.hypot(x.mapX-place.mapX,
-         x.mapY-place.mapY)<35000))continue;
-     centersOfActivity.push(place);
+   const populationNear=p=>[...counts].reduce((sum,[key,n])=>{
+     const [x,y]=key.split(',').map(Number);
+     return sum+(Math.hypot(x-p.mapX,y-p.mapY)<35000?n:0);
+   },0);
+   const farmEvidence=p=>{
+     const name=p.name.toLowerCase(),type=(p.sourceType||'').toLowerCase();
+     if(/mine|ruin|cave|delve|camp|dungeon|lighthouse|tomb|keep|fort|castle|crypt|tunnel/.test(type))
+       return -1;
+     if(p.role==='food_producer')return 100;
+     if(/farm|plantation|orchard|vineyard|field/.test(name))return 75;
+     if(/grove|vale|greenwater|meadow|garden|cove/.test(name))return 50;
+     if(type==='grove'||type==='town')return 25;
+     return -1;
+   };
+   const farms=sourceSites.filter(p=>p.mapX!==null&&farmEvidence(p)>0)
+     .map(p=>({place:p,score:farmEvidence(p)}))
+     .sort((a,b)=>b.score-a.score||a.place.id.localeCompare(b.place.id));
+   const selected=[];
+   for(const {place} of farms){
+     if(selected.length>=7)break;
+     if(selected.some(p=>distance(p,place)<110000))continue;
+     if(sourceSites.some(p=>p.role==='food_producer'&&distance(p,place)<110000))
+       continue;
+     selected.push(place);
    }
-   for(const anchor of centersOfActivity){
+   for(const anchor of selected){
      const suffix=anchor.id.replace(/[^a-z0-9]+/gi,'-');
-     const farmId='sim:allotment:'+suffix;
+     const farmId='sim:growing-grounds:'+suffix;
      const district=anchor.district||anchor.name;
      resultPlaces.push({id:farmId,sourcePageId:0,
-       name:'Community allotments near '+anchor.name,
-       sourceType:'simulation_default_agriculture',settlement:anchor.name,
+       name:'Simulated growing grounds near '+anchor.name,
+       sourceType:'simulation_inferred_agriculture',settlement:anchor.name,
        zone:wholeZone,role:'food_producer',sourceUrl:'',
        mapX:anchor.mapX,mapY:anchor.mapY,
-       mapEvidence:anchor.mapX!==null?'simulation_at_source_anchor':'unmapped',district});
+       mapEvidence:'simulation_at_source_anchor',district});
      businesses.push({placeId:farmId,kind:'food_producer',ownerNpcId:null,
-       operatorNpcIds:[],evidence:'SIMULATION DEFAULT renewable plots near source place; not an ESO farm claim'});
-     const existingFood=businesses.some(b=>b.kind==='food_retail' &&
-        resultPlaces.find(p=>p.id===b.placeId)?.district===district);
-     if(!existingFood){
-       const shopId='sim:food-market:'+suffix;
-       resultPlaces.push({id:shopId,sourcePageId:0,
-         name:'Community provisions near '+anchor.name,
-         sourceType:'simulation_default_cooperative_market',settlement:anchor.name,
-         zone:wholeZone,role:'food_retail',sourceUrl:'',
-         mapX:anchor.mapX,mapY:anchor.mapY,
-         mapEvidence:anchor.mapX!==null?'simulation_at_source_anchor':'unmapped',district});
-       businesses.push({placeId:shopId,kind:'food_retail',ownerNpcId:null,
-         operatorNpcIds:[],evidence:'SIMULATION DEFAULT village food market; unconfirmed in source'});
-     }
+       operatorNpcIds:[],evidence:'SIMULATION HYPOTHESIS based on geographic/name hints, NOT confirmed ESO farmland'});
+   }
+   // Only a few unserved, populous settlements warrant a hypothetical food
+   // market. Ruins and every roadside landmark do not receive one by default.
+   const settlements=sourceSites.filter(p=>p.mapX!==null &&
+       ['Town','City'].includes(p.sourceType))
+     .map(p=>({place:p,pop:populationNear(p)}))
+     .filter(x=>x.pop>=12)
+     .sort((a,b)=>b.pop-a.pop||a.place.id.localeCompare(b.place.id));
+   let addedMarkets=0;
+   for(const {place,pop} of settlements){
+     if(addedMarkets>=3)break;
+     if(businesses.some(b=>b.kind==='food_retail'&&
+       resultPlaces.some(p=>p.id===b.placeId&&distance(p,place)<65000)))continue;
+     const suffix=place.id.replace(/[^a-z0-9]+/gi,'-');
+     const id='sim:food-market:'+suffix;
+     resultPlaces.push({id,sourcePageId:0,
+       name:'Simulated provisions near '+place.name,
+       sourceType:'simulation_inferred_market',settlement:place.name,
+       zone:wholeZone,role:'food_retail',sourceUrl:'',
+       mapX:place.mapX,mapY:place.mapY,
+       mapEvidence:'simulation_at_source_anchor',district:place.district||place.name});
+     businesses.push({placeId:id,kind:'food_retail',ownerNpcId:null,
+       operatorNpcIds:[],evidence:'SIMULATION HYPOTHESIS for an underserved population centre, NOT confirmed ESO market'});
+     addedMarkets++;
    }
  }
  const businessIds=new Set(businesses.map(b=>b.placeId));
