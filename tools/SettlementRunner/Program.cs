@@ -10,6 +10,7 @@ try
     string? economicMode=null;
     bool traceFirst=false,details=false,allResidents=false;
     bool disableTrade=false,disableProduction=false,disableAid=false;
+    bool establishedStart=false,disableRiskChoices=false;
     for(int i=0;i<args.Length;i++)
     {
         string Next() => i+1<args.Length ? args[++i] :
@@ -33,6 +34,8 @@ try
             case "--no-foreign-trade":disableTrade=true;break;
             case "--no-local-production":disableProduction=true;break;
             case "--no-assistance":disableAid=true;break;
+            case "--established-start":establishedStart=true;break;
+            case "--no-risk-choices":disableRiskChoices=true;break;
             case "--help":
                 Console.WriteLine(
                     "dotnet run -c Release --project tools/SettlementRunner -- "+
@@ -41,6 +44,7 @@ try
                     "[--no-local-production] [--no-assistance] [--rent-reserve GOLD] "+
                     "[--regular-hours N] [--casual-wage GOLD] [--casual-hours N] "+
                     "[--wild-forage UNITS] [--autonomy-percent 0..100] "+
+                    "[--established-start] [--no-risk-choices] "+
                     "[--trace NPC_ID] [--details] [--resident-details]");
                 return 0;
             default:throw new ArgumentException("Unknown parameter "+args[i]);
@@ -65,7 +69,9 @@ try
         RegularGuaranteedHoursPerDay=regularHours,
         CasualHourlyWage=casualWage,MaxCasualHoursPerDay=casualHours,
         WildForagePerResidentPerDay=wildForage,
-        AutonomousParticipationPercent=autonomyPercent});
+        AutonomousParticipationPercent=autonomyPercent,
+        EnableEstablishedOpeningEconomy=establishedStart,
+        EnableRiskAwareChoices=!disableRiskChoices});
     loading.Stop();
     if(traceFirst && world.Residents.Count>0)trace=world.Residents[0].Source.Id;
     if(trace is not null)
@@ -101,6 +107,8 @@ try
         CasualHourlyWage=casualWage,MaxCasualHoursPerDay=casualHours,
         WildForagePerResidentPerDay=wildForage,
         AutonomousParticipationPercent=autonomyPercent,
+        EstablishedOpeningEconomy=establishedStart,
+        RiskAwareChoices=!disableRiskChoices,
         summary.Settlement,
         summary.SourcePlaces,
         summary.SimulatedPlaces,
@@ -270,6 +278,7 @@ try
             LastLocation=r.CurrentPlaceId,
             r.HomeId,r.HousingId,r.RentSpent,r.Evictions,r.Relocations,r.Rehousings,
             r.HomelessDays,r.Gold,r.Food,r.Goods,r.Satiation,r.Energy,
+            r.RiskTolerance,r.FoodChoiceCount,
             CommodityInventory=mode==EconomyMode.CommodityProduction?
                 r.CommodityStock:null,
             r.MealsEaten,r.Purchases,r.Journeys,r.WageIncome,

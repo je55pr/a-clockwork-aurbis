@@ -185,6 +185,11 @@ public sealed class ResidentState
     public long ActionStart { get; internal set; }
     public long LastUpdate { get; internal set; }
     public int WorkStart { get; }
+    // Stable per-person inclination; 0 chooses the best scored option.
+    public int RiskTolerance { get; internal set; }
+    public long FoodChoiceCount { get; internal set; }
+    internal string? PlannedMealShopId { get; set; }
+    internal string? PlannedMealSku { get; set; }
     public decimal Gold { get; internal set; }
     public int Food { get; internal set; }
     public int Goods { get; internal set; }
@@ -349,6 +354,9 @@ public sealed record SettlementSettings
     // Personal economic initiative is opt-in per scenario and deterministic
     // per resident. It never changes the resource/transaction mechanics.
     public bool EnableAutonomousPersonalEconomy { get; init; } = true;
+    // The former bare-world scenario remains available for regression tests.
+    public bool EnableEstablishedOpeningEconomy { get; init; } = false;
+    public bool EnableRiskAwareChoices { get; init; } = true;
     public int AutonomousParticipationPercent { get; init; } = 22;
     public int AutonomousDailyActionLimit { get; init; } = 2;
     public int AutonomousMaxTravelMinutes { get; init; } = 130;

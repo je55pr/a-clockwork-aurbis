@@ -153,6 +153,8 @@ public sealed partial class SettlementWorld
 
     private BusinessState? ChooseShop(ResidentState actor,bool food)
     {
+        if(food && Detailed && _settings.EnableRiskAwareChoices)
+            return ChooseRiskAwareMealShop(actor);
         BusinessState? best=null;
         decimal lowest=decimal.MaxValue;
         // Chef staffing changes over time; don't cache which shops can

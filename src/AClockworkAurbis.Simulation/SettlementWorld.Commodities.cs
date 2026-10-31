@@ -126,6 +126,8 @@ public sealed partial class SettlementWorld
                     break;
             }
         }
+        if(_settings.EnableEstablishedOpeningEconomy)
+            SeedEstablishedOpeningInventory();
         OpenMarketAccounts();
         foreach(var sku in CommodityRecipes.Prices.Keys)
             Account(sku).Initial = CommodityStockOnHand(sku);
@@ -679,13 +681,22 @@ public sealed partial class SettlementWorld
         decimal cost=0;
         string[] candidates=food?CommodityRecipes.Meals:
             ["firewood","iron_tools","leather_goods","furnishings"];
+        string? plannedFood=food && resident.PlannedMealShopId==shop.Id
+            ?resident.PlannedMealSku:null;
+        if(food)
+        {
+            resident.PlannedMealShopId=null;
+            resident.PlannedMealSku=null;
+        }
         string? sku=food
-            ? candidates.Where(s=>Quantity(shop.Stock,s)>0 &&
-                    MealRetailQuote(shop,s)<=resident.Gold)
-                .OrderBy(s=>MealRetailQuote(shop,s))
-                .ThenBy(s=>Quantity(resident.Stock,s))
-                .ThenBy(s=>StableRandom.Hash(s+resident.Source.Id,_settings.Seed))
-                .FirstOrDefault()
+            ? plannedFood is not null && Quantity(shop.Stock,plannedFood)>0 &&
+                MealRetailQuote(shop,plannedFood)<=resident.Gold ?plannedFood:
+                candidates.Where(s=>Quantity(shop.Stock,s)>0 &&
+                        MealRetailQuote(shop,s)<=resident.Gold)
+                    .OrderBy(s=>MealRetailQuote(shop,s))
+                    .ThenBy(s=>Quantity(resident.Stock,s))
+                    .ThenBy(s=>StableRandom.Hash(s+resident.Source.Id,_settings.Seed))
+                    .FirstOrDefault()
             : NeededSupplyAtShop(resident,shop);
         if(sku is null)return;
         cost=food?MealRetailQuote(shop,sku):HouseholdGoodsQuote(shop,sku);

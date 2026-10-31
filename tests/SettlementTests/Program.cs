@@ -39,6 +39,8 @@ var tests=new (string Name,Action Run)[]
     ("Cancelled personal actions cannot duplicate or shortcut gathering", PersonalCancellationAndExhaustion),
     ("Commodity-market tax rates are configurable and cannot mint gold", ConfigurableDetailedTaxes),
     ("Crop failure blocks harvesting but not existing personal trade", PersonalTradeDuringCropFailure),
+    ("Deterministic risk tolerance explores plausible alternatives", RiskChoices),
+    ("Established opening endowments are finite, diverse and conserved", EstablishedOpening),
     ("Autonomous fisher earns real income from catch and buyers", AutonomousFisher),
     ("Autonomous smith builds and equips a personally owned sword", AutonomousSmith),
     ("Concurrent personal gather requests reserve finite ore", AutonomousResourceReservation),
@@ -1684,4 +1686,86 @@ static void FundedCapitalConstruction()
     closed.CheckInvariants();
     Expect(closed.Report().CapitalProjectsStarted==0,
         "shutting off local production cannot secretly construct equipment");
+}
+
+static void RiskChoices()
+{
+    var options=new[]
+    {
+        new NpcChoiceOption<string>("safe",0),
+        new NpcChoiceOption<string>("interesting",25),
+        new NpcChoiceOption<string>("unusual",55)
+    };
+    int medium=0,high=0;
+    for(int i=0;i<1000;i++)
+    {
+        Expect(NpcChoicePolicy.Choose(options,0,"npc:risk",42,i)=="safe",
+            "zero risk always chooses the cheapest feasible alternative");
+        var middle=NpcChoicePolicy.Choose(options,35,"npc:risk",42,i);
+        var adventurous=NpcChoicePolicy.Choose(options,90,"npc:risk",42,i);
+        if(middle!="safe")medium++;
+        if(adventurous!="safe")high++;
+        Expect(adventurous==NpcChoicePolicy.Choose(options,90,"npc:risk",42,i),
+            "the same NPC and decision index always produce the same choice");
+    }
+    Expect(medium>0 && high>medium+80,
+        "risk tolerance increases less-optimal experimentation without becoming random chaos");
+    bool invalid=false;
+    try
+    {
+        NpcChoicePolicy.Choose(new[] {new NpcChoiceOption<string>("bad",double.NaN)},
+            100,"npc:risk",42,0);
+    }
+    catch(ArgumentException){invalid=true;}
+    Expect(invalid,"invalid option utility is rejected");
+}
+static void EstablishedOpening()
+{
+    var catalog=CommodityFixture();
+    var bareSettings=new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false
+    };
+    var bare=new SettlementWorld(catalog,bareSettings);
+    var establishedSettings=bareSettings with{EnableEstablishedOpeningEconomy=true};
+    var established=new SettlementWorld(catalog,establishedSettings);
+    var duplicate=new SettlementWorld(catalog,establishedSettings);
+    Expect(established.Residents.Sum(r=>r.Food)>bare.Residents.Sum(r=>r.Food),
+        "established residents begin with stored meals rather than empty cupboards");
+    Expect(established.Businesses.Sum(b=>b.CommodityStock.Values.Sum())>
+        bare.Businesses.Sum(b=>b.CommodityStock.Values.Sum()),
+        "established firms receive declared opening inventory");
+    Expect(established.Businesses.Any(b=>b.Kind==BusinessKinds.GoodsRetail &&
+        b.CommodityStock.GetValueOrDefault("iron_tools")>0),
+        "retailers begin with a practical range of products");
+    Expect(established.Residents.Select(r=>r.RiskTolerance)
+        .SequenceEqual(duplicate.Residents.Select(r=>r.RiskTolerance)),
+        "identities carry reproducible risk scores");
+    Expect(established.Residents.All(r=>r.RiskTolerance is >=0 and <=100),
+        "risk values remain bounded");
+    established.CheckInvariants();
+    duplicate.CheckInvariants();
+    Expect(established.Report().CommodityDetails.All(x=>x.Initial==x.StockOnHand),
+        "opening inventory is recorded before simulation as an initial endowment");
+    Expect(established.Report().InitialAllAccountsGold==
+        bare.Report().InitialAllAccountsGold,
+        "starter stock cannot mint monetary balances");
+    var stockedId=catalog.Residents[0].Id;
+    var withPersonalEndowment=catalog with
+    {
+        Residents=catalog.Residents.Select(r=>r.Id==stockedId
+            ?r with{SimulatedStartingItems=new Dictionary<string,int>{{"bread",100}}}
+            :r).ToArray()
+    };
+    var capped=new SettlementWorld(withPersonalEndowment,establishedSettings);
+    Expect(capped.Residents.Single(r=>r.Source.Id==stockedId)
+        .CommodityStock.GetValueOrDefault("bread")==100,
+        "opening endowments respect explicit personal inventory limits");
+    capped.CheckInvariants();
+    established.AdvanceTo(20L*1440);
+    duplicate.AdvanceTo(20L*1440);
+    established.CheckInvariants();
+    Expect(JsonSerializer.Serialize(established.Report())==
+        JsonSerializer.Serialize(duplicate.Report()),
+        "established economy stays deterministic across equivalent runs");
 }

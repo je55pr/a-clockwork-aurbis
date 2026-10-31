@@ -121,7 +121,10 @@ public sealed partial class SettlementWorld
             double satiation=55+StableRandom.Between(person.Id,_settings.Seed,25,40);
             double energy=55+StableRandom.Between(person.Id,_settings.Seed,26,40);
             string home=person.HomePlaceId ?? "sim:unmapped-home:"+person.Id;
-            var state=new ResidentState(person,home,cash,food,satiation,energy,start);
+            var state=new ResidentState(person,home,cash,food,satiation,energy,start)
+            {
+                RiskTolerance=StableRandom.Between(person.Id,_settings.Seed,31,101)
+            };
             int idx=_residents.Count;
             _residents.Add(state);
             _residentById.Add(person.Id,state);
