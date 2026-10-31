@@ -6,9 +6,9 @@ namespace AClockworkAurbis.Simulation;
 public sealed partial class SettlementWorld
 {
     private long _autonomousChoices, _autonomousCompleted, _autonomousFailed;
-    private readonly long[] _autonomousChosenKinds=new long[4];
-    private readonly long[] _autonomousCompletedKinds=new long[4];
-    private readonly long[] _autonomousFailedKinds=new long[4];
+    private readonly long[] _autonomousChosenKinds=new long[Enum.GetValues<PersonalTaskKind>().Length];
+    private readonly long[] _autonomousCompletedKinds=new long[Enum.GetValues<PersonalTaskKind>().Length];
+    private readonly long[] _autonomousFailedKinds=new long[Enum.GetValues<PersonalTaskKind>().Length];
     private readonly HashSet<string> _autonomousParticipants =
         new(StringComparer.Ordinal);
 
@@ -137,7 +137,7 @@ public sealed partial class SettlementWorld
                 Quantity(actor.Stock,"iron_sword")==0 &&
                 (sku is "iron_ore" or "logs" or "firewood" or
                     "lumber" or "iron_ingot");
-            int reserve=preservingSword ? owned : sku=="iron_sword" ? 1:0;
+            int reserve=preservingSword ? owned : sku is "iron_sword" or "firewood" ? 1:0;
             int quantity=Math.Min(2,owned-reserve);
             if(quantity<=0)continue;
             var buyer=NearbyBuyer(actor,sku,quantity);

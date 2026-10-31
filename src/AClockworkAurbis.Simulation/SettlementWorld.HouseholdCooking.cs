@@ -194,7 +194,7 @@ public sealed partial class SettlementWorld
     }
 
     private void CompleteProfessionalCooking(ResidentState worker,
-        BusinessState workplace,int hours)
+        BusinessState workplace,int hours,int? paidWagePerHour=null)
     {
         int numerator=IsNamedChef(worker)?3:2;
         bool CookBatch(int paidHours)
@@ -207,7 +207,8 @@ public sealed partial class SettlementWorld
                 .ThenBy(r=>r.Id,StringComparer.Ordinal)
                 .FirstOrDefault();
             if(recipe is null)return false;
-            CraftMarketRecipe(workplace,recipe,numerator,2,paidHours);
+            CraftMarketRecipe(workplace,recipe,numerator,2,paidHours,
+                paidWagePerHour);
             int output=recipe.Products.Sum(p=>checked(p.Value*numerator/2));
             _recipeBatches++;
             workplace.ItemsCrafted=checked(workplace.ItemsCrafted+output);

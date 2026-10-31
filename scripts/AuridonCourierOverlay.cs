@@ -38,32 +38,59 @@ public partial class AuridonCourierOverlay : Control
         var file=ProjectSettings.GlobalizePath(
             "res://.research/auridon-courier-preview.json");
         if(!File.Exists(file))return;
-        using var document=JsonDocument.Parse(File.ReadAllText(file));
-        var root=document.RootElement;
-        if(root.GetProperty("schemaVersion").GetInt32()!=1)
-            throw new InvalidDataException("Unknown courier preview schema");
-        foreach(var j in root.GetProperty("journeys").EnumerateArray())
+        try
         {
-            if(!Coordinate(j,"fromMapX",out var fx) ||
-               !Coordinate(j,"fromMapY",out var fy) ||
-               !Coordinate(j,"toMapX",out var tx) ||
-               !Coordinate(j,"toMapY",out var ty) ||
-               !Timestamp(j,"pickupMinute",out long pickup))continue;
-            bool complete=Timestamp(j,"deliveredMinute",out long arrival);
-            if(!complete && !Timestamp(j,"expectedDeliveryMinute",out arrival))
-                continue;
-            if(arrival<=pickup)continue;
-            var from=new Vector2(fx,1f-fy)*512f;
-            var to=new Vector2(tx,1f-ty)*512f;
-            if(!Inside(from)||!Inside(to))continue;
-            _routes.Add(new Route(from,to,pickup,arrival,
-                j.GetProperty("courierName").GetString()??"Courier",
-                j.GetProperty("commodity").GetString()??"goods",complete));
+            using var document=JsonDocument.Parse(File.ReadAllText(file));
+            var root=document.RootElement;
+            if(root.ValueKind!=JsonValueKind.Object ||
+               !root.TryGetProperty("schemaVersion",out var version) ||
+               version.ValueKind!=JsonValueKind.Number ||
+               !version.TryGetInt32(out int schema) || schema!=1 ||
+               !root.TryGetProperty("journeys",out var journeys) ||
+               journeys.ValueKind!=JsonValueKind.Array)
+                throw new InvalidDataException("Invalid courier preview schema");
+
+            // Never expose a half-loaded list if a record or file is invalid.
+            var parsed=new List<Route>();
+            foreach(var j in journeys.EnumerateArray())
+            {
+                if(j.ValueKind!=JsonValueKind.Object ||
+                   !Coordinate(j,"fromMapX",out var fx) ||
+                   !Coordinate(j,"fromMapY",out var fy) ||
+                   !Coordinate(j,"toMapX",out var tx) ||
+                   !Coordinate(j,"toMapY",out var ty) ||
+                   !Timestamp(j,"pickupMinute",out long pickup))continue;
+                bool complete=Timestamp(j,"deliveredMinute",out long arrival);
+                if(!complete && !Timestamp(j,"expectedDeliveryMinute",out arrival))
+                    continue;
+                if(arrival<=pickup)continue;
+                var from=new Vector2(fx,1f-fy)*512f;
+                var to=new Vector2(tx,1f-ty)*512f;
+                if(!Inside(from)||!Inside(to))continue;
+                parsed.Add(new Route(from,to,pickup,arrival,
+                    StringField(j,"courierName","Courier"),
+                    StringField(j,"commodity","goods"),complete));
+            }
+            if(parsed.Count==0)return;
+            _routes.AddRange(parsed);
+            _start=_routes.Min(x=>x.Pickup);
+            _end=_routes.Max(x=>x.Arrival);
+            _playhead=_start;
         }
-        if(_routes.Count==0)return;
-        _start=_routes.Min(x=>x.Pickup);
-        _end=_routes.Max(x=>x.Arrival);
-        _playhead=_start;
+        catch(Exception error) when(error is JsonException or IOException or
+            InvalidDataException)
+        {
+            _routes.Clear();
+            _playhead=_start=_end=0;
+            GD.PushWarning("Courier preview ignored: "+error.Message);
+        }
+    }
+
+    private static string StringField(JsonElement value,string property,string fallback)
+    {
+        return value.TryGetProperty(property,out var field) &&
+            field.ValueKind==JsonValueKind.String
+            ?field.GetString()??fallback:fallback;
     }
 
     private static bool Timestamp(JsonElement value,string property,out long result)

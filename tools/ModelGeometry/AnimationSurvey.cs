@@ -133,6 +133,7 @@ internal static class AnimationSurvey
             {
                 ids[k]=bytes[v*stride+indexOffset+k];
                 int rawWeight=bytes[v*stride+weightOffset+k];
+                if(rawWeight==0)ids[k]=0; // Unused slots are valid indices too.
                 total+=rawWeight;
                 weights[k]=rawWeight/255f;
                 if(rawWeight!=0&&ids[k]>=bindings)

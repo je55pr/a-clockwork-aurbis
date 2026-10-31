@@ -385,8 +385,9 @@ public sealed record SettlementSettings
     public int OpenFishPerResidentPerDay { get; init; } = 1;
     public int OpenGamePerResidentPerDay { get; init; } = 1;
     public int MaxPersonalCommodityStock { get; init; } = 100;
-    // Personal economic initiative is opt-in per scenario and deterministic
-    // per resident. It never changes the resource/transaction mechanics.
+    // Personal economic initiative is enabled by default and deterministic
+    // per resident. Scenarios may disable it or set participation to zero;
+    // all actions still use the same finite resource/transaction mechanics.
     public bool EnableAutonomousPersonalEconomy { get; init; } = true;
     // The former bare-world scenario remains available for regression tests.
     public bool EnableEstablishedOpeningEconomy { get; init; } = false;

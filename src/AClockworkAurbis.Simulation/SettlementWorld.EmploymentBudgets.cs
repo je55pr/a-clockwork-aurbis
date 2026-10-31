@@ -136,6 +136,8 @@ public sealed partial class SettlementWorld
         int wage=_settings.HourlyWage;
         if(PublicEmployer(firm))
         {
+            if(!_settings.EnableBudgetedPublicEmployment)
+                return firm.Gold>=Math.Max(12,_settings.HourlyWage*8);
             int slots=count+1;
             decimal pledged=checked((decimal)slots*
                 _settings.PublicTargetPaidHoursPerWorker*wage*

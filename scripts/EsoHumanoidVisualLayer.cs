@@ -80,15 +80,28 @@ public partial class EsoHumanoidVisualLayer : Node3D
         _oodle = decoder.LibraryPath;
         _placements.AddRange(placements);
         foreach (var kv in people) _people[kv.Key] = kv.Value;
-        var sources = new List<(uint, EsoRecord)>();
-        foreach (uint id in Parts.SelectMany(x => x).Concat(EsoHumanoidWardrobe.Sources)
-            .Concat(HairStyles.SelectMany(x=>x)).Concat(EsoHumanoidWardrobe.AccessorySources).Distinct())
+        var ids = Parts.SelectMany(x=>x).Concat(EsoHumanoidWardrobe.Sources)
+            .Concat(HairStyles.SelectMany(x=>x))
+            .Concat(EsoHumanoidWardrobe.AccessorySources).Distinct().ToArray();
+        var wanted=ids.ToHashSet();
+        var found=new Dictionary<uint,EsoRecord>();
+        // A single scan replaces dozens of full 1.3M-record manifest walks.
+        // Keep the first unflagged record for each ID, as FindId did.
+        for(int ordinal=0;ordinal<archive.Count && found.Count<wanted.Count;ordinal++)
         {
-            var record = archive.FindId(id).FirstOrDefault(r =>
-                archive.GetIdIndexFields(r.Ordinal).Flags == 0);
-            if (record.UncompressedSize is < 64 or > 32_000_000)
+            var record=archive.GetRecord(ordinal);
+            if(wanted.Contains(record.FileId) &&
+               !found.ContainsKey(record.FileId) &&
+               archive.GetIdIndexFields(ordinal).Flags==0)
+                found.Add(record.FileId,record);
+        }
+        var sources = new List<(uint, EsoRecord)>();
+        foreach(uint id in ids)
+        {
+            if(!found.TryGetValue(id,out var record) ||
+               record.UncompressedSize is <64 or >32_000_000)
                 throw new FileNotFoundException($"ESO character source 0x{id:X8} unavailable");
-            sources.Add((id, record));
+            sources.Add((id,record));
         }
         _source = sources.ToArray();
     }

@@ -155,16 +155,18 @@ public partial class EsoModelStage : Node3D
         foreach (string arg in new[] { helper, granny, id.ToString("X8"), output, archive.SourcePath, decoder.LibraryPath })
             process.StartInfo.ArgumentList.Add(arg);
         if (!process.Start()) throw new IOException("Could not start isolated GR2 helper.");
+        // Drain stderr concurrently so a verbose native helper cannot fill
+        // the pipe and deadlock while we wait for the child to exit.
+        Task<string> stderr=process.StandardError.ReadToEndAsync();
         if (!process.WaitForExit(30000))
         {
             process.Kill(entireProcessTree: true);
             throw new TimeoutException("GR2 helper exceeded 30 seconds.");
         }
+        string failure=stderr.GetAwaiter().GetResult();
         if (process.ExitCode != 0)
-        {
-            string failure = process.StandardError.ReadToEnd();
-            throw new InvalidDataException("GR2 helper failed: " + failure[..Math.Min(400, failure.Length)]);
-        }
+            throw new InvalidDataException("GR2 helper failed: " +
+                failure[..Math.Min(400, failure.Length)]);
         if (!File.Exists(output)) throw new IOException("GR2 helper returned no geometry.");
         return output;
     }

@@ -215,7 +215,7 @@ public sealed partial class SettlementWorld
         }
     }
 
-    private bool CompleteCommodityWork(ResidentState actor,BusinessState company,
+    internal bool CompleteCommodityWork(ResidentState actor,BusinessState company,
         int hours,int? hourlyWage=null)
     {
         if(!_settings.EnableLocalProduction || hours<=0)return true;
@@ -308,11 +308,11 @@ public sealed partial class SettlementWorld
                 break;
             }
             case BusinessKinds.Bakery:
-                CompleteProfessionalCooking(actor,company,hours);
+                CompleteProfessionalCooking(actor,company,hours,hourlyWage);
                 break;
             case BusinessKinds.FoodRetail or BusinessKinds.GoodsRetail
                 when IsNamedChef(actor):
-                CompleteProfessionalCooking(actor,company,hours);
+                CompleteProfessionalCooking(actor,company,hours,hourlyWage);
                 break;
             case BusinessKinds.Smeltery:
             case BusinessKinds.Sawmill:
@@ -336,7 +336,7 @@ public sealed partial class SettlementWorld
                         .ThenBy(r=>r.Id,StringComparer.Ordinal)
                         .FirstOrDefault();
                     if(recipe is null)return false;
-                    CraftMarketRecipe(company,recipe,1,1,paidHours);
+                    CraftMarketRecipe(company,recipe,1,1,paidHours,hourlyWage);
                     _recipeBatches++;
                     company.ItemsCrafted+=recipe.Products.Values.Sum();
                     _crafted+=recipe.Products.Values.Sum();
@@ -600,15 +600,6 @@ public sealed partial class SettlementWorld
                 int available=Quantity(seller.Stock,sku);
                 BusinessState? carrier=UsesPaidCarriers?
                     ChoosePaidCarrier(seller,buyer):null;
-                ResidentState? courier=carrier is not null &&
-                    _settings.EnableNpcCourierJourneys
-                    ?ChooseCourierFor(carrier,seller):null;
-                if(carrier is not null &&
-                   _settings.EnableNpcCourierJourneys && courier is null)
-                {
-                    CourierStaffShortage();
-                    continue;
-                }
                 if(UsesPaidCarriers && carrier is null)
                 {
                     CarrierShortage(need);
@@ -619,8 +610,7 @@ public sealed partial class SettlementWorld
                 int minutes=PlaceTravelMinutes(seller.Place,buyer.Place);
                 int charge=checked(_settings.BaseFreightFee+
                     (int)Math.Ceiling(minutes/90d)*_settings.FreightFeePer90Minutes);
-                if(buyer.Gold<charge ||
-                   courier is not null && carrier!.Gold+charge<1m)continue;
+                if(buyer.Gold<charge)continue;
                 decimal availableGold=buyer.Gold-charge;
                 // Each unit price is quoted and settled in hundredths
                 // of a septim. No rounding up whole-septim payments.
@@ -631,6 +621,19 @@ public sealed partial class SettlementWorld
                 if(carrier is not null)
                     units=Math.Min(units,carrier.CargoCapacity);
                 if(units==0)continue;
+                ResidentState? courier=null;
+                if(carrier is not null && _settings.EnableNpcCourierJourneys)
+                {
+                    // Only attempt an expensive NPC search after checking
+                    // the buyer can fund a nonzero, capacity-limited load.
+                    if(carrier.Gold+charge<1m)continue;
+                    courier=ChooseCourierFor(carrier,seller);
+                    if(courier is null)
+                    {
+                        CourierStaffShortage();
+                        continue;
+                    }
+                }
 
                 decimal payment=checked(units*unitPrice);
                 buyer.Gold-=payment+charge;

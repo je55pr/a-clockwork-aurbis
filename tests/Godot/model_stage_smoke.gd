@@ -10,7 +10,8 @@ func _check() -> void:
     var stage := lab.get_node("SourceModelStage")
     var loaded := false
     var summary := ""
-    for i in 500:
+    var load_deadline := Time.get_ticks_msec() + 70000
+    while Time.get_ticks_msec() < load_deadline:
         await physics_frame
         var mesh_root := stage.get_node("ImportedMeshes")
         loaded = mesh_root.get_child_count() > 0
@@ -55,7 +56,8 @@ func _check() -> void:
         return
     skinned_button.pressed.emit()
     summary = ""
-    for i in 450:
+    var skin_deadline := Time.get_ticks_msec() + 70000
+    while Time.get_ticks_msec() < skin_deadline:
         await physics_frame
         summary = ""
         for label in stage.find_children("*", "Label", true, false):

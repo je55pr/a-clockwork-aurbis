@@ -152,7 +152,8 @@ public partial class SourcePropLayer : Node3D
         {
             var record=archive.GetRecord(i);
             if(archive.GetIdIndexFields(i).Flags!=0)continue;
-            if(record.UncompressedSize is >=128 and <=20_000_000)
+            // 4096x4096 DXT5 with mips can exceed 22 MB.
+            if(record.UncompressedSize is >=128 and <=24_000_000)
                 _sourceOrdinals.TryAdd(record.FileId,i);
             if(!modelIds.Contains(record.FileId))continue;
             if(!candidateRecords.TryGetValue(record.FileId,out var records))

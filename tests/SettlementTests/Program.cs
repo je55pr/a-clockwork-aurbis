@@ -44,6 +44,7 @@ var tests=new (string Name,Action Run)[]
     ("Public payroll is allocated fairly without minting or phantom contracts", PublicPayrollBudget),
     ("Permanent private hires require observed demand and cash runway", SustainablePrivateHiring),
     ("Unfunded processors may offer real casual manufacturing shifts", CasualProcessorWork),
+    ("Casual manufacturing uses paid wage cost and worker-specific preflight", CasualManufacturingCosts),
     ("Brewing, tavern leisure and clothing form conserved economic activities", BrewingClothingAndTaverns),
     ("Paid hauliers deliver only with real work and finite shipping capacity", PaidFreightCarriers),
     ("Named couriers actually carry freight and settle wage escrow on delivery", NpcCourierJourneys),
@@ -1826,6 +1827,20 @@ static void PublicPayrollBudget()
     Expect(trulyUnfunded.Report().ActivePublicEmployees==0 &&
         trulyUnfunded.Report().ResidentsFurloughed>=2,
         "unfunded positions cannot masquerade as permanent after the grace period");
+
+    var lowCash=settings with
+    {
+        InitialPublicGoldPerResident=0,StartingBusinessGold=40,
+        EnableBudgetedPublicEmployment=false
+    };
+    var oldPublic=new SettlementWorld(catalog,lowCash);
+    var newPublic=new SettlementWorld(catalog,lowCash with
+    {
+        EnableBudgetedPublicEmployment=true
+    });
+    Expect(oldPublic.CanOfferPermanentContract(chapel.Id) &&
+        !newPublic.CanOfferPermanentContract(chapel.Id),
+        "disabling budgeted payroll restores the old public hiring threshold");
 }
 
 static void SustainablePrivateHiring()
@@ -2151,4 +2166,48 @@ static void NpcCourierJourneys()
         unavailable.UnfulfilledFreightRequests>0 &&
         unavailable.CarrierRevenue==0,
         "paid cargo capacity without an eligible person cannot teleport goods");
+}
+
+static void CasualManufacturingCosts()
+{
+    var fixture=CommodityFixture();
+    var settings=new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableExternalTrade=false,AutonomousParticipationPercent=0
+    };
+    var world=new SettlementWorld(fixture,settings);
+    var sawmill=world.Businesses.Single(b=>b.Id=="sim:sawmill");
+    var originalValue=sawmill.InventoryValueMilli.Values.Sum();
+    var resident=world.Residents.First();
+    Expect(world.CompleteCommodityWork(resident,sawmill,1,2),
+        "a funded casual manufacturing hour can create a real physical product");
+    Expect(sawmill.ItemsCrafted>0 &&
+        sawmill.InventoryValueMilli.Values.Sum()==originalValue+2000L,
+        "inventory cost basis uses the actually paid two-gold wage, not the standard rate");
+
+    var chefSource=fixture with
+    {
+        Residents=fixture.Residents.Select((r,i)=>i==0
+            ?r with {Profession="Chef"}:r).ToArray()
+    };
+    var chefWorld=new SettlementWorld(chefSource,settings);
+    var bakery=chefWorld.Businesses.Single(b=>b.Id=="sim:bakery");
+    bakery.Stock.Clear();
+    bakery.Stock["wheat"]=2;
+    bakery.Stock["firewood"]=1;
+    bakery.Stock["bread"]=132;
+    bakery.Gold=1000;
+    bakery.PlannedHours=0;
+    var chef=chefWorld.Residents.Single(r=>r.Source.Id==chefSource.Residents[0].Id);
+    var ordinary=chefWorld.Residents.First(r=>r.Source.Profession!="Chef");
+    Expect(!chefWorld.CanTakeCasualShift(bakery,chef) &&
+        chefWorld.CanTakeCasualShift(bakery,ordinary),
+        "an enhanced-output chef cannot be paid to cook 42 bread into just 28 free slots");
+
+    var ledger=new SettlementWorld(fixture,settings);
+    ledger.AdvanceTo(12L*1440);
+    ledger.CheckInvariants();
+    Expect(ledger.Report().AllAccountsGold==ledger.Report().InitialAllAccountsGold,
+        "casual production still preserves actual monetary balances");
 }
