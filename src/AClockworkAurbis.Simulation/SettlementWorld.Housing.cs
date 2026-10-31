@@ -176,11 +176,14 @@ public sealed partial class SettlementWorld
             : _settings.BaseTravelMinutes + _settings.UnknownMapInterdistrictMinutes;
     }
 
+    private int HomeCommuteMinutes(ResidentState resident, BusinessState workplace) =>
+        PlaceTravelMinutes(Anchor(resident, resident.HomeId), workplace.Place);
+
     private HousingUnit? AvailableHousingNear(ResidentState resident, BusinessState workplace)
     {
         if (resident.Gold < _settings.MealPrice + _settings.DailySharedRent * 2 + 4)
             return null;
-        return _housing.Where(h => h.Vacant &&
+        return _housing.Where(h => h.Vacant && h.Id != resident.HousingId &&
                 (h.Place.SourcePageId == 0 || h.Id == resident.Source.HomePlaceId) &&
                 PlaceTravelMinutes(h.Place, workplace.Place) <= 130)
             .OrderBy(h => PlaceTravelMinutes(h.Place, workplace.Place))

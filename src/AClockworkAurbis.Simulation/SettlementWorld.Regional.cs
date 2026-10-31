@@ -290,7 +290,9 @@ public sealed partial class SettlementWorld
             {
                 if(employer.Gold < Math.Max(12, _settings.HourlyWage * 8) ||
                    _staff[employer.Id].Count >= ContractCapacity(employer))continue;
-                int route=JourneyDuration(person,employer.Id);
+                // Employment viability is based on home-to-work commuting,
+                // not where somebody happens to be standing at 6 AM.
+                int route=HomeCommuteMinutes(person,employer);
                 if(route>130 && (!_settings.EnableHousing ||
                     AvailableHousingNear(person, employer) is null))continue;
                 // Prefer nearby opportunities, but allow a fresh start in
@@ -304,7 +306,7 @@ public sealed partial class SettlementWorld
                 if(candidate<score){score=candidate;best=employer;}
             }
             if(best is null)continue;
-            if (JourneyDuration(person, best.Id) > 130 &&
+            if (HomeCommuteMinutes(person, best) > 130 &&
                 !RelocateForJob(person, best)) continue;
             person.AssignedWorkPlaceId=best.Id;
             person.OnUnpaidLeave=false;
