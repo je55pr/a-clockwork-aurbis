@@ -1217,6 +1217,7 @@ void fragment() {
                     var population=new PopulationPlaceholderLayer {Name="AuridonNpcPlaceholders"};
                     population.Setup(_archive,_decoder,bundle,props,result.LowestHeight,tileX,tileZ);
                     population.ConfigureFirstPersonAim(FirstPersonLab);
+                    population.EnableSourceHumanoids(FirstPersonLab);
                     population.SetDensity(_populationDensity);
                     population.SetShown(_showPopulation);
                     population.SetHoverGate(()=>_bestView&&_simpleHud?.Visible==true&&
