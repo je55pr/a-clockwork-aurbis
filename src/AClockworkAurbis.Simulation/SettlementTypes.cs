@@ -120,7 +120,14 @@ public sealed class ResidentState
         WorkStart = workStart;
     }
     public ResidentDefinition Source { get; }
-    public string HomeId { get; }
+    public string HomeId { get; internal set; }
+    public string? HousingId { get; internal set; }
+    internal bool RoughSleeping { get; set; }
+    public int Relocations { get; internal set; }
+    public int Rehousings { get; internal set; }
+    public int Evictions { get; internal set; }
+    public int HomelessDays { get; internal set; }
+    public long RentSpent { get; internal set; }
     // Source-backed job links are immutable; contracts are simulation state.
     public string? WorkId => OnUnpaidLeave ? null : AssignedWorkPlaceId ?? Source.WorkPlaceId;
     public bool OnUnpaidLeave { get; internal set; }
@@ -191,6 +198,8 @@ public sealed class BusinessState
     public int LandYieldRemaining { get; internal set; }
     public int MineralReserve { get; internal set; }
     public int WorkerCount { get; internal set; }
+    public int CargoCapacity { get; internal set; }
+    public long CargoHandled { get; internal set; }
 }
 
 public sealed record SettlementSettings
@@ -219,6 +228,10 @@ public sealed record SettlementSettings
     public bool EnableLocalProduction { get; init; } = true;
     public bool EnableExternalTrade { get; init; } = true;
     public bool EnablePublicAssistance { get; init; } = true;
+    public bool EnableHousing { get; init; } = true;
+    public int DailySharedRent { get; init; } = 2;
+    public int PortCargoUnitsPerWorkHour { get; init; } = 50;
+    public int MaxPortCargoCapacity { get; init; } = 2000;
     public int MealPrice { get; init; } = 6;
     public int GoodsPrice { get; init; } = 12;
     public int FoodWholesalePrice { get; init; } = 2;
@@ -228,6 +241,7 @@ public sealed record SettlementSettings
     public int FoodImportPerResident { get; init; } = 2;
     public int MaterialImportPerTenResidents { get; init; } = 3;
     public int BaseTravelMinutes { get; init; } = 18;
+    public int LocalTravelMinutes { get; init; } = 4;
     // UESP map units are not metres. This is a simulated travel-time
     // calibration parameter, not a real-world speed measurement.
     public int MapUnitsPerTravelMinute { get; init; } = 2500;
@@ -241,7 +255,8 @@ public sealed record BusinessSnapshot(
     int NamedOperators, string? SimulatedLeaseholderId, string LeaseEvidence,
     long Gold, int Food, int Materials, int Goods,
     int RetailSales, int WorkHours, int ItemsCrafted, long WagesPaid,
-    long DividendsPaid);
+    long DividendsPaid,
+    int CargoCapacity = 0, long CargoHandled = 0);
 
 public sealed record SettlementReport
 {
@@ -318,4 +333,12 @@ public sealed record SettlementReport
     public double PersonHoursBelow20Satiation { get; init; }
     public long WorkersFurloughedCumulative { get; init; }
     public long JobsReassigned { get; init; }
+    public int HousingUnits { get; init; }
+    public int HousingBeds { get; init; }
+    public int HousingOccupied { get; init; }
+    public int HomelessResidents { get; init; }
+    public long RentCollected { get; init; }
+    public int TotalEvictions { get; init; }
+    public int TotalRelocations { get; init; }
+    public int TotalRehousings { get; init; }
 }

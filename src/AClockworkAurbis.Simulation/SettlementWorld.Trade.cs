@@ -5,9 +5,6 @@ public sealed partial class SettlementWorld
     private void RegionalWholesaleAndTrade()
     {
         if (_ports.Length == 0) return;
-
-        // Explicit imports: goods AND money change owners, with finite
-        // external stock, finite island funds and a daily shipping quota.
         if (_settings.EnableExternalTrade)
             PurchaseForeignShortfalls();
 
@@ -41,14 +38,17 @@ public sealed partial class SettlementWorld
         providers.OrderBy(p => BusinessTravelCost(customer, p))
             .ThenBy(p => p.Id, StringComparer.Ordinal).ToArray();
 
-    private static int BusinessTravelCost(BusinessState a, BusinessState b)
+    private static int BusinessTravelCost(BusinessState a, BusinessState b) =>
+        PlaceTradeDistance(a.Place, b.Place);
+
+    private static int PlaceTradeDistance(PlaceDefinition a, PlaceDefinition b)
     {
-        if (a.Place.MapX is double ax && a.Place.MapY is double ay &&
-            b.Place.MapX is double bx && b.Place.MapY is double by)
+        if (a.MapX is double ax && a.MapY is double ay &&
+            b.MapX is double bx && b.MapY is double by)
             return (int)Math.Min(1_000_000,
                 Math.Sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by)));
-        if (a.Place.District is string district &&
-            string.Equals(district, b.Place.District, StringComparison.OrdinalIgnoreCase))
+        if (a.District is string district &&
+            string.Equals(district, b.District, StringComparison.OrdinalIgnoreCase))
             return 0;
         return 1_000_000;
     }
@@ -62,14 +62,21 @@ public sealed partial class SettlementWorld
         int dailyLimit = checked((_residents.Count + 9) / 10 *
             _settings.DailyImportCapPerTenResidents);
         foodWant = Math.Min(foodWant, dailyLimit);
-        materialsWant = Math.Min(materialsWant, Math.Max(1, dailyLimit / 2));
-        foreach (var hub in _ports)
+        materialsWant = Math.Min(materialsWant,
+            dailyLimit == 0 ? 0 : Math.Max(1, dailyLimit / 2));
+
+        // Import capacity is provided by paid port labour; process the best
+        // staffed hub first, not always the first source page ID.
+        foreach (var hub in _ports.OrderByDescending(p => p.CargoCapacity)
+            .ThenBy(p => StableRandom.Hash(p.Id,
+                unchecked(_settings.Seed + (int)(Minute / DayMinutes)))))
         {
             if (foodWant > 0)
             {
                 int affordable = _settings.ExternalFoodImportPrice == 0 ? foodWant :
                     (int)Math.Min(foodWant, hub.Gold / _settings.ExternalFoodImportPrice);
-                int food = Math.Min(foodWant, Math.Min(_outsideFood, affordable));
+                int food = Math.Min(hub.CargoCapacity,
+                    Math.Min(foodWant, Math.Min(_outsideFood, affordable)));
                 if (food > 0)
                 {
                     long paid = checked((long)food * _settings.ExternalFoodImportPrice);
@@ -77,6 +84,8 @@ public sealed partial class SettlementWorld
                     _outsideGold += paid;
                     hub.Food += food;
                     _outsideFood -= food;
+                    hub.CargoCapacity -= food;
+                    hub.CargoHandled += food;
                     _foodImported += food;
                     _foodImportsPaidUnits += food;
                     _goldImportsPaid += paid;
@@ -88,8 +97,8 @@ public sealed partial class SettlementWorld
                 int affordable = _settings.ExternalMaterialImportPrice == 0 ?
                     materialsWant : (int)Math.Min(materialsWant,
                     hub.Gold / _settings.ExternalMaterialImportPrice);
-                int materials = Math.Min(materialsWant,
-                    Math.Min(_outsideMaterials, affordable));
+                int materials = Math.Min(hub.CargoCapacity, Math.Min(materialsWant,
+                    Math.Min(_outsideMaterials, affordable)));
                 if (materials > 0)
                 {
                     long paid = checked((long)materials *
@@ -98,6 +107,8 @@ public sealed partial class SettlementWorld
                     _outsideGold += paid;
                     hub.Materials += materials;
                     _outsideMaterials -= materials;
+                    hub.CargoCapacity -= materials;
+                    hub.CargoHandled += materials;
                     _materialsImported += materials;
                     _materialsImportsPaidUnits += materials;
                     _goldImportsPaid += paid;
@@ -115,57 +126,40 @@ public sealed partial class SettlementWorld
         int materialDemand = Math.Max(0, _residents.Count / 4);
         int goodsDemand = checked(_residents.Count *
             _settings.DailyForeignGoodsDemandPerResident);
-        var farms = _farms.OrderBy(b => b.Id, StringComparer.Ordinal).ToArray();
-        var mines = _extractors.OrderBy(b => b.Id, StringComparer.Ordinal).ToArray();
-        var workshops = _workshops.OrderBy(b => b.Id, StringComparer.Ordinal).ToArray();
-        foreach (var hub in _ports)
-        {
-            if (foodDemand > 0)
-            {
-                int sold = ExportCommodity(hub, farms, foodDemand,
-                    _settings.FoodWholesalePrice,
-                    _settings.FoodExportPrice, "food", reserve: 8);
-                foodDemand -= sold;
-                _foodExports += sold;
-                _outsideFood = checked(_outsideFood + sold);
-            }
 
-            if (materialDemand > 0)
-            {
-                // Raw material exports can fund miners when local fabrication
-                // demand is low. External buyer pays, mine transfers inventory.
-                int sold = ExportCommodity(hub, mines, materialDemand,
-                    _settings.MaterialWholesalePrice,
-                    _settings.MaterialWholesalePrice + 1, "materials", reserve: 10);
-                materialDemand -= sold;
-                _materialsExports += sold;
-                _outsideMaterials = checked(_outsideMaterials + sold);
-            }
+        // Match the producer to a port based on geography and actual loading
+        // capacity. Supplier rotation avoids an arbitrary alphabetic monopoly.
+        int food = ExportCommodity(_farms, foodDemand, _settings.FoodWholesalePrice,
+            _settings.FoodExportPrice, "food", reserve: 8);
+        _foodExports += food;
+        _outsideFood = checked(_outsideFood + food);
 
-            if (goodsDemand > 0)
-            {
-                int sold = ExportCommodity(hub, workshops, goodsDemand,
-                    _settings.GoodsWholesalePrice,
-                    _settings.GoodsExportPrice, "goods", reserve: 4);
-                goodsDemand -= sold;
-                _goodsExports += sold;
-                _outsideGoods = checked(_outsideGoods + sold);
-            }
-            if (foodDemand == 0 && materialDemand == 0 && goodsDemand == 0) break;
-        }
+        int materials = ExportCommodity(_extractors, materialDemand,
+            _settings.MaterialWholesalePrice,
+            _settings.MaterialWholesalePrice + 1, "materials", reserve: 10);
+        _materialsExports += materials;
+        _outsideMaterials = checked(_outsideMaterials + materials);
+
+        int goods = ExportCommodity(_workshops, goodsDemand,
+            _settings.GoodsWholesalePrice,
+            _settings.GoodsExportPrice, "goods", reserve: 4);
+        _goodsExports += goods;
+        _outsideGoods = checked(_outsideGoods + goods);
     }
 
-    // Buyers are ports, sellers are real local producers. Every export
-    // involves TWO explicit transactions: port buys domestically and then
-    // sells to the external market. There is no free export income.
+    // Every shipment has a paying island buyer and a paying foreign buyer.
+    // Cargo-handling credits arise only from paid dockworker labour.
     private int ExportCommodity(
-        BusinessState port, BusinessState[] sellers, int demand,
-        int domesticPrice, int foreignPrice, string commodity, int reserve)
+        BusinessState[] sellers, int demand, int domesticPrice, int foreignPrice,
+        string commodity, int reserve)
     {
-        if (demand <= 0 || foreignPrice <= 0) return 0;
+        if (demand <= 0 || foreignPrice <= 0 || sellers.Length == 0) return 0;
+        var sorted = sellers.OrderBy(s => s.Id, StringComparer.Ordinal).ToArray();
+        int start = (int)((Minute / DayMinutes) % sorted.Length);
         int exported = 0;
-        foreach (var supplier in ClosestSuppliers(port, sellers))
+        for (int i = 0; i < sorted.Length && demand > 0; i++)
         {
+            var supplier = sorted[(start + i) % sorted.Length];
             int stock = commodity switch
             {
                 "food" => supplier.Food,
@@ -174,31 +168,46 @@ public sealed partial class SettlementWorld
             };
             int available = Math.Max(0, stock - reserve);
             if (available == 0) continue;
-            int affordableByPort = domesticPrice == 0 ? available :
-                (int)Math.Min(int.MaxValue, port.Gold / domesticPrice);
-            int affordableByOutside = (int)Math.Min(int.MaxValue,
-                _outsideGold / foreignPrice);
-            int quantity = Math.Min(demand,
-                Math.Min(available, Math.Min(affordableByPort, affordableByOutside)));
-            if (quantity <= 0) continue;
 
-            long domesticPayment = checked((long)quantity * domesticPrice);
-            long foreignPayment = checked((long)quantity * foreignPrice);
-            port.Gold -= domesticPayment;
-            supplier.Gold += domesticPayment;
-            port.Gold += foreignPayment;
-            _outsideGold -= foreignPayment;
-            supplier.WholesaleRevenue += domesticPayment;
-            port.WholesaleSpending += domesticPayment;
-            port.WholesaleRevenue += foreignPayment;
-            _goldExportsEarned += foreignPayment;
-            if (commodity == "food") supplier.Food -= quantity;
-            else if (commodity == "materials") supplier.Materials -= quantity;
-            else supplier.Goods -= quantity;
+            // A producer's natural nearest staffed port wins. If that port
+            // is full or insolvent, another can pick up the contract.
+            var eligible = _ports.Where(p => p.CargoCapacity > 0 &&
+                (domesticPrice == 0 || p.Gold >= domesticPrice))
+                .OrderBy(p => BusinessTravelCost(p, supplier))
+                .ThenByDescending(p => p.CargoCapacity)
+                .ThenBy(p => StableRandom.Hash(p.Id + supplier.Id,
+                    unchecked(_settings.Seed + (int)(Minute / DayMinutes))));
+            foreach (var port in eligible)
+            {
+                int affordableByPort = domesticPrice == 0 ? available :
+                    (int)Math.Min(int.MaxValue, port.Gold / domesticPrice);
+                int affordableByOutside = (int)Math.Min(int.MaxValue,
+                    _outsideGold / foreignPrice);
+                int quantity = Math.Min(demand, Math.Min(available,
+                    Math.Min(port.CargoCapacity,
+                        Math.Min(affordableByPort, affordableByOutside))));
+                if (quantity <= 0) continue;
 
-            exported += quantity;
-            demand -= quantity;
-            if (demand == 0) break;
+                long domesticPayment = checked((long)quantity * domesticPrice);
+                long foreignPayment = checked((long)quantity * foreignPrice);
+                port.Gold -= domesticPayment;
+                supplier.Gold += domesticPayment;
+                port.Gold += foreignPayment;
+                _outsideGold -= foreignPayment;
+                supplier.WholesaleRevenue += domesticPayment;
+                port.WholesaleSpending += domesticPayment;
+                port.WholesaleRevenue += foreignPayment;
+                port.CargoCapacity -= quantity;
+                port.CargoHandled += quantity;
+                _goldExportsEarned += foreignPayment;
+                if (commodity == "food") supplier.Food -= quantity;
+                else if (commodity == "materials") supplier.Materials -= quantity;
+                else supplier.Goods -= quantity;
+                exported += quantity;
+                available -= quantity;
+                demand -= quantity;
+                if (available == 0 || demand == 0 || _outsideGold < foreignPrice) break;
+            }
         }
         return exported;
     }

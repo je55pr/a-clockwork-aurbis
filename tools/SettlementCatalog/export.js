@@ -131,28 +131,42 @@ try{
      .map(l=>'npc:uesp-online:'+l.npc_page_id)),
   evidence:'UESP place type and npc_store links; finances and inventory are simulation defaults'
  }));
- // The source contains very few documented farms and no populated farming
- // industry in most towns. Model municipal allotments and produce stalls as
- // explicitly synthetic workplaces. The source town marker only anchors them;
- // it is NOT evidence that a particular farm existed in ESO.
+ // The source contains very few documented farms. Model hypothetical
+ // agricultural co-ops near the densest source-associated NPC concentrations,
+ // including ruins and outposts rather than just officially named towns.
+ // None of these facilities is a claim that the ESO location had a farm.
  if(wholeZone){
-   const centers=resultPlaces.filter(p=>['City','Town'].includes(p.sourceType));
-   const occupied=new Set(centers.map(p=>p.id));
-   // Rural communities are grouped around larger source-associated NPC
-   // clusters, keeping remote residents from magically commuting to a city.
-   const counts=new Map();
-   for(const l of mapped){if(l.relation!=='npc_city')counts.set(l.place_page_id, (counts.get(l.place_page_id)||0)+1);}
-   const rural=resultPlaces.filter(p=>!p.district && p.mapX!==null &&
-       !['Zone','City','Town','Treasure Map','Survey Report'].includes(p.sourceType))
-      .sort((a,b)=>(counts.get(b.sourcePageId)||0)-(counts.get(a.sourcePageId)||0) ||
-            a.id.localeCompare(b.id));
-   const centersOfActivity=[...centers];
-   for(const candidate of rural){
-     if(centersOfActivity.length>=centers.length+12)break;
-     if((counts.get(candidate.sourcePageId)||0)<2)continue;
-     if(centersOfActivity.some(x=>x.mapX!==null && x.mapY!==null &&
-        Math.hypot(x.mapX-candidate.mapX,x.mapY-candidate.mapY)<35000))continue;
-     centersOfActivity.push(candidate);
+   // Allocate hypothetical services based on observed character density,
+   // regardless of whether ESO labels a place City, Town, ruin or campsite.
+   const anchorPriority={npc_house:0,npc_store:1,npc_ship:2,npc_loc:3,
+     npc_settlement:4,npc_city:5};
+   const anchored=new Map();
+   const direct=new Map();
+   for(const sourceLinks of byNpc.values()){
+     const candidates=sourceLinks.filter(l=>l.relation!=='npc_city' ||
+       !sourceLinks.some(q=>q.relation!=='npc_city'&&q.relation!=='npc_settlement'));
+     candidates.sort((a,b)=>(anchorPriority[a.relation]??10)-
+       (anchorPriority[b.relation]??10)||a.place_page_id-b.place_page_id);
+     const place=resultPlaces.find(p=>p.sourcePageId===candidates[0]?.place_page_id);
+     if(!place||place.mapX===null)continue;
+     const key=place.mapX+','+place.mapY;
+     anchored.set(key,(anchored.get(key)||0)+1);
+     direct.set(place.id,(direct.get(place.id)||0)+1);
+   }
+   const sites=resultPlaces.filter(p=>p.mapX!==null &&
+       !['Zone','Treasure Map','Survey Report'].includes(p.sourceType))
+     .map(p=>({place:p,density:[...anchored].reduce((sum,[key,n])=>{
+       const [x,y]=key.split(',').map(Number);
+       return sum+(Math.hypot(x-p.mapX,y-p.mapY)<35000?n:0);
+     },0),direct:direct.get(p.id)||0}))
+     .sort((a,b)=>b.density-a.density||b.direct-a.direct||
+       a.place.id.localeCompare(b.place.id));
+   const centersOfActivity=[];
+   for(const {place,density} of sites){
+     if(density===0||centersOfActivity.length>=26)break;
+     if(centersOfActivity.some(x=>Math.hypot(x.mapX-place.mapX,
+         x.mapY-place.mapY)<35000))continue;
+     centersOfActivity.push(place);
    }
    for(const anchor of centersOfActivity){
      const suffix=anchor.id.replace(/[^a-z0-9]+/gi,'-');

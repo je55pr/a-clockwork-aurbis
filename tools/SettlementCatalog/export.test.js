@@ -88,6 +88,8 @@ try{
  assert.equal(whole.counts.placesWithExactMapMarkers,3);
  assert.ok(whole.businesses.some(b=>b.kind==='food_producer' &&
    b.evidence.includes('SIMULATION DEFAULT')),'synthetic co-ops distinguish source evidence');
+ assert.ok(whole.places.some(p=>p.name==='Community allotments near Seabright Grove'),
+   'NPC concentrations receive services even at locations not labelled towns');
  assert.ok(whole.counts.placesWithEstimatedMapMarkers>=1);
  assert.equal(whole.residents.find(x=>x.name==='Cedar').anchorPlaceId,'uesp:place:9');
  assert.ok(whole.places.find(x=>x.name==='Waterfront Market').mapEvidence==='estimated_parent_settlement_marker');

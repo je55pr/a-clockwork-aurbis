@@ -13,12 +13,17 @@ var tests=new (string Name,Action Run)[]
     ("Missing port is explicitly synthetic outside trade", MissingPort),
     ("Malformed source associations rejected", CatalogValidation),
     ("Whole-island map travel and neighbourhood shopping", IslandTravel),
+    ("Different buildings at a shared town marker take local minutes", LocalBuildingTravel),
     ("Regional production needs actual labour and finite natural capacity", RegionalProduction),
     ("Closed regional economy works without automatic imports", ClosedRegion),
     ("Disabling work and imports cannot create food", NoSupply),
     ("External trade funds are finite and count in all ledgers", FiniteForeignMarket),
     ("Crop failure exposes genuine food shortage", CropFailureSensitivity),
     ("Public assistance cannot exceed collected and allocated funds", FundedAssistance),
+    ("Finite shared beds and paid rent can produce eviction", FiniteHousing),
+    ("Unemployed residents can move towns for solvent jobs", EconomicMigration),
+    ("Dock cargo needs paid handling and respects zero capacity", DockLabour),
+    ("Competing ports attract cargo from their own productive hinterland", TwoPortCompetition),
     ("Deterministic regional simulations can run in time chunks", RegionalDeterminism),
     ("Large 10k actor headless performance and integrity", Stress)
 };
@@ -372,7 +377,8 @@ static void FundedAssistance()
 {
     var world=new SettlementWorld(Fixture(80,production:true),
         new SettlementSettings{Economy=EconomyMode.RegionalProduction,
-            InitialPublicGoldPerResident=0,EnableExternalTrade=false});
+            InitialPublicGoldPerResident=0,EnableExternalTrade=false,
+            EnableHousing=false});
     world.AdvanceTo(1440L*30);
     world.CheckInvariants();
     var r=world.Report();
@@ -398,4 +404,169 @@ static void Stress()
     var r=Run(10_000);
     Expect(r.Residents==10_000 && r.Events>15_000,
         "10k NPCs actually execute independent activity events");
+}
+
+static void LocalBuildingTravel()
+{
+    var fixture=Fixture(8);
+    var places=fixture.Places.Select(p=>p.Id switch
+    {
+        "home:1" or "b:market" or "b:tavern" =>
+            p with {MapX=1000,MapY=1000,District="Exampleton"},
+        "b:forge" => p with {MapX=801000,MapY=1000,District="Far Away"},
+        _=>p
+    }).ToArray();
+    var world=new SettlementWorld(fixture with {Places=places});
+    int guildToShop=world.EstimateTravelMinutes("npc:example:0","b:market");
+    int guildToTavern=world.EstimateTravelMinutes("npc:example:0","b:tavern");
+    int acrossIsland=world.EstimateTravelMinutes("npc:example:0","b:forge");
+    Expect(guildToShop>=1 && guildToShop<=8 && guildToTavern<=8,
+        "same inherited city marker means a few local minutes, not 18");
+    Expect(acrossIsland>300,"inter-city travel remains consequential");
+}
+
+static void FiniteHousing()
+{
+    var cat=Fixture(80,production:true);
+    var normal=new SettlementWorld(cat,new SettlementSettings
+        {Economy=EconomyMode.RegionalProduction});
+    var info=normal.Report();
+    Expect(info.HousingUnits>0 && info.HousingUnits<80 &&
+        info.HousingBeds>=info.HousingOccupied &&
+        info.HousingOccupied==80,"multiple NPCs share finite assigned beds");
+    Expect(normal.Residents.Any(r=>r.Source.HomePlaceId=="home:1"&&r.HomeId=="home:1"),
+        "source-confirmed house association remains accessible");
+    normal.AdvanceTo(1440L*10);
+    normal.CheckInvariants();
+    Expect(normal.Report().RentCollected==normal.Residents.Sum(r=>r.RentSpent),
+        "paid housing moves gold between real ledgers");
+
+    var expensive=new SettlementWorld(cat,new SettlementSettings
+    {
+        Economy=EconomyMode.RegionalProduction,
+        DailySharedRent=100,EnablePublicAssistance=false,
+        InitialPublicGoldPerResident=0
+    });
+    expensive.AdvanceTo(1440L*5);
+    expensive.CheckInvariants();
+    var r=expensive.Report();
+    Expect(r.TotalEvictions>0 && r.HomelessResidents>0,
+        "people who cannot afford housing can actually lose their beds");
+    Expect(r.HousingOccupied+r.HomelessResidents==r.Residents,
+        "unhoused characters are not silently assigned phantom beds");
+    Expect(r.RentCollected==expensive.Residents.Sum(p=>p.RentSpent),
+        "landlord/public rent receipts cannot duplicate gold");
+}
+
+static void EconomicMigration()
+{
+    PlaceDefinition Place(string id,int source,string label,string type,string district,double x) =>
+        new(id,source,label,type,district,"Auridon",
+            type=="Home"?"dwelling":"business","",x,1000,
+            "source_map_marker",district);
+    var places=new[]
+    {
+        Place("home:a",1,"A boarding house","Home","A",1000),
+        Place("home:b",2,"B boarding house","Home","B",801000),
+        Place("port:a",3,"A harbour","Transportation","A",1000),
+        Place("shop:b",4,"B workshop","Smithy","B",801000)
+    };
+    var businesses=new[]
+    {
+        new BusinessDefinition("port:a",BusinessKinds.ImportHub,null,[],"Test port"),
+        new BusinessDefinition("shop:b",BusinessKinds.Workshop,null,[],"Test workshop")
+    };
+    var residents=Enumerable.Range(0,5).Select(i=>
+        new ResidentDefinition("migrant:"+i,i+100,"Citizen "+i,"Altmer",null,
+            i==3?null:i==4?"home:b":"home:a",
+            i==3?"unknown":"explicit_npc_house",
+            i<3?"port:a":i==4?"shop:b":null,
+            i==3?"unknown":"test_source_workplace",
+            [],null,
+            i==4?"home:b":"home:a",
+            "source-neighbourhood")).ToArray();
+    var catalog=new SettlementCatalog(1,"Two Regions","Synthetic migration fixture",
+        default,places,businesses,residents);
+    var world=new SettlementWorld(catalog,new SettlementSettings
+        {Economy=EconomyMode.RegionalProduction});
+    Expect(world.Residents.First(p=>p.Source.Id=="migrant:3").WorkId is null,
+        "remote jobs cannot be taken on as ordinary commutes at initialization");
+    world.AdvanceTo(1440L*2);
+    world.CheckInvariants();
+    var mover=world.Residents.First(p=>p.Source.Id=="migrant:3");
+    Expect(mover.WorkId=="shop:b" && mover.Relocations>=1,
+        "jobless NPC can take a solvent distant job by relocating");
+    Expect(mover.HousingId!=null && mover.HomeId!=null &&
+        mover.HomeId.StartsWith("sim:shared-housing:",StringComparison.Ordinal),
+        "migration requires an actual available shared bed near the employer");
+    Expect(world.Report().TotalRelocations>=1,"economic migration is measured");
+}
+
+static void DockLabour()
+{
+    var cat=Fixture(100,production:true);
+    var normal=new SettlementWorld(cat,new SettlementSettings
+        {Economy=EconomyMode.RegionalProduction});
+    var disabled=new SettlementWorld(cat,new SettlementSettings
+        {Economy=EconomyMode.RegionalProduction,PortCargoUnitsPerWorkHour=0});
+    normal.AdvanceTo(1440L*30);
+    disabled.AdvanceTo(1440L*30);
+    normal.CheckInvariants();disabled.CheckInvariants();
+    var exported=normal.Report();
+    var blocked=disabled.Report();
+    Expect(exported.FoodExported>0 &&
+        exported.BusinessDetails.Any(p=>p.Kind==BusinessKinds.ImportHub&&
+            p.CargoHandled>0),"paid dockworkers enable real exports");
+    Expect(blocked.FoodExported==0 && blocked.GoodsExported==0 &&
+        blocked.MaterialsExported==0 && blocked.FoodImported==0,
+        "port without any cargo-handling capacity cannot ship anything");
+    Expect(blocked.BusinessDetails.Where(p=>p.Kind==BusinessKinds.ImportHub)
+        .All(p=>p.CargoHandled==0),
+        "no transport ledger entries appear without port labour");
+}
+
+static void TwoPortCompetition()
+{
+    PlaceDefinition Place(string id, int sourceId, string label, string district, double x) =>
+        new(id, sourceId, label, "Transportation", district, "Auridon", "business",
+            "", x, 1000, "source_map_marker", district);
+    var places=new[]
+    {
+        Place("port:a",1,"Western Docks","West",1000),
+        Place("farm:a",2,"Western Fields","West",1000),
+        Place("port:b",3,"Eastern Docks","East",901000),
+        Place("farm:b",4,"Eastern Fields","East",901000)
+    };
+    var businesses=new[]
+    {
+        new BusinessDefinition("port:a",BusinessKinds.ImportHub,null,[],"Test"),
+        new BusinessDefinition("farm:a",BusinessKinds.FoodProducer,null,[],"Test"),
+        new BusinessDefinition("port:b",BusinessKinds.ImportHub,null,[],"Test"),
+        new BusinessDefinition("farm:b",BusinessKinds.FoodProducer,null,[],"Test")
+    };
+    var ids=new[]{"port:a","port:a","port:a","port:b","port:b","port:b",
+        "farm:a","farm:a","farm:b","farm:b"};
+    var residents=ids.Select((work,i)=>
+    {
+        string place=i is <3 or 6 or 7?"port:a":"port:b";
+        return new ResidentDefinition("shipping:"+i,i+10,"Worker "+i,"Altmer",
+            null,null,"unknown",work,"test_source_workplace",[],null,
+            place,"source-neighbourhood");
+    }).ToArray();
+    var catalog=new SettlementCatalog(1,"Two Coastal Regions",
+        "Synthetic shipping fixture",default,places,businesses,residents);
+    var world=new SettlementWorld(catalog,new SettlementSettings
+    {
+        Economy=EconomyMode.RegionalProduction,
+        DailyImportCapPerTenResidents=0,
+        InitialOutsideFood=0,InitialOutsideMaterials=0
+    });
+    world.AdvanceTo(1440L*12);
+    world.CheckInvariants();
+    var report=world.Report();
+    var ports=report.BusinessDetails.Where(p=>p.Kind==BusinessKinds.ImportHub).ToArray();
+    Expect(ports.Length==2 && ports.All(p=>p.CargoHandled>0),
+        "both docks can earn real shipping work from nearby farm exports");
+    Expect(report.FoodExported>0 && report.FoodImported==0,
+        "transport comes from domestic farm labour, not free imports");
 }

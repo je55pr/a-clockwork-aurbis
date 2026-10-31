@@ -15,7 +15,8 @@ public sealed partial class SettlementWorld
             {
                 int untilMorning=(6*60-localMinute+DayMinutes)%DayMinutes;
                 Enqueue(index,Math.Max(1,untilMorning),SettlementAction.Sleep);
-                Observe(actor,"sleep",DisplayPlace(actor.HomeId));
+                Observe(actor,actor.HousingId is null && Regional && _settings.EnableHousing ?
+                    "rough_sleep" : "sleep",DisplayPlace(actor.HomeId));
             }
             return;
         }
@@ -149,13 +150,19 @@ public sealed partial class SettlementWorld
            to?.MapX is double bx && to.MapY is double by)
         {
             double distance=Math.Sqrt((ax-bx)*(ax-bx)+(ay-by)*(ay-by));
-            return checked(_settings.BaseTravelMinutes+
+            // Sub-buildings often inherit the same town-centre marker. Treat
+            // distinct places in one district as a short local journey, not
+            // an 18-minute cross-settlement trip.
+            bool local = from.District is string fromDistrict && to.District is string toDistrict &&
+                string.Equals(fromDistrict, toDistrict, StringComparison.OrdinalIgnoreCase);
+            int baseMinutes = local ? _settings.LocalTravelMinutes : _settings.BaseTravelMinutes;
+            return checked(baseMinutes +
                 (int)Math.Ceiling(distance/_settings.MapUnitsPerTravelMinute));
         }
         if(from?.District is string a && to?.District is string b)
         {
             if(string.Equals(a,b,StringComparison.OrdinalIgnoreCase))
-                return _settings.BaseTravelMinutes;
+                return _settings.LocalTravelMinutes;
             return _settings.BaseTravelMinutes+_settings.UnknownMapInterdistrictMinutes;
         }
         // Without a coordinate or shared known district, assume nonlocal

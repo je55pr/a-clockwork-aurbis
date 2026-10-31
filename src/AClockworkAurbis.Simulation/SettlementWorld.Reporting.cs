@@ -72,13 +72,20 @@ public sealed partial class SettlementWorld
             PersonHoursAtZeroSatiation=Math.Round(_residents.Sum(p=>p.MinutesAtZeroSatiation)/60d,2),
             PersonHoursBelow20Satiation=Math.Round(_residents.Sum(p=>p.MinutesBelow20Satiation)/60d,2),
             WorkersFurloughedCumulative=_furloughs,JobsReassigned=_rehired,
+            HousingUnits=_housing.Count, HousingBeds=_housing.Sum(h=>h.Beds),
+            HousingOccupied=_housing.Sum(h=>h.Occupied),
+            HomelessResidents=Regional && _settings.EnableHousing ?
+                _residents.Count(r=>r.HousingId is null) : 0,
+            RentCollected=_rentCollected,TotalEvictions=_evictions,
+            TotalRelocations=_relocations,TotalRehousings=_rehousings,
             InitialFood=_initialFood,InitialMaterials=_initialMaterials,
             InitialGoods=_initialGoods,InitialGold=_initialGold,TotalGold=TotalGold(),
             BusinessDetails=_businesses.OrderBy(b=>b.Id,StringComparer.Ordinal)
                 .Select(b=>new BusinessSnapshot(b.Name,b.Kind,b.Id,b.OwnerId,
                     b.Operators.Count,b.SimulatedLeaseholderId,b.LeaseEvidence,
                     b.Gold,b.Food,b.Materials,b.Goods,
-                    b.RetailSales,b.WorkHours,b.ItemsCrafted,b.WagesPaid,b.DividendsPaid)).ToArray()
+                    b.RetailSales,b.WorkHours,b.ItemsCrafted,b.WagesPaid,b.DividendsPaid,
+                    b.CargoCapacity,b.CargoHandled)).ToArray()
         };
     }
 
@@ -107,6 +114,18 @@ public sealed partial class SettlementWorld
         if(_wages!=_residents.Sum(r=>r.WageIncome)||
            _wages!=_businesses.Sum(b=>b.WagesPaid))
             throw new InvalidOperationException("Worker wages do not reconcile to business wages");
+        if (Regional && _settings.EnableHousing)
+        {
+            if (_housing.Any(h => h.Occupied < 0 || h.Occupied > h.Beds) ||
+                _housing.Sum(h => h.Occupied) !=
+                    _residents.Count(r => r.HousingId is not null))
+                throw new InvalidOperationException("Beds cannot be overallocated or duplicated");
+            foreach (var home in _housing)
+                if (home.Occupied != _residents.Count(r => r.HousingId == home.Id))
+                    throw new InvalidOperationException("Occupancy does not match residents");
+            if (_rentCollected != _residents.Sum(r => r.RentSpent))
+                throw new InvalidOperationException("Housing rent ledger mismatch");
+        }
         foreach(var r in _residents)
         {
             if(r.Gold<0||r.Food<0||r.Goods<0||r.Satiation is <0 or >100 ||

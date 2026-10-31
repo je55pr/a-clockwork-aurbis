@@ -41,6 +41,7 @@ public sealed partial class SettlementWorld
         if(_settings.Seed==int.MinValue || _settings.MealPrice<=0 ||
            _settings.GoodsPrice<=0 || _settings.HourlyWage<0 ||
            _settings.StartingBusinessGold<0 || _settings.BaseTravelMinutes<1 ||
+           _settings.LocalTravelMinutes<1 ||
            _settings.FoodWholesalePrice<0 || _settings.MaterialWholesalePrice<0 ||
            _settings.GoodsWholesalePrice<0 ||
            _settings.FoodImportPerResident<0 || _settings.MaterialImportPerTenResidents<0 ||
@@ -57,6 +58,8 @@ public sealed partial class SettlementWorld
            _settings.DailyForeignFoodDemandPerResident<0 ||
            _settings.DailyForeignGoodsDemandPerResident<0 ||
            _settings.DailyImportCapPerTenResidents<0 ||
+           _settings.DailySharedRent<0 || _settings.PortCargoUnitsPerWorkHour<0 ||
+           _settings.MaxPortCargoCapacity<0 ||
            _settings.ExternalFoodImportPrice<0 ||
            _settings.ExternalMaterialImportPrice<0 || _settings.DailyAssistanceLimit<0)
             throw new ArgumentOutOfRangeException(nameof(settings));
@@ -135,7 +138,11 @@ public sealed partial class SettlementWorld
             if(business.Kind==BusinessKinds.FoodRetail)business.Food=5;
             if(business.Kind==BusinessKinds.GoodsRetail)business.Goods=2;
         }
-        if (Regional) InitializeRegional();
+        if (Regional)
+        {
+            InitializeRegional();
+            if (_settings.EnableHousing) InitializeHousing();
+        }
         _initialGold=TotalGold();
         _initialFood=TotalFood();
         _initialMaterials=TotalMaterials();
@@ -149,6 +156,9 @@ public sealed partial class SettlementWorld
         var actor=_residents[personIndex];
         actor.Activity=action;
         actor.ActionStart=Minute;
+        if (action==SettlementAction.Sleep)
+            actor.RoughSleeping=Regional && _settings.EnableHousing &&
+                actor.HousingId is null;
         _queue.Enqueue(personIndex,(checked(Minute+minutes),_sequence++));
     }
 
@@ -175,7 +185,7 @@ public sealed partial class SettlementWorld
         foreach(var actor in _residents)AdvanceNeeds(actor,Minute);
     }
 
-    private static void AdvanceNeeds(ResidentState actor,long minute)
+    private void AdvanceNeeds(ResidentState actor,long minute)
     {
         long delta=minute-actor.LastUpdate;
         if(delta<0)throw new InvalidOperationException("NPC time cannot run backwards");
@@ -188,14 +198,14 @@ public sealed partial class SettlementWorld
             Math.Max(0d,(initialSatiation-20d)/hungerRate),0d,(double)delta);
         actor.MinutesAtZeroSatiation+=Math.Clamp((double)delta -
             initialSatiation/hungerRate,0d,(double)delta);
-        actor.Satiation=Math.Clamp(initialSatiation-delta*hungerRate,0,100);
+        actor.Satiation=Math.Round(Math.Clamp(initialSatiation-delta*hungerRate,0,100),3);
         double rate=actor.Activity switch
         {
-            SettlementAction.Sleep=>0.16,
+            SettlementAction.Sleep=>RegionalSleepRate(actor),
             SettlementAction.Work=>-0.076,
             _=>-0.053
         };
-        actor.Energy=Math.Clamp(actor.Energy+delta*rate,0,100);
+        actor.Energy=Math.Round(Math.Clamp(actor.Energy+delta*rate,0,100),3);
         if(actor.Activity==SettlementAction.Work)actor.WorkMinutes+=delta;
         if(actor.Activity==SettlementAction.Sleep)actor.SleepMinutes+=delta;
         actor.LastUpdate=minute;

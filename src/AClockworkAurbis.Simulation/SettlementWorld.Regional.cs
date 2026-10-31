@@ -135,6 +135,18 @@ public sealed partial class SettlementWorld
                 Observe(actor, "extract", $"{collected} materials at {employer.Name}");
                 break;
             }
+            case BusinessKinds.ImportHub:
+            {
+                // Paid stevedore labour creates actual throughput for the
+                // next cargo transfers. An unstaffed port cannot ship freely.
+                int available = Math.Max(0, _settings.MaxPortCargoCapacity - employer.CargoCapacity);
+                int handled = (int)Math.Min(available,
+                    (long)hours * _settings.PortCargoUnitsPerWorkHour);
+                employer.CargoCapacity += handled;
+                if (handled > 0)
+                    Observe(actor, "dockwork", $"{handled} cargo capacity at {employer.Name}");
+                break;
+            }
             case BusinessKinds.Workshop:
             {
                 int made = Math.Min(hours, employer.Materials);
@@ -222,8 +234,11 @@ public sealed partial class SettlementWorld
 
         DistributeRegionalSurplus();
         FundPublicServices();
-        ReassignSolventEmployment();
+        // Aid must reach the resident before rent becomes due, otherwise
+        // a solvent public treasury can evict an eligible tenant needlessly.
         ProvideFundedAssistance();
+        ReassignSolventEmployment();
+        RunHousingDay();
         RegionalWholesaleAndTrade();
     }
 
@@ -276,14 +291,21 @@ public sealed partial class SettlementWorld
                 if(employer.Gold < Math.Max(12, _settings.HourlyWage * 8) ||
                    _staff[employer.Id].Count >= ContractCapacity(employer))continue;
                 int route=JourneyDuration(person,employer.Id);
-                if(route>130)continue;
-                long candidate=(long)route*10+
+                if(route>130 && (!_settings.EnableHousing ||
+                    AvailableHousingNear(person, employer) is null))continue;
+                // Prefer nearby opportunities, but allow a fresh start in
+                // another town when there is no local solvent work.
+                long candidate=route>130 ? 2000L +
+                    (long)(StableRandom.Hash(person.Source.Id+employer.Id,_settings.Seed)%31uL)
+                    : (long)route*10+
                     (long)(StableRandom.Hash(person.Source.Id+employer.Id,_settings.Seed)%31uL);
                 if(person.Source.WorkPlaceId==employer.Id)
                     candidate=Math.Max(0,candidate-500);
                 if(candidate<score){score=candidate;best=employer;}
             }
             if(best is null)continue;
+            if (JourneyDuration(person, best.Id) > 130 &&
+                !RelocateForJob(person, best)) continue;
             person.AssignedWorkPlaceId=best.Id;
             person.OnUnpaidLeave=false;
             person.EmploymentEvidence=person.Source.WorkPlaceId==best.Id?
@@ -291,6 +313,7 @@ public sealed partial class SettlementWorld
             _staff[best.Id].Add(person);
             best.WorkerCount++;
             _rehired++;
+            Observe(person, "hired", best.Name + ": solvent employment contract");
         }
     }
 
@@ -304,6 +327,7 @@ public sealed partial class SettlementWorld
         _staff[employer.Id].Remove(person);
         employer.WorkerCount=_staff[employer.Id].Count;
         _furloughs++;
+        Observe(person, "laid_off", employer.Name + ": payroll could not be funded");
     }
 
     private void FundPublicServices()
