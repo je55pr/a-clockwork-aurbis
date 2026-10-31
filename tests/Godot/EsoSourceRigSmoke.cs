@@ -21,9 +21,18 @@ public partial class EsoSourceRigSmoke : Node3D
     [Export] public bool InteractivePreview {get;set;}
     private EsoSourceAnimationClip? _walking;
     private Skeleton3D? _animatedRig;
-    private Skeleton3D? _faceRig;
-    private int _facePreset=2;
     private readonly List<(Skeleton3D Rig,EsoSourceAnimationClip Clip)> _animatedPieces=new();
+    private readonly List<Node3D> _faceVariants=new();
+    private Node3D? _bodyPreview;
+    private Node3D? _facePreview;
+    private Camera3D? _labCamera;
+    private Label? _modeHelp;
+    private bool _showFaces=true;
+    private int _focusedFace=-1;
+    private float _orbitYaw,_orbitPitch;
+    private float _faceDistance=0.95f,_bodyDistance=4.15f;
+    private bool _dragging;
+    private static readonly string[] FaceLabels={"NARROW","NEUTRAL","WIDE"};
     private float _elapsed;
     private bool _playing=true;
     private bool _savedPreview;
@@ -86,12 +95,35 @@ public partial class EsoSourceRigSmoke : Node3D
             var secondPose=torso.Skeleton.GetBoneGlobalPose(arm);
             if(firstPose.Basis.IsEqualApprox(secondPose.Basis))
                 throw new Exception("Original PC_Walk sampled curves did not animate the upper arm");
+            // The user's walking repro was a full sideways collapse. Exercise
+            // the safer source-timed anatomical remapping against the real
+            // customization skeleton, checking left/right alternation, bounds
+            // and that returning to time zero restores the exact bind pose.
+            float leftSource=walk.OriginalJointSwing("mshBn_thigh_L",0.33f);
+            float rightSource=walk.OriginalJointSwing("mshBn_thigh_R",0.33f);
+            if(walk.SourceCurveCount<6 || leftSource> -0.30f || rightSource<0.30f)
+                throw new Exception("Original ESO leg curves are unavailable or not alternating");
+            EsoRigLabGait.Apply(torso.Skeleton,walk,0.33f);
+            int leftThigh=torso.Skeleton.FindBone("defBn_thigh_L");
+            int rightThigh=torso.Skeleton.FindBone("defBn_thigh_R");
+            float leftPose=torso.Skeleton.GetBonePoseRotation(leftThigh)
+                .AngleTo(torso.Skeleton.GetBoneRest(leftThigh).Basis.GetRotationQuaternion());
+            float rightPose=torso.Skeleton.GetBonePoseRotation(rightThigh)
+                .AngleTo(torso.Skeleton.GetBoneRest(rightThigh).Basis.GetRotationQuaternion());
+            if(leftPose is <0.10f or >0.45f || rightPose is <0.10f or >0.45f)
+                throw new Exception("Gait anatomical thigh hinges are implausibly small or overrotated");
+            int upperBody=torso.Skeleton.FindBone("defCtrl_body");
+            if(torso.Skeleton.GetBoneGlobalPose(upperBody).Basis.Y.Dot(Vector3.Up)<0.98f)
+                throw new Exception("Gait tilted the character's whole body sideways");
+            EsoRigLabGait.Apply(torso.Skeleton,walk,0f);
+            if(!torso.Skeleton.GetBonePoseRotation(leftThigh).IsEqualApprox(
+                torso.Skeleton.GetBoneRest(leftThigh).Basis.GetRotationQuaternion()))
+                throw new Exception("Gait time zero must preserve the imported bind pose");
             GD.Print($"PASS source ESO skinned meshes: torso {torso.Source.VertexCount} vertices / 43 bones, " +
                 $"head {head.Source.VertexCount} vertices / 39 bones, source PC_Walk retargeted {walk.MappedBoneCount} bones");
             if(InteractivePreview)
             {
                 _animatedRig=torso.Skeleton;
-                _faceRig=head.Skeleton;
                 _walking=walk;
                 _animatedPieces.Add((torso.Skeleton,walk));
                 _elapsed=0;
@@ -112,10 +144,46 @@ public partial class EsoSourceRigSmoke : Node3D
                     _animatedPieces.Add((part.Skeleton,clip));
                 }
                 head.Skeleton.ResetBonePoses();
+                // Keep the existing full-body assets in their own display,
+                // independent from the closer 3-way facial comparison.
+                _bodyPreview=new Node3D{Name="BodyDisplay"};
+                AddChild(_bodyPreview);
+                foreach(var piece in _skeletons.ToArray())
+                    piece.Reparent(_bodyPreview,true);
+                AddFaceDetailsAt(_bodyPreview,new Vector3(0,0,-4),2);
+                try
+                {
+                    var hairMesh=LoadPreviewHair(0x0009EC43);
+                    _bodyPreview.AddChild(new MeshInstance3D
+                    {
+                        Name="OriginalESOHairOnBody",
+                        Mesh=hairMesh,
+                        Position=new Vector3(0,0,-4),
+                        MaterialOverride=FeatureMaterial(new Color("#674b37"))
+                    });
+                }
+                catch(Exception e)
+                {
+                    GD.PushWarning("Rig lab full-body hairstyle: "+e.Message);
+                }
+                BuildFaceGallery();
                 ConfigureInteractivePreview();
-                // The rest pose is trustworthy. Partial source-clip retargeting
-                // is opt-in until its coordinate bases are fully reconciled.
-                _playing=System.Environment.GetEnvironmentVariable("ESO_RIG_AUTOPLAY")=="1";
+                // Source-clip direct retarget remains in the importer test,
+                // never in the player-facing gait preview.
+                _playing=System.Environment.GetEnvironmentVariable("ESO_RIG_CAPTURE_BODY")=="1";
+                _showFaces=!_playing;
+                if(float.TryParse(System.Environment.GetEnvironmentVariable("ESO_RIG_PREVIEW_YAW"),
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,out float yaw))
+                    _orbitYaw=Mathf.Clamp(yaw,-1.4f,1.4f);
+                if(int.TryParse(System.Environment.GetEnvironmentVariable("ESO_RIG_FOCUS_FACE"),out int selected)
+                    && selected is >=1 and <=3)
+                {
+                    _showFaces=true;
+                    _focusedFace=selected-1;
+                    _faceDistance=0.62f;
+                }
+                UpdateCamera();
                 foreach(var piece in _animatedPieces)piece.Rig.ResetBonePoses();
                 SetProcess(true);
                 return;
@@ -144,6 +212,168 @@ public partial class EsoSourceRigSmoke : Node3D
         }
     }
 
+    private static StandardMaterial3D FeatureMaterial(Color colour) =>
+        new()
+        {
+            AlbedoColor=colour,
+            Roughness=0.78f,
+            CullMode=BaseMaterial3D.CullModeEnum.Disabled
+        };
+
+    private static void FacialDetail(Node3D owner,Vector3 spot,
+        Vector3 size,Color colour,string name)
+    {
+        var mesh=new SphereMesh{Radius=1f,Height=2f,
+            RadialSegments=20,Rings=12};
+        owner.AddChild(new MeshInstance3D
+        {
+            Name=name,
+            Mesh=mesh,
+            Position=spot,
+            Scale=size,
+            MaterialOverride=FeatureMaterial(colour)
+        });
+    }
+
+    private static void AddFaceDetailsAt(Node3D parent,Vector3 sourcePosition,int variant)
+    {
+        var source=new Node3D
+        {
+            Name="FaceFeatureAttachment",
+            Position=sourcePosition
+        };
+        parent.AddChild(source);
+        AddFaceDetails(source,variant);
+    }
+
+    private static void AddFaceDetails(Node3D source,int variant)
+    {
+        // Diagnostic appearance only. The face SHELL is a real skinned ESO
+        // mesh; its material system has not been recovered. These small eye,
+        // eyebrow and mouth proxies make morphology differences inspectable
+        // without pretending to have the original character atlas.
+        var features=new Node3D{Name="ProvisionalFacialFeatures",
+            Position=new Vector3(0,2.1f,0.084f)};
+        source.AddChild(features);
+        float x=variant switch {1=>0.90f,3=>1.11f,_=>1f};
+        features.Scale=new Vector3(x,1,1);
+        for(int side=-1;side<=1;side+=2)
+        {
+            float a=side*0.035f;
+            FacialDetail(features,new Vector3(a,0.023f,0.005f),
+                new Vector3(0.0125f,0.006f,0.003f),
+                new Color("#eeece7"),$"EyeWhite_{side}");
+            FacialDetail(features,new Vector3(a,0.023f,0.010f),
+                new Vector3(0.0048f,0.0056f,0.0027f),
+                new Color("#537778"),$"Iris_{side}");
+            FacialDetail(features,new Vector3(a,0.023f,0.012f),
+                new Vector3(0.0025f,0.0037f,0.0012f),
+                new Color("#15191d"),$"Pupil_{side}");
+            FacialDetail(features,new Vector3(a,0.051f,0.001f),
+                new Vector3(0.023f,0.0032f,0.004f),
+                new Color("#5e493b"),$"Eyebrow_{side}");
+        }
+        // The source face lacks its original skin/feature material. Keep
+        // these markers shallow, especially around nose and lips, until
+        // authentic customization atlases are decoded.
+        FacialDetail(features,new Vector3(0,-0.029f,0.010f),
+            new Vector3(0.0085f,0.014f,0.007f),
+            new Color("#b8a08b"),"NoseProxy");
+        FacialDetail(features,new Vector3(0,-0.079f,0.013f),
+            new Vector3(0.0175f,0.0027f,0.003f),
+            new Color("#946961"),"MouthProxy");
+    }
+
+    private ArrayMesh LoadPreviewHair(uint sourceId)
+    {
+        var record=_archive!.FindId(sourceId).First(r=>
+            _archive.GetIdIndexFields(r.Ordinal).Flags==0);
+        string folder=Path.Combine(ProjectSettings.GlobalizePath("res://"),
+            ".research","npc-rigs");
+        string basename=$"{sourceId:X8}-a{record.ArchiveIndex}-o{record.Offset}-"+
+            $"h{record.Hash:X8}-u{record.UncompressedSize}";
+        string meshFile=Path.Combine(folder,basename+"-mesh-v5.esm");
+        if(!File.Exists(meshFile))
+            RunHelper(new[]{sourceId.ToString("X8"),meshFile},null);
+        return EsoHumanoidVisualLayer.LoadMesh(meshFile,"HAR_");
+    }
+
+    private void BuildFaceGallery()
+    {
+        _facePreview=new Node3D{Name="CloseFaceComparison"};
+        AddChild(_facePreview);
+        _faceVariants.Clear();
+        ArrayMesh? hair=null;
+        try{hair=LoadPreviewHair(0x0009EC43);}
+        catch(Exception e)
+        {
+            GD.PushWarning("Original ESO hairstyle not available for face lab: "+e.Message);
+        }
+        for(int i=0;i<3;i++)
+        {
+            int preset=i+1;
+            var modelRoot=new Node3D{
+                Name=$"FaceVariant_{preset}",
+                Position=new Vector3((i-1)*0.43f,0,-3.15f)
+            };
+            _facePreview.AddChild(modelRoot);
+            _faceVariants.Add(modelRoot);
+            var face=CreateSkin(0x000E2CFF,"Head_004",Vector3.Zero);
+            face.Skeleton.Reparent(modelRoot,true);
+            face.Skeleton.Position=Vector3.Zero;
+            ApplyFacePreset(face.Skeleton,preset);
+            AddFaceDetails(modelRoot,preset);
+            if(hair!=null)
+            {
+                modelRoot.AddChild(new MeshInstance3D{
+                    Name="OriginalESOHairstyle",
+                    Mesh=hair,
+                    MaterialOverride=FeatureMaterial(new Color("#674b37"))});
+            }
+            var label=new Label3D{
+                Name="VariantLabel",
+                Text=$"{preset}. {FaceLabels[i]}",
+                Position=new Vector3(0,1.90f,0.16f),
+                Modulate=new Color("#f7f3e7"),
+                PixelSize=0.00065f,
+                FontSize=29,
+                OutlineSize=0
+            };
+            modelRoot.AddChild(label);
+        }
+        GD.Print("RIG FACE GALLERY: 3 source skinned head meshes, ",
+            "original hair if available, provisional face details, ",
+            "three independent customization-bone presets");
+    }
+
+    private void UpdateCamera()
+    {
+        if(_labCamera==null || _facePreview==null || _bodyPreview==null)return;
+        _facePreview.Visible=_showFaces;
+        _bodyPreview.Visible=!_showFaces;
+        for(int i=0;i<_faceVariants.Count;i++)
+            _faceVariants[i].Visible=_focusedFace<0 || i==_focusedFace;
+        float focusX=_focusedFace<0?0:(_focusedFace-1)*0.43f;
+        Vector3 target=_showFaces
+            ? new Vector3(focusX,2.13f,-3.15f)
+            : new Vector3(0,1.2f,-4f);
+        float distance=_showFaces?_faceDistance:_bodyDistance;
+        var direction=new Vector3(Mathf.Sin(_orbitYaw)*Mathf.Cos(_orbitPitch),
+            Mathf.Sin(_orbitPitch),
+            Mathf.Cos(_orbitYaw)*Mathf.Cos(_orbitPitch));
+        _labCamera.Position=target+direction*distance;
+        _labCamera.LookAt(target,Vector3.Up);
+        if(_modeHelp!=null)
+            _modeHelp.Text=_showFaces
+                ? "F FACES | B BODY / GAIT | 1-3 enlarge individual faces | 0 compare all\n"+
+                  "Drag to orbit | Wheel zoom | Esc exit\n"+
+                  "Original ESO head geometry, experimental facial details and sizes, not ESO skin textures"
+                : "B BODY | F FACES | Space walk / pause | Drag orbit | Wheel zoom\n"+
+                  (_playing?"GAIT ACTIVE: source PC_Walk joint timing, remapped onto limited anatomical hinges":
+                            "REST POSE: Space starts source-timed in-place gait")+
+                  "\nReal ESO bone weights. Partial axis mapping, not a complete ESO animation rig.";
+    }
+
     private void ConfigureInteractivePreview()
     {
         AddChild(new DirectionalLight3D{
@@ -153,23 +383,22 @@ public partial class EsoSourceRigSmoke : Node3D
             BackgroundColor=new Color("#344353"),
             AmbientLightSource=Godot.Environment.AmbientSource.Color,
             AmbientLightColor=Colors.White,AmbientLightEnergy=0.85f}});
-        var camera=new Camera3D{Current=true,Fov=42,
-            Position=new Vector3(0,2.1f,3.5f)};
-        AddChild(camera);camera.LookAt(new Vector3(0,1.4f,-4f));
+        _labCamera=new Camera3D{Name="RigLabCamera",Current=true,Fov=44};
+        AddChild(_labCamera);
         var hud=new CanvasLayer{Name="RigLabHUD"};
         AddChild(hud);
         var hint=new Label
         {
             Position=new Vector2(22,22),
-            Text="ESO SOURCE RIG LAB  |  PC_Walk source curve samples\n"+
-                 "Seven original ESO body-part meshes, each with original skin weights\n"+
-                 "Head: genuine ESO bind pose + facial control bones (not canonical character)\n"+
-                 "Space toggle experimental limb motion | 1/2/3 face shape tests | Esc exit\n"+
-                 "Character materials and complete animation retargeting still under investigation",
+            Text="ESO RIG LAB | experimental character appearance and gait",
         };
-        hint.AddThemeFontSizeOverride("font_size",17);
+        hint.AddThemeFontSizeOverride("font_size",18);
         hud.AddChild(hint);
+        _modeHelp=new Label{Position=new Vector2(22,58)};
+        _modeHelp.AddThemeFontSizeOverride("font_size",16);
+        hud.AddChild(_modeHelp);
         Input.MouseMode=Input.MouseModeEnum.Visible;
+        UpdateCamera();
     }
 
     public override void _Process(double delta)
@@ -177,11 +406,18 @@ public partial class EsoSourceRigSmoke : Node3D
         if(!InteractivePreview||_walking==null||_animatedRig==null)return;
         if(_playing)
         {
-            _elapsed+=(float)delta;
+            if(float.TryParse(System.Environment.GetEnvironmentVariable("ESO_RIG_PREVIEW_TIME"),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,out float sampleTime))
+                _elapsed=sampleTime;
+            else
+                _elapsed+=(float)delta;
             foreach(var part in _animatedPieces)
-                part.Clip.Apply(part.Rig,_elapsed);
+                EsoRigLabGait.Apply(part.Rig,part.Clip,_elapsed);
         }
-        if(!_savedPreview && ++_previewFrames>100)
+        int targetFrame=int.TryParse(System.Environment.GetEnvironmentVariable("ESO_RIG_PREVIEW_FRAME"),out int requestedFrame)
+            ? Math.Clamp(requestedFrame,12,500):100;
+        if(!_savedPreview && ++_previewFrames>targetFrame)
         {
             string? save=System.Environment.GetEnvironmentVariable("ESO_RIG_PREVIEW_PATH");
             if(!string.IsNullOrWhiteSpace(save) && DisplayServer.GetName()!="headless")
@@ -218,14 +454,64 @@ public partial class EsoSourceRigSmoke : Node3D
 
     public override void _Input(InputEvent evt)
     {
-        if(!InteractivePreview||evt is not InputEventKey key||!key.Pressed||key.Echo)return;
-        if(key.Keycode==Key.Space)_playing=!_playing;
-        else if(key.Keycode is Key.Key1 or Key.Key2 or Key.Key3)
+        if(!InteractivePreview)return;
+        if(evt is InputEventMouseButton mouse)
         {
-            _facePreset=key.Keycode switch {Key.Key1=>1,Key.Key3=>3,_=>2};
-            if(_faceRig!=null)ApplyFacePreset(_faceRig,_facePreset);
+            if(mouse.ButtonIndex==MouseButton.Left)
+                _dragging=mouse.Pressed;
+            if(mouse.Pressed && mouse.ButtonIndex is MouseButton.WheelUp or MouseButton.WheelDown)
+            {
+                float factor=mouse.ButtonIndex==MouseButton.WheelUp?0.84f:1.19f;
+                if(_showFaces)
+                    _faceDistance=Mathf.Clamp(_faceDistance*factor,0.52f,2.3f);
+                else
+                    _bodyDistance=Mathf.Clamp(_bodyDistance*factor,2.4f,7.5f);
+                UpdateCamera();
+            }
+            return;
         }
-        else if(key.Keycode==Key.Escape)GetTree().Quit();
+        if(evt is InputEventMouseMotion motion && _dragging)
+        {
+            _orbitYaw=Mathf.Clamp(_orbitYaw+motion.Relative.X*0.005f,-1.4f,1.4f);
+            _orbitPitch=Mathf.Clamp(_orbitPitch-motion.Relative.Y*0.005f,-0.55f,0.55f);
+            UpdateCamera();
+            return;
+        }
+        if(evt is not InputEventKey key||!key.Pressed||key.Echo)return;
+        switch(key.Keycode)
+        {
+            case Key.F:
+                _showFaces=true;_focusedFace=-1;
+                _orbitYaw=0;_orbitPitch=0;
+                _faceDistance=0.95f;
+                UpdateCamera();
+                break;
+            case Key.B:
+                _showFaces=false;
+                _orbitYaw=0;_orbitPitch=0;
+                UpdateCamera();
+                break;
+            case Key.Key0:
+                _showFaces=true;_focusedFace=-1;_faceDistance=0.95f;
+                UpdateCamera();
+                break;
+            case Key.Key1 or Key.Key2 or Key.Key3:
+                _showFaces=true;
+                _focusedFace=key.Keycode switch {Key.Key1=>0,Key.Key2=>1,_=>2};
+                _faceDistance=0.62f;
+                UpdateCamera();
+                break;
+            case Key.Space:
+                _showFaces=false;
+                _playing=!_playing;
+                if(!_playing)
+                    foreach(var part in _animatedPieces)part.Rig.ResetBonePoses();
+                UpdateCamera();
+                break;
+            case Key.Escape:
+                GetTree().Quit();
+                break;
+        }
     }
 
     private void ExportOriginalWalk(string output)

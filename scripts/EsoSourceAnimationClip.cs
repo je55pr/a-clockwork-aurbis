@@ -23,11 +23,18 @@ internal sealed class EsoSourceAnimationClip
     internal readonly float Duration;
     internal readonly int FrameRate;
     internal readonly IReadOnlyList<Track> Tracks;
+    // Selected original animation curve samples are retained for cautious
+    // anatomical-axis remapping. They are source coordinate rotations,
+    // NOT directly usable customization-rig rotations.
+    private readonly Dictionary<string,Frame[]> _sourceCurves;
+    internal int SourceCurveCount => _sourceCurves.Count;
     internal int MappedBoneCount=>Tracks.Count;
 
-    private EsoSourceAnimationClip(string name,float duration,int fps,IReadOnlyList<Track> tracks)
+    private EsoSourceAnimationClip(string name,float duration,int fps,
+        IReadOnlyList<Track> tracks,Dictionary<string,Frame[]> sourceCurves)
     {
         Name=name;Duration=duration;FrameRate=fps;Tracks=tracks;
+        _sourceCurves=sourceCurves;
     }
     private static Quaternion ReadQ(JsonElement array)
     {
@@ -51,13 +58,18 @@ internal sealed class EsoSourceAnimationClip
         if(duration is <0.1f or >60f || fps is <2 or >60 || name.Length==0)
             throw new InvalidDataException("Native source clip missing metadata");
         var tracks=new List<Track>();
+        var sourceCurves=new Dictionary<string,Frame[]>(StringComparer.Ordinal);
         foreach(var record in root.GetProperty("Tracks").EnumerateArray())
         {
             string rawName=record.GetProperty("Name").GetString()??"";
             if(!rawName.StartsWith("mshBn_",StringComparison.Ordinal))continue;
             string canonical="defBn_"+rawName["mshBn_".Length..];
             int index=skeleton.FindBone(canonical);
-            if(index<0)continue;
+            bool gaitCurve=rawName is
+                "mshBn_thigh_L" or "mshBn_thigh_R" or
+                "mshBn_shin_L" or "mshBn_shin_R" or
+                "mshBn_upperArm_L" or "mshBn_upperArm_R";
+            if(index<0 && !gaitCurve)continue;
             var frames=new List<Frame>();
             foreach(var frame in record.GetProperty("Frames").EnumerateArray())
             {
@@ -67,6 +79,8 @@ internal sealed class EsoSourceAnimationClip
                 frames.Add(new Frame(time,ReadQ(frame.GetProperty("Orientation"))));
             }
             if(frames.Count<2 || frames.Count>4000)continue;
+            if(gaitCurve)sourceCurves[rawName]=frames.ToArray();
+            if(index<0)continue;
             // Source track rotations live on the 'mshBn' animation skeleton.
             // Deltas are explicit experimental retargeting, not absolute rests.
             tracks.Add(new Track(canonical,index,
@@ -75,8 +89,33 @@ internal sealed class EsoSourceAnimationClip
         }
         if(tracks.Count==0)
             throw new InvalidDataException("No source bone names match the customization rig");
-        return new EsoSourceAnimationClip(name,duration,fps,tracks);
+        return new EsoSourceAnimationClip(name,duration,fps,tracks,sourceCurves);
     }
+
+    private Frame InterpolateFrame(Frame[] frames,float sample)
+    {
+        int at=Math.Clamp((int)(sample*FrameRate),0,frames.Length-2);
+        var start=frames[at];var next=frames[at+1];
+        float alpha=Mathf.Clamp((sample-start.Time)/
+            Math.Max(0.00001f,next.Time-start.Time),0,1);
+        return new Frame(sample,start.Orientation.Slerp(next.Orientation,alpha));
+    }
+
+    // Return signed native angular travel around the animation rig's
+    // dominant local Y hinge. We deliberately do NOT treat it as a
+    // rotation in Godot's customization-rig coordinate system.
+    internal float OriginalJointSwing(string originalJoint,float seconds)
+    {
+        if(!_sourceCurves.TryGetValue(originalJoint,out var frames))return 0;
+        float sample=seconds%Duration;
+        if(sample<0)sample+=Duration;
+        var current=InterpolateFrame(frames,sample).Orientation;
+        var original=frames[0].Orientation;
+        var delta=(current*original.Inverse()).Normalized();
+        if(delta.W<0)delta=-delta;
+        return 2f*Mathf.Asin(Mathf.Clamp(delta.Y,-0.99f,0.99f));
+    }
+
     internal void Apply(Skeleton3D skeleton,float seconds)
     {
         float sample=seconds%Duration;
