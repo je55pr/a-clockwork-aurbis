@@ -5,7 +5,7 @@ using AClockworkAurbis.Simulation;
 try
 {
     string? catalogPath=null,trace=null;
-    int days=3,seed=42;
+    int days=3,seed=42,rentReserve=20;
     string? economicMode=null;
     bool traceFirst=false,details=false,allResidents=false;
     bool disableTrade=false,disableProduction=false,disableAid=false;
@@ -18,6 +18,7 @@ try
             case "--catalog":catalogPath=Next();break;
             case "--days":days=int.Parse(Next());break;
             case "--seed":seed=int.Parse(Next());break;
+            case "--rent-reserve":rentReserve=int.Parse(Next());break;
             case "--trace":trace=Next();break;
             case "--trace-first":traceFirst=true;break;
             case "--details":details=true;break;
@@ -31,7 +32,8 @@ try
                     "dotnet run -c Release --project tools/SettlementRunner -- "+
                     "--catalog catalog.json [--days 3] [--seed 42] [--trace-first] "+
                     "[--economy prototype|production|commodities] [--no-foreign-trade] "+
-                    "[--no-local-production] [--no-assistance] [--trace NPC_ID] [--details] [--resident-details]");
+                    "[--no-local-production] [--no-assistance] [--rent-reserve GOLD] "+
+                    "[--trace NPC_ID] [--details] [--resident-details]");
                 return 0;
             default:throw new ArgumentException("Unknown parameter "+args[i]);
         }
@@ -50,7 +52,8 @@ try
         EconomyMode.Prototype;
     var world=new SettlementWorld(catalog,new SettlementSettings
     {Seed=seed,Economy=mode,EnableExternalTrade=!disableTrade,
-        EnableLocalProduction=!disableProduction,EnablePublicAssistance=!disableAid});
+        EnableLocalProduction=!disableProduction,EnablePublicAssistance=!disableAid,
+        RentGoldReserve=rentReserve});
     loading.Stop();
     if(traceFirst && world.Residents.Count>0)trace=world.Residents[0].Source.Id;
     if(trace is not null)
@@ -81,6 +84,7 @@ try
         Economy=mode.ToString(),
         Scenario=disableProduction?"crop-failure":disableTrade?"no-foreign":disableAid?"no-assistance":"normal",
         Seed=seed,
+        RentGoldReserve=rentReserve,
         summary.Settlement,
         summary.SourcePlaces,
         summary.SimulatedPlaces,

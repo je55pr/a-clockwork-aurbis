@@ -306,6 +306,9 @@ public sealed record SettlementSettings
     public bool EnablePublicAssistance { get; init; } = true;
     public bool EnableHousing { get; init; } = true;
     public int DailySharedRent { get; init; } = 2;
+    // Pay rent only when enough cash remains after payment. Nobody is
+    // evicted for lack of gold; beds and household stock remain physical.
+    public int RentGoldReserve { get; init; } = 20;
     public int PortCargoUnitsPerWorkHour { get; init; } = 50;
     public int MaxPortCargoCapacity { get; init; } = 2000;
     public int MaxFreightLoad { get; init; } = 40;

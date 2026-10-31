@@ -87,7 +87,7 @@ public sealed partial class SettlementWorld
             HousingOccupied=_housing.Sum(h=>h.Occupied),
             HomelessResidents=Regional && _settings.EnableHousing ?
                 _residents.Count(r=>r.HousingId is null) : 0,
-            RentCollected=_rentCollected,TotalEvictions=_evictions,
+            RentCollected=_rentCollected,TotalEvictions=0,
             TotalRelocations=_relocations,TotalRehousings=_rehousings,
             CommodityDetails=Detailed?CommodityLedger():[],
             RecipesCompleted=_recipeBatches,ToolsWornOut=_toolsWorn,

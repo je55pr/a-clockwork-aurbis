@@ -17,7 +17,7 @@ public sealed partial class SettlementWorld
     private readonly List<HousingUnit> _housing = [];
     private readonly Dictionary<string, HousingUnit> _housingById = new(StringComparer.Ordinal);
     private decimal _rentCollected;
-    private int _evictions, _relocations, _rehousings;
+    private int _relocations, _rehousings;
 
     private double RegionalSleepRate(ResidentState resident) =>
         resident.RoughSleeping ? 0.07 : 0.16;
@@ -50,13 +50,31 @@ public sealed partial class SettlementWorld
         }
     }
 
+    // Source place names can suggest room quality, but the rent amounts
+    // are game-simulation assumptions, not claimed ESO tenancy data.
+    // Unclassified locations use the ordinary room price.
+    internal static int SuggestedHousingRent(PlaceDefinition place,int ordinaryRent)
+    {
+        if(ordinaryRent==0)return 0;
+        string name=place.Name;
+        if(name.Contains("bunkhouse",StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("inn room",StringComparison.OrdinalIgnoreCase))
+            return (ordinaryRent+1)/2;
+        if(name.Contains("manor",StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("manse",StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("villa",StringComparison.OrdinalIgnoreCase))
+            return (int)Math.Min(int.MaxValue,((long)ordinaryRent*5+1)/2);
+        return ordinaryRent;
+    }
+
     private void InitializeHousing()
     {
         foreach (var house in Catalog.Places.Where(p => p.Role == "dwelling"))
-            // No source evidence establishes whether occupants pay rent
-            // to a private landlord. Do not invent one or tax their home.
-            AddHousing(house, beds: 4, rent: 0);
+            AddHousing(house, beds: 4,
+                rent: SuggestedHousingRent(house,_settings.DailySharedRent));
 
+        // The named dwellings carry inferred price tiers, not claims of
+        // source-backed property ownership or historical rent.
         // Create finite, shared beds from observed NPC neighbourhoods, NOT
         // one invisible private home per character. A modest vacancy reserve
         // permits migration without assuming unlimited free property.
@@ -181,8 +199,6 @@ public sealed partial class SettlementWorld
 
     private HousingUnit? AvailableHousingNear(ResidentState resident, BusinessState workplace)
     {
-        if (resident.Gold < EverydayMealCost + _settings.DailySharedRent * 2 + 4)
-            return null;
         return _housing.Where(h => h.Vacant && h.Id != resident.HousingId &&
                 (h.Place.SourcePageId == 0 || h.Id == resident.Source.HomePlaceId) &&
                 PlaceTravelMinutes(h.Place, workplace.Place) <= 130)
@@ -196,9 +212,6 @@ public sealed partial class SettlementWorld
         if (!_settings.EnableHousing) return false;
         var room = AvailableHousingNear(resident, employer);
         if (room is null) return false;
-        const int movingCost = 4;
-        resident.Gold -= movingCost;
-        _publicGold += movingCost; // Paid local transport and relocation services.
         Occupy(resident, room, initial: false, jobMove: true);
         return true;
     }
@@ -206,16 +219,13 @@ public sealed partial class SettlementWorld
     private void RunHousingDay()
     {
         if (!_settings.EnableHousing) return;
-        // First establish housing for anyone with income again. This is not
-        // an unconditional rescue: both capacity and payment are required.
+        // Any resident can use an actual vacant bed. Income does not
+        // determine whether they have somewhere to sleep.
         foreach (var person in _residents.Where(p => p.HousingId is null))
         {
-            // A bed requires a modest buffer for food and several rent days.
-            // Otherwise tiny daily aid payments cause repeated eviction loops.
             var room = _housing.Where(h => h.Vacant &&
                 (h.Place.SourcePageId == 0 || h.Id == person.Source.HomePlaceId) &&
-                PlaceTravelMinutes(ResidentAnchor(person), h.Place) <= 130 &&
-                person.Gold >= h.Rent * 5 + EverydayMealCost)
+                PlaceTravelMinutes(ResidentAnchor(person), h.Place) <= 130)
                 .OrderBy(h => PlaceTravelMinutes(ResidentAnchor(person), h.Place))
                 .ThenBy(h => h.Rent).ThenBy(h => h.Id, StringComparer.Ordinal)
                 .FirstOrDefault();
@@ -228,18 +238,16 @@ public sealed partial class SettlementWorld
             {
                 if (person.HousingId is not string id) continue;
                 var room = _housingById[id];
-                if (person.Gold >= room.Rent)
+                // A simple voluntary means-tested contribution: preserve
+                // a cash reserve for essentials. Never bill or evict
+                // anyone who cannot pay. Only real gold enters the treasury.
+                if (room.Rent > 0 &&
+                    person.Gold >= (decimal)room.Rent + _settings.RentGoldReserve)
                 {
                     person.Gold -= room.Rent;
                     person.RentSpent += room.Rent;
-                    _publicGold += room.Rent; // Explicitly modelled communal lodgings.
+                    _publicGold += room.Rent;
                     _rentCollected += room.Rent;
-                }
-                else
-                {
-                    person.Evictions++;
-                    _evictions++;
-                    MakeHomeless(person);
                 }
             }
         }
