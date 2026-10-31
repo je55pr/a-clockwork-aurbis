@@ -1052,15 +1052,14 @@ static void FundedCapitalConstruction()
     {
         Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false
     });
-    var fishery=world.Businesses.Single(b=>b.Id=="sim:fishery");
-    world.AdvanceTo(11L*1440);
+    var investor=world.Businesses.Single(b=>b.Id=="sim:bakery");
     // Allocate existing, paid-for materials and money through a zero-fee
     // intra-fixture donation. This does not mint goods or gold and makes
     // the construction path deterministic without depending on market luck.
     void Gift(string sku,int count)
     {
         int remaining=count;
-        foreach(var source in world.Businesses.Where(b=>b.Id!=fishery.Id))
+        foreach(var source in world.Businesses.Where(b=>b.Id!=investor.Id))
         {
             int available=source.Stock.GetValueOrDefault(sku);
             int moved=Math.Min(available,remaining);
@@ -1075,28 +1074,30 @@ static void FundedCapitalConstruction()
                 source.InventoryValueMilli.Remove(sku);
             }
             else source.InventoryValueMilli[sku]=originalValue-basis;
-            fishery.Stock[sku]=fishery.Stock.GetValueOrDefault(sku)+moved;
-            fishery.InventoryValueMilli[sku]=
-                fishery.InventoryValueMilli.GetValueOrDefault(sku)+basis;
+            investor.Stock[sku]=investor.Stock.GetValueOrDefault(sku)+moved;
+            investor.InventoryValueMilli[sku]=
+                investor.InventoryValueMilli.GetValueOrDefault(sku)+basis;
             remaining-=moved;
             if(remaining==0)break;
         }
         Expect(remaining==0,"physical capital input "+sku+" exists in the fixture");
     }
-    Gift("lumber",1);
-    Gift("leather",1);
-    decimal needed=Math.Max(0m,1500m-fishery.Gold);
-    foreach(var source in world.Businesses.Where(b=>b.Id!=fishery.Id)
+    Gift("lumber",2);
+    Gift("iron_ingot",2);
+    world.AdvanceTo(11L*1440);
+    if(investor.Stock.GetValueOrDefault("firewood")==0)Gift("firewood",1);
+    decimal needed=Math.Max(0m,1500m-investor.Gold);
+    foreach(var source in world.Businesses.Where(b=>b.Id!=investor.Id)
         .OrderByDescending(b=>b.Gold))
     {
         decimal transferred=Math.Min(needed,Math.Max(0m,source.Gold-100m));
         source.Gold-=transferred;
-        fishery.Gold+=transferred;
+        investor.Gold+=transferred;
         needed-=transferred;
         if(needed==0)break;
     }
     Expect(needed==0,"investment cash is transferred from real accounts");
-    fishery.RecentDemand["fish"]=30m;
+    investor.RecentDemand["bread"]=30m;
     world.CheckInvariants();
     world.AdvanceTo(22L*1440);
     world.CheckInvariants();
@@ -1104,9 +1105,9 @@ static void FundedCapitalConstruction()
     CheckCommodityBalance(report);
     Expect(report.CapitalProjectsStarted>=1,
         "a solvent firm with material inputs can commission construction");
-    Expect(report.CapitalProjectsCompleted>=1 && fishery.CapitalLevel>1,
+    Expect(report.CapitalProjectsCompleted>=1 && investor.CapitalLevel>1,
         "capacity only increases after actual workshop worker hours");
-    Expect(report.CapitalMaterialsConsumed>=2 &&
+    Expect(report.CapitalMaterialsConsumed>=5 &&
         report.ConstructionLabourPayments>=12m,
         "source goods and financed workshop pay are both real costs");
     Expect(report.AllAccountsGold==report.InitialAllAccountsGold,

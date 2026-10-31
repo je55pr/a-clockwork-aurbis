@@ -253,7 +253,7 @@ public sealed partial class SettlementWorld
                HasConstructionOrders(business))
                 budget=Math.Max(budget,Math.Min(maxHours,
                     _construction.Values.Where(p=>p.Builder.Id==business.Id)
-                        .Sum(p=>p.RequiredHours-p.CompletedHours)));\r\n
+                        .Sum(p=>p.RequiredHours-p.CompletedHours)));
             if(!_settings.EnableLocalProduction && PlansProduction(business))
                 budget=0;
             if(estimatedMargin<0 && choice!=null)_unprofitablePlans++;
