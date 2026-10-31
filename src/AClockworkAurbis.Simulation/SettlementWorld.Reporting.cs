@@ -104,6 +104,14 @@ public sealed partial class SettlementWorld
             BusinessPlansRevised=_plansRevised,
             LossMakingPlans=_unprofitablePlans,
             BusinessPlans=Detailed?BusinessPlans().ToArray():[],
+            CapitalProjectsStarted=_capitalProjectsStarted,
+            CapitalProjectsCompleted=_capitalProjectsCompleted,
+            CapitalUpgradesWorn=_capitalProjectsWorn,
+            CapitalMaintenanceUnits=_capitalMaintenancePaid,
+            CapitalMaterialsConsumed=_capitalMaterialsConsumed,
+            ConstructionLabourPayments=_constructionLabourPayments,
+            CapitalProjects=Detailed?CapitalProjects():[],
+            CapitalDecisions=Detailed?CapitalDecisions():[],
             MarketQuotes=Detailed?_businesses
                 .OrderBy(b=>b.Id,StringComparer.Ordinal)
                 .SelectMany(b=>b.Stock.OrderBy(s=>s.Key,StringComparer.Ordinal)
@@ -164,7 +172,8 @@ public sealed partial class SettlementWorld
                     b.RetailSales,b.WorkHours,b.ItemsCrafted,b.WagesPaid,b.DividendsPaid,
                     b.CargoCapacity,b.CargoHandled,
                     Detailed?new SortedDictionary<string,int>(b.Stock,
-                        StringComparer.Ordinal):null)).ToArray()
+                        StringComparer.Ordinal):null,
+                    b.CapitalLevel,b.CapitalInvestedMilli)).ToArray()
         };
     }
 

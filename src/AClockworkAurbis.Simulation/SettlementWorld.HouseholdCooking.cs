@@ -194,24 +194,30 @@ public sealed partial class SettlementWorld
         BusinessState workplace,int hours)
     {
         int numerator=IsNamedChef(worker)?3:2;
-        for(int n=0;n<hours;n++)
+        bool CookBatch(int paidHours)
         {
-            var available=CookableProfessionalRecipes(worker)
+            var recipe=CookableProfessionalRecipes(worker)
                 .Where(r=>RecipeAvailable(r,workplace.Stock,
                     _settings.MaxCommodityStockPerSite,numerator,2))
                 .OrderByDescending(r=>r.Id==workplace.PlannedProduct)
                 .ThenByDescending(r=>ExpectedRecipeMargin(workplace,r,numerator,2))
                 .ThenBy(r=>r.Id,StringComparer.Ordinal)
-                .ToArray();
-            if(available.Length==0)break;
-            var recipe=available[0];
-            CraftMarketRecipe(workplace,recipe,numerator,2,1);
-            int output=recipe.Products.Sum(p=>checked(
-                p.Value*numerator/2));
+                .FirstOrDefault();
+            if(recipe is null)return false;
+            CraftMarketRecipe(workplace,recipe,numerator,2,paidHours);
+            int output=recipe.Products.Sum(p=>checked(p.Value*numerator/2));
             _recipeBatches++;
             workplace.ItemsCrafted=checked(workplace.ItemsCrafted+output);
             _crafted+=output;
             if(IsNamedChef(worker))_chefCookedMeals+=output;
+            return true;
         }
+        int productiveHours=0;
+        for(int n=0;n<hours;n++)
+            if(CookBatch(1))productiveHours++;
+            else break;
+        int bonus=CapitalProductionHours(workplace,productiveHours)-
+            productiveHours;
+        for(int n=0;n<bonus && CookBatch(0);n++) { }
     }
 }

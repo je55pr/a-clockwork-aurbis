@@ -176,6 +176,11 @@ public sealed partial class SettlementWorld
             if(business.Kind==BusinessKinds.FoodProducer)
                 budget=Math.Min(affordable,Math.Max(2,
                     choice is null?0:DemandFor(business,choice)/2+2));
+            if(business.Kind==BusinessKinds.Workshop &&
+               HasConstructionOrders(business))
+                budget=Math.Max(budget,Math.Min(maxHours,
+                    _construction.Values.Where(p=>p.Builder.Id==business.Id)
+                        .Sum(p=>p.RequiredHours-p.CompletedHours)));
             if(!_settings.EnableLocalProduction && PlansProduction(business))
                 budget=0;
             if(estimatedMargin<0 && choice!=null)_unprofitablePlans++;

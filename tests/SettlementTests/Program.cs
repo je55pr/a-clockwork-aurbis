@@ -36,6 +36,7 @@ var tests=new (string Name,Action Run)[]
     ("Bread prices respond to local stock and logistics", BreadScarcityPricing),
     ("Fractional septims really settle and all accounts reconcile", FractionalMarketSettlement),
     ("Businesses plan production and labour using observed market data", AdaptiveBusinessPlanning),
+    ("Capital upgrades consume funded materials and real construction hours", FundedCapitalConstruction),
     ("Households cook with real ingredients at lower yields than chefs", HouseholdCookingAndChefs),
     ("Deterministic regional simulations can run in time chunks", RegionalDeterminism),
     ("Large 10k actor headless performance and integrity", Stress)
@@ -729,9 +730,11 @@ static void CommodityChains()
         "tools wear out, recipes require paid workers and cargo needs transport");
     var corn=world.Businesses.Single(b=>b.Id=="sim:fields");
     var greens=world.Businesses.Single(b=>b.Id=="sim:greens");
-    Expect(corn.CommodityStock.Keys.All(k=>k is "wheat" or "potato") &&
-        greens.CommodityStock.Keys.All(k=>k is "lettuce" or "onion"),
-        "two farms do not automatically grow the same crops");
+    Expect(corn.CommodityStock.Keys.Where(CommodityRecipes.Crops.Contains)
+            .All(k=>k is "wheat" or "potato") &&
+        greens.CommodityStock.Keys.Where(CommodityRecipes.Crops.Contains)
+            .All(k=>k is "lettuce" or "onion"),
+        "farm crop identity remains restricted even when investment goods are stocked");
     Expect(report.AllAccountsGold==report.InitialAllAccountsGold,
         "commodity trading and delivery fees conserve all gold");
     var invalid=CommodityFixture();
@@ -1032,4 +1035,80 @@ static void AdaptiveBusinessPlanning()
         "production-disabled scenarios do not create paid production plans");
     Expect(halted.Report().RecipesCompleted==0,
         "production plans cannot create physical goods without production");
+}
+
+static void FundedCapitalConstruction()
+{
+    var world=new SettlementWorld(CommodityFixture(),new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false
+    });
+    var fishery=world.Businesses.Single(b=>b.Id=="sim:fishery");
+    world.AdvanceTo(11L*1440);
+    // Allocate existing, paid-for materials and money through a zero-fee
+    // intra-fixture donation. This does not mint goods or gold and makes
+    // the construction path deterministic without depending on market luck.
+    void Gift(string sku,int count)
+    {
+        int remaining=count;
+        foreach(var source in world.Businesses.Where(b=>b.Id!=fishery.Id))
+        {
+            int available=source.Stock.GetValueOrDefault(sku);
+            int moved=Math.Min(available,remaining);
+            if(moved==0)continue;
+            long originalValue=source.InventoryValueMilli.GetValueOrDefault(sku);
+            long basis=moved==available?originalValue:
+                originalValue*moved/available;
+            source.Stock[sku]-=moved;
+            if(source.Stock[sku]==0)
+            {
+                source.Stock.Remove(sku);
+                source.InventoryValueMilli.Remove(sku);
+            }
+            else source.InventoryValueMilli[sku]=originalValue-basis;
+            fishery.Stock[sku]=fishery.Stock.GetValueOrDefault(sku)+moved;
+            fishery.InventoryValueMilli[sku]=
+                fishery.InventoryValueMilli.GetValueOrDefault(sku)+basis;
+            remaining-=moved;
+            if(remaining==0)break;
+        }
+        Expect(remaining==0,"physical capital input "+sku+" exists in the fixture");
+    }
+    Gift("lumber",1);
+    Gift("leather",1);
+    decimal needed=Math.Max(0m,1500m-fishery.Gold);
+    foreach(var source in world.Businesses.Where(b=>b.Id!=fishery.Id)
+        .OrderByDescending(b=>b.Gold))
+    {
+        decimal transferred=Math.Min(needed,Math.Max(0m,source.Gold-100m));
+        source.Gold-=transferred;
+        fishery.Gold+=transferred;
+        needed-=transferred;
+        if(needed==0)break;
+    }
+    Expect(needed==0,"investment cash is transferred from real accounts");
+    fishery.RecentDemand["fish"]=30m;
+    world.CheckInvariants();
+    world.AdvanceTo(22L*1440);
+    world.CheckInvariants();
+    var report=world.Report();
+    CheckCommodityBalance(report);
+    Expect(report.CapitalProjectsStarted>=1,
+        "a solvent firm with material inputs can commission construction");
+    Expect(report.CapitalProjectsCompleted>=1 && fishery.CapitalLevel>1,
+        "capacity only increases after actual workshop worker hours");
+    Expect(report.CapitalMaterialsConsumed>=2 &&
+        report.ConstructionLabourPayments>=12m,
+        "source goods and financed workshop pay are both real costs");
+    Expect(report.AllAccountsGold==report.InitialAllAccountsGold,
+        "paid construction cannot create or destroy fractional septims");
+    var closed=new SettlementWorld(CommodityFixture(),new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableLocalProduction=false,
+        EnableExternalTrade=false
+    });
+    closed.AdvanceTo(30L*1440);
+    closed.CheckInvariants();
+    Expect(closed.Report().CapitalProjectsStarted==0,
+        "shutting off local production cannot secretly construct equipment");
 }

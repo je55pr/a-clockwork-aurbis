@@ -164,7 +164,8 @@ public sealed partial class SettlementWorld
                 return ProfessionalCookCanWork(worker,company);
             case BusinessKinds.Smeltery or BusinessKinds.Sawmill or BusinessKinds.Tannery
                 or BusinessKinds.Leatherworker or BusinessKinds.Workshop:
-                return CommodityRecipes.For(company).Any(r=>
+                return HasConstructionOrders(company) ||
+                    CommodityRecipes.For(company).Any(r=>
                     r.Ingredients.All(x=>Quantity(company.Stock,x.Key)>=x.Value) &&
                     r.Products.All(x=>Quantity(company.Stock,x.Key)+x.Value<=
                         _settings.MaxCommodityStockPerSite));
@@ -197,7 +198,7 @@ public sealed partial class SettlementWorld
                     int capacity=_settings.MaxCommodityStockPerSite-
                         Quantity(company.Stock,crop);
                     int picked=Math.Min(capacity,Math.Min(company.LandYieldRemaining,
-                        _settings.RenewableFoodPerWorkHour));
+                        _settings.RenewableFoodPerWorkHour+company.CapitalLevel-1));
                     if(picked==0)break;
                     company.LandYieldRemaining-=picked;
                     ExtractMarketStock(company,crop,picked,1);
@@ -216,7 +217,7 @@ public sealed partial class SettlementWorld
                     int capacity=Math.Max(0,_settings.MaxCommodityStockPerSite-
                         Quantity(company.Stock,output));
                     int picked=Math.Min(capacity,Math.Min(company.MineralReserve,
-                        _settings.RawMaterialPerWorkHour));
+                        _settings.RawMaterialPerWorkHour+company.CapitalLevel-1));
                     if(picked==0)break;
                     company.MineralReserve-=picked;
                     ExtractMarketStock(company,output,picked,1);
@@ -242,7 +243,8 @@ public sealed partial class SettlementWorld
                             Quantity(company.Stock,"game_meat"),
                             _settings.MaxCommodityStockPerSite-
                             Quantity(company.Stock,"raw_hide"));
-                    int units=Math.Min(capacity,Math.Min(2,company.LandYieldRemaining));
+                    int units=Math.Min(capacity,Math.Min(
+                        2+company.CapitalLevel-1,company.LandYieldRemaining));
                     if(units<=0)break;
                     company.LandYieldRemaining-=units;
                     if(company.Kind==BusinessKinds.Fishery)
@@ -269,22 +271,34 @@ public sealed partial class SettlementWorld
             case BusinessKinds.Leatherworker:
             case BusinessKinds.Workshop:
             {
-                for(int n=0;n<hours;n++)
+                int productive=hours;
+                if(company.Kind==BusinessKinds.Workshop)
+                    for(int hour=0;hour<hours;hour++)
+                        if(CompleteConstructionHour(company))productive--;
+                bool CraftBatch(int paidHours)
                 {
-                    var available=CommodityRecipes.For(company)
+                    var recipe=CommodityRecipes.For(company)
                         .Where(r=>RecipeAvailable(r,company.Stock,
                             _settings.MaxCommodityStockPerSite))
                         .OrderByDescending(r=>r.Id==company.PlannedProduct)
                         .ThenByDescending(r=>ExpectedRecipeMargin(company,r))
                         .ThenBy(r=>r.Id,StringComparer.Ordinal)
-                        .ToArray();
-                    if(available.Length==0)break;
-                    var recipe=available[0];
-                    CraftMarketRecipe(company,recipe,1,1,1);
+                        .FirstOrDefault();
+                    if(recipe is null)return false;
+                    CraftMarketRecipe(company,recipe,1,1,paidHours);
                     _recipeBatches++;
                     company.ItemsCrafted+=recipe.Products.Values.Sum();
                     _crafted+=recipe.Products.Values.Sum();
+                    return true;
                 }
+                int actuallyProduced=0;
+                for(int n=0;n<productive;n++)
+                    if(CraftBatch(1))actuallyProduced++;
+                    else break;
+                // Extra machine cycles are earned only by productive hours.
+                int extra=CapitalProductionHours(company,actuallyProduced)-
+                    actuallyProduced;
+                for(int n=0;n<extra && CraftBatch(0);n++) { }
                 break;
             }
             case BusinessKinds.ImportHub:
@@ -370,6 +384,7 @@ public sealed partial class SettlementWorld
             }
 
         PlanMarketDay();
+        PlanCapitalDay(day);
         CommodityWholesaleDay();
     }
 
@@ -466,9 +481,12 @@ public sealed partial class SettlementWorld
         // A tannery holding hides but lacking fuel is a blocked production
         // line; it competes ahead of retailers filling optional inventories.
         // All ties rotate deterministically by day and seed.
-        var orders=_businesses.SelectMany(b=>CommodityOrders(b)
-            .Select(o=>(Buyer:b,Sku:o.Sku,
-                Target:MarketTarget(b,o.Sku,o.Target))))
+        var orders=_businesses.SelectMany(b=>
+            CommodityOrders(b).Select(o=>(Sku:o.Sku,
+                    Target:MarketTarget(b,o.Sku,o.Target)))
+                .Concat(CapitalOrders(b))
+                .GroupBy(x=>x.Sku,StringComparer.Ordinal)
+                .Select(g=>(Buyer:b,Sku:g.Key,Target:g.Max(x=>x.Target))))
             .OrderBy(o=>CommodityOrderPriority(o.Buyer,o.Sku))
             .ThenBy(o=>StableRandom.Hash(o.Buyer.Id+o.Sku,
                 unchecked(_settings.Seed+day))).ToArray();

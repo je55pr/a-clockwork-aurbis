@@ -241,6 +241,12 @@ public sealed class BusinessState
     public int PlannedHours { get; internal set; } = 8;
     internal int PlannedHoursWorked { get; set; }
     internal int LastPlannedDay { get; set; } = -1;
+    public int CapitalLevel { get; internal set; } = 1;
+    public long CapitalInvestedMilli { get; internal set; }
+    internal int CapitalWorkCredit { get; set; }
+    internal bool RequestedCapital { get; set; }
+    internal int LastCapitalInvestmentDay { get; set; } = -50;
+    internal int LastCapitalMaintenanceDay { get; set; } = -1;
     public int ToolWearHours { get; internal set; }
     public decimal WagesPaid { get; internal set; }
     public decimal RetailRevenue { get; internal set; }
@@ -334,7 +340,17 @@ public sealed record BusinessSnapshot(
     int RetailSales, int WorkHours, int ItemsCrafted, decimal WagesPaid,
     decimal DividendsPaid,
     int CargoCapacity = 0, long CargoHandled = 0,
-    IReadOnlyDictionary<string,int>? CommodityInventory = null);
+    IReadOnlyDictionary<string,int>? CommodityInventory = null,
+    int CapitalLevel=1,long CapitalInvestedMilli=0);
+
+public sealed record CapitalDecisionSnapshot(
+    int Day,string BusinessId,string BusinessName,string Decision,
+    decimal ExpectedPaybackDays,string Reason);
+
+public sealed record CapitalProjectSnapshot(
+    string InvestorId,string InvestorName,string BuilderName,
+    int CompletedHours,int RequiredHours,long MaterialCostMilli,
+    decimal LabourPayment);
 
 public sealed record BusinessPlanSnapshot(
     string BusinessId,string BusinessName,int Day,string? Product,
@@ -466,6 +482,14 @@ public sealed record SettlementReport
     public long BusinessPlansRevised { get; init; }
     public long LossMakingPlans { get; init; }
     public BusinessPlanSnapshot[] BusinessPlans { get; init; } = [];
+    public long CapitalProjectsStarted { get; init; }
+    public long CapitalProjectsCompleted { get; init; }
+    public long CapitalUpgradesWorn { get; init; }
+    public long CapitalMaintenanceUnits { get; init; }
+    public long CapitalMaterialsConsumed { get; init; }
+    public decimal ConstructionLabourPayments { get; init; }
+    public CapitalProjectSnapshot[] CapitalProjects { get; init; } = [];
+    public CapitalDecisionSnapshot[] CapitalDecisions { get; init; } = [];
     public MarketQuoteSnapshot[] MarketQuotes { get; init; } = [];
     public decimal ScarcityPricePremiumGold { get; init; }
     public decimal SurplusPriceDiscountGold { get; init; }
