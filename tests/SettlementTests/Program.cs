@@ -28,6 +28,7 @@ var tests=new (string Name,Action Run)[]
     ("Specific commodities flow through extraction and crafting recipes", CommodityChains),
     ("Missing smeltery blocks new ingots despite abundant ore", MissingSmeltery),
     ("Commodity world is deterministic with physical freight and consumption", CommodityDeterminism),
+    ("No port means no invented depot and less efficient freight", PortlessCommodityRegion),
     ("Deterministic regional simulations can run in time chunks", RegionalDeterminism),
     ("Large 10k actor headless performance and integrity", Stress)
 };
@@ -704,8 +705,8 @@ static void CommodityChains()
         Item(report,"bread").Crafted>0 &&
         Item(report,"garden_salad").Crafted>0,
         "distinct local crops and fishing supply multiple cooked foods");
-    Expect(report.ToolsWornOut>0 && report.RecipesCompleted>0 &&
-        report.ShipmentsSent>0 && report.FreightFees>0,
+    Expect(report.ToolsWornOut>0 && Item(report,"horseshoes").Consumed>0 &&
+        report.RecipesCompleted>0 && report.ShipmentsSent>0 && report.FreightFees>0,
         "tools wear out, recipes require paid workers and cargo needs transport");
     var corn=world.Businesses.Single(b=>b.Id=="sim:fields");
     var greens=world.Businesses.Single(b=>b.Id=="sim:greens");
@@ -758,4 +759,26 @@ static void CommodityDeterminism()
     a.CheckInvariants();b.CheckInvariants();
     Expect(JsonSerializer.Serialize(a.Report())==JsonSerializer.Serialize(b.Report()),
         "all SKU stockpiles, shipment locations and recipe ledgers repeat across time chunks");
+}
+
+static void PortlessCommodityRegion()
+{
+    var source=CommodityFixture();
+    var noPort=source with
+    {
+        Places=source.Places.Where(p=>p.Id!="b:port").ToArray(),
+        Businesses=source.Businesses.Where(b=>b.PlaceId!="b:port").ToArray(),
+        Residents=source.Residents.Select(r=>r.WorkPlaceId=="b:port"?
+            r with{WorkPlaceId=null,WorkEvidence="no_local_port"}:r).ToArray()
+    };
+    var world=new SettlementWorld(noPort,new SettlementSettings
+        {Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false});
+    Expect(world.Businesses.All(b=>b.Kind!=BusinessKinds.ImportHub),
+        "a region without a documented port does not gain a free phantom port");
+    world.AdvanceTo(1440L*20);
+    world.CheckInvariants();
+    var r=world.Report();
+    CheckCommodityBalance(r);
+    Expect(r.ShipmentsSent>12 && r.FreightDelayedForGear>0,
+        "domestic freight can still operate but inadequate carrier equipment delays long routes");
 }
