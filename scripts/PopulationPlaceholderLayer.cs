@@ -21,6 +21,9 @@ public partial class PopulationPlaceholderLayer : Node3D
     private NpcHoverInspector? _hoverInspector;
     private Func<bool>? _hoverAllowed;
     public void SetHoverGate(Func<bool> allowed) => _hoverAllowed=allowed;
+    public void SetFirstPersonAim(bool enabled) => _hoverInspector?.SetFirstPersonAim(enabled);
+    private bool _firstPersonAim;
+    public void ConfigureFirstPersonAim(bool enabled) { _firstPersonAim=enabled; SetFirstPersonAim(enabled); }
     private readonly List<Vector2> _dockLandings=new();
     private Node3D? _models;
     private readonly List<PopulationSpawnPlanner.Placement> _visibleSpawns=new();
@@ -82,6 +85,7 @@ public partial class PopulationPlaceholderLayer : Node3D
         _hoverInspector=new NpcHoverInspector {Name="NpcCursorInspector"};
         _hoverInspector.Setup(_props.Raycaster,
             ()=>_shown&&(_hoverAllowed?.Invoke()??true));
+        _hoverInspector.SetFirstPersonAim(_firstPersonAim);
         AddChild(_hoverInspector);
         Rebuild();
     }

@@ -20,6 +20,10 @@ internal static class AnimationSurvey
     private delegate nint GetFileInfo(nint file);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void FreeFile(nint file);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate nint GetVertexType(nint mesh);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int GetObjectSize(nint type);
 
     private static nint Ptr(nint address, int offset) =>
         address == 0 ? 0 : Marshal.ReadIntPtr(address, offset);
@@ -46,15 +50,17 @@ internal static class AnimationSurvey
         return refs;
     }
 
+    private sealed record MeshSkinInfo(string Name, int VertexCount, int BoneBindings,
+        int VertexStride, string[] VertexMembers);
     private sealed record SkeletonInfo(string Name, int BoneCount, string[] SampleBones);
     private sealed record GroupInfo(string Name, int VectorTracks, int TransformTracks,
         int TextTracks, string[] SampleTransformNames);
     private sealed record AnimationInfo(string Name, float DurationSeconds,
         float TimeStepSeconds, float Oversampling, int LoopCount, int Flags,
         GroupInfo[] Groups);
-    private sealed record SurveyInfo(string SourceId, int MeshCount, int ModelCount,
-        int SkeletonCount, SkeletonInfo[] Skeletons, int StandaloneTrackGroups,
-        int AnimationCount, AnimationInfo[] Animations);
+    private sealed record SurveyInfo(string SourceId, int MeshCount, MeshSkinInfo[] Meshes,
+        int ModelCount, int SkeletonCount, SkeletonInfo[] Skeletons,
+        int StandaloneTrackGroups, int AnimationCount, AnimationInfo[] Animations);
 
     public static unsafe int Run(string[] args)
     {
@@ -91,6 +97,10 @@ internal static class AnimationSurvey
                 NativeLibrary.GetExport(module, "GrannyGetFileInfo"));
             var free = Marshal.GetDelegateForFunctionPointer<FreeFile>(
                 NativeLibrary.GetExport(module, "GrannyFreeFile"));
+            var vertexType = Marshal.GetDelegateForFunctionPointer<GetVertexType>(
+                NativeLibrary.GetExport(module, "GrannyGetMeshVertexType"));
+            var objectSize = Marshal.GetDelegateForFunctionPointer<GetObjectSize>(
+                NativeLibrary.GetExport(module, "GrannyGetTotalObjectSize"));
             fixed (byte* data = payload)
             {
                 nint file = open(payload.Length, data);
@@ -99,6 +109,32 @@ internal static class AnimationSurvey
                 {
                     nint info = get(file);
                     if (info == 0) throw new InvalidDataException("No file metadata.");
+                    var meshes = new List<MeshSkinInfo>();
+                    foreach (nint mesh in References(info, 84, 88, 256))
+                    {
+                        if (mesh == 0) continue;
+                        nint layout = vertexType(mesh);
+                        int stride = layout == 0 ? 0 : objectSize(layout);
+                        int vertices = Int(mesh, 12);
+                        // The material binding count is at 36; the separate bone binding
+                        // table begins at offset 48 in this packed x64 layout.
+                        int bindings = Int(mesh, 48);
+                        var members = new List<string>();
+                        if (layout != 0 && stride is > 0 and <= 512)
+                        {
+                            for (int i = 0; i < 64; i++)
+                            {
+                                nint member = layout + i * 44;
+                                int kind = Int(member, 0);
+                                if (kind == 0) break;
+                                int width = Int(member, 20);
+                                string label = Name(Ptr(member, 4));
+                                members.Add($"{label} ({kind} x {width})");
+                            }
+                        }
+                        meshes.Add(new MeshSkinInfo(Str(mesh), vertices, bindings,
+                            stride, members.ToArray()));
+                    }
                     var skeletons = new List<SkeletonInfo>();
                     foreach (nint skel in References(info, 48, 52, 128))
                     {
@@ -155,8 +191,9 @@ internal static class AnimationSurvey
                     }
 
                     var report = new SurveyInfo($"0x{id:X8}",
-                        Int(info, 84), Int(info, 96), Int(info, 48), skeletons.ToArray(),
-                        Int(info, 108), Int(info, 120), animations.ToArray());
+                        Int(info, 84), meshes.ToArray(), Int(info, 96),
+                        Int(info, 48), skeletons.ToArray(), Int(info, 108),
+                        Int(info, 120), animations.ToArray());
                     Console.WriteLine(JsonSerializer.Serialize(report, new JsonSerializerOptions
                     {
                         WriteIndented = true

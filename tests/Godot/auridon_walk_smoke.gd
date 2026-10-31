@@ -39,8 +39,9 @@ func _run() -> void:
         push_error("Source terrain collider missing")
         quit(1)
         return
-    if terrain.get_node_or_null("SourcePlacedProps") == null:
-        push_error("Existing source prop renderer not attached")
+    var props := terrain.get_node_or_null("SourcePlacedProps")
+    if props == null or props.get_node_or_null("StreamingSourceCollisions/NearbySourceObjectBody") == null:
+        push_error("Source prop renderer or streamed collision body not attached")
         quit(1)
         return
     if terrain.get_node_or_null("AuridonNpcPlaceholders") == null:
@@ -118,5 +119,7 @@ func _run() -> void:
         quit(1)
         return
 
+    var streamed_body := props.get_node("StreamingSourceCollisions/NearbySourceObjectBody")
+    print("SOURCE PHYSICS: active placed-mesh colliders=", streamed_body.get_child_count())
     print("PASS Auridon source terrain, props, NPC preview, collision, mouse-look, walking and jumping")
     quit(0)

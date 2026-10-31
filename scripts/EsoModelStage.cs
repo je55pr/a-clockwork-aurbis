@@ -39,7 +39,7 @@ public partial class EsoModelStage : Node3D
         {
             AnchorLeft = 0.58f, AnchorRight = 0.99f,
             AnchorTop = 0.1f, AnchorBottom = 0.1f,
-            OffsetLeft = 0, OffsetRight = 0, OffsetTop = 0, OffsetBottom = 242
+            OffsetLeft = 0, OffsetRight = 0, OffsetTop = 0, OffsetBottom = 300
         };
         var ui = new CanvasLayer { Name = "ModelControls" };
         AddChild(ui);
@@ -58,6 +58,19 @@ public partial class EsoModelStage : Node3D
         row.AddChild(button);
         button.Pressed += () => BeginLoad(_idField.Text);
         _idField.TextSubmitted += BeginLoad;
+        var examples = new HBoxContainer();
+        column.AddChild(examples);
+        foreach (var (caption, asset) in new[]
+        {
+            ("Animated limestone", "0015F475"),
+            ("Skinned helmet A", "0029A89F"),
+            ("Skinned helmet B", "0017F3F3")
+        })
+        {
+            var sample = new Button { Text = caption };
+            sample.Pressed += () => { _idField.Text = asset; BeginLoad(asset); };
+            examples.AddChild(sample);
+        }
         _status = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, Text = "Initializing ESO source archive..." };
         column.AddChild(_status);
         _animations = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, Text = "Animations: not inspected" };
@@ -202,7 +215,19 @@ public partial class EsoModelStage : Node3D
             clips.Add(animation.GetProperty("Name").GetString() +
                 $" {animation.GetProperty("DurationSeconds").GetSingle():0.00}s ({tracks} tracks)");
         }
+        var sourceMeshes = data.GetProperty("Meshes").EnumerateArray().ToArray();
+        int skinned = sourceMeshes.Count(m =>
+        {
+            var fields = m.GetProperty("VertexMembers").EnumerateArray()
+                .Select(f => f.GetString() ?? "").ToArray();
+            return fields.Any(f => f.StartsWith("BoneWeights", StringComparison.Ordinal)) &&
+                   fields.Any(f => f.StartsWith("BoneIndices", StringComparison.Ordinal));
+        });
+        string bindings = string.Join(", ", sourceMeshes.Select(m =>
+            m.GetProperty("BoneBindings").GetInt32().ToString()));
         return $"Native survey: {skeletonCount} skeleton(s), bone counts [{bones}].\n" +
+            $"Skinnable vertex streams: {skinned}/{sourceMeshes.Length} meshes; " +
+            $"source bone bindings [{bindings}] (not yet exported to Godot).\n" +
             (clips.Count == 0 ? "No clips in this GR2." : string.Join(" | ", clips));
     }
 

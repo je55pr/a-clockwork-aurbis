@@ -967,6 +967,8 @@ void fragment() {
         player.Position = spawn;
         player.Rotation = new Vector3(0f, _yaw, 0f);
         AddChild(player);
+        _terrainRoot.GetNodeOrNull<SourcePropLayer>("SourcePlacedProps")?
+            .TrackPlayerCollision(player);
         _firstPersonPlayer = player;
         if (_camera != null)
             _camera.Current = false;
@@ -1188,7 +1190,8 @@ void fragment() {
             GD.Print("FULL SECTION " + _status.Text);
             if(vegetationTest && closeUp)
             {
-                var props=new SourcePropLayer{Name="SourcePlacedProps"};
+                var props=new SourcePropLayer{Name="SourcePlacedProps",
+                    EnableFirstPersonPhysics=FirstPersonLab};
                 props.Setup(_archive,_decoder,bundle,result.LowestHeight,tileX,tileZ);
                 string waterNote="No source-linked harbour-water elevation found.";
                 if(props.HarbourWaterCandidate is float boatHeight)
@@ -1213,6 +1216,7 @@ void fragment() {
                 {
                     var population=new PopulationPlaceholderLayer {Name="AuridonNpcPlaceholders"};
                     population.Setup(_archive,_decoder,bundle,props,result.LowestHeight,tileX,tileZ);
+                    population.ConfigureFirstPersonAim(FirstPersonLab);
                     population.SetDensity(_populationDensity);
                     population.SetShown(_showPopulation);
                     population.SetHoverGate(()=>_bestView&&_simpleHud?.Visible==true&&

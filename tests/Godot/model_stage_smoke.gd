@@ -42,5 +42,33 @@ func _check() -> void:
         push_error("Native animation durations/tracks wrong: " + summary)
         quit(1)
         return
-    print("PASS ESO bind-pose mesh rendering and source animation metadata")
+    # The same viewer should inspect genuine character-equipment skinning
+    # information without pretending those mesh parts are complete NPCs.
+    var skinned_button: Button = null
+    for item in stage.find_children("*", "Button", true, false):
+        if (item as Button).text == "Skinned helmet A":
+            skinned_button = item as Button
+            break
+    if skinned_button == null:
+        push_error("Character-equipment model quick-load button missing")
+        quit(1)
+        return
+    skinned_button.pressed.emit()
+    summary = ""
+    for i in 450:
+        await physics_frame
+        summary = ""
+        for label in stage.find_children("*", "Label", true, false):
+            summary += (label as Label).text + "\n"
+        if "0x0029A89F:" in summary and "Skinnable vertex streams:" in summary:
+            break
+    if not "0x0029A89F:" in summary or not "Skinnable vertex streams: 1/1 meshes" in summary:
+        push_error("ESO equipment skinning survey failed: " + summary)
+        quit(1)
+        return
+    if not "source bone bindings [5]" in summary:
+        push_error("Original equipment skeleton binding metadata unavailable")
+        quit(1)
+        return
+    print("PASS ESO bind-pose model and character-equipment skinning metadata")
     quit(0)

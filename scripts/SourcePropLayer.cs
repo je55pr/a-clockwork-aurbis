@@ -64,6 +64,9 @@ public partial class SourcePropLayer : Node3D
     public IReadOnlyList<PropFootprint> PropFootprints => _propFootprints;
     public bool HasPreparedGeometry { get; private set; }
     public SourceGeometryRaycaster Raycaster { get; } = new();
+    public bool EnableFirstPersonPhysics { get; set; }
+    public SourcePropCollisions? NearbyCollisions { get; private set; }
+    public void TrackPlayerCollision(Node3D player) => NearbyCollisions?.Track(player);
     public static bool BlocksNpcSpawn(string sourceModelName)
         => !string.Equals(sourceModelName,"ActiveRunes",StringComparison.OrdinalIgnoreCase);
     private readonly Dictionary<uint,List<PropFootprint>> _coarsePerModel = new();
@@ -310,6 +313,11 @@ public partial class SourcePropLayer : Node3D
 
     public override void _Ready()
     {
+        if (EnableFirstPersonPhysics)
+        {
+            NearbyCollisions = new SourcePropCollisions { Name = "StreamingSourceCollisions" };
+            AddChild(NearbyCollisions);
+        }
         _running=true;
         var ordered=_transforms.OrderByDescending(g=>IsArchitecture(_names[g.Key]))
             .ThenByDescending(g=>g.Value.Count).Select(g=>g.Key).ToArray();
@@ -488,6 +496,7 @@ public partial class SourcePropLayer : Node3D
                 mesh.SurfaceSetMaterial(mesh.GetSurfaceCount()-1,mat);
             }
             var placements=_transforms[id];
+            NearbyCollisions?.Register(mesh, placements, _names[id]);
             // MultiMeshInstance3D has NO physics collider: register its exact source
             // triangles and its transforms with the CPU spatial/BVH raycaster.
             var faceVertices=mesh.GetFaces();
