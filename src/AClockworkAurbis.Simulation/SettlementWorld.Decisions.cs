@@ -62,8 +62,10 @@ public sealed partial class SettlementWorld
             }
         }
 
-        if (Regional && actor.Food==0 && actor.Gold<EverydayMealCost &&
-            actor.Satiation<72 && ChooseSubsistence(index,actor))return;
+        // Natural subsistence is the fallback when a hungry resident has no
+        // food they can buy. Don't preempt ordinary shopping at mild hunger.
+        if (Regional && actor.Food==0 &&
+            actor.Satiation<53 && ChooseSubsistence(index,actor))return;
 
         if(actor.WorkId is not null &&
            localMinute>=actor.WorkStart*60&&
@@ -95,6 +97,12 @@ public sealed partial class SettlementWorld
             }
             return;
         }
+
+        // Casual paid extraction is available without a permanent contract.
+        // Full-time shifts above always take priority. NPCs seek extra work
+        // when low on cash; the site still needs resources and payroll.
+        if(Detailed && hour>=10 && hour<18 && actor.Gold<12 &&
+           actor.Energy>=20 && TryCasualShift(index,actor))return;
 
         // Household tool/general-goods purchases are deliberately modest.
         // We do not assert which specific TES items residents need yet.

@@ -227,8 +227,10 @@ public sealed partial class SettlementWorld
 
     private bool ChooseSubsistence(int index, ResidentState actor)
     {
-        if (!Regional || !_settings.EnableLocalProduction || _farms.Length == 0)
-            return false;
+        if (!Regional || !_settings.EnableLocalProduction)return false;
+        // The commons belong to no employer or farm. A person without gold
+        // can forage directly rather than needing a paid harvesting job.
+        if(TryWildForage(index,actor))return true;
         var plot = SubsistencePlot(actor);
         if (plot is null) return false;
         // At this scale foraging represents one hour of productive labour in
@@ -241,9 +243,14 @@ public sealed partial class SettlementWorld
 
     private void CompleteSubsistenceHarvest(ResidentState actor)
     {
-        if (!Regional || !_byBusiness.TryGetValue(actor.CurrentPlaceId, out var plot) ||
-            plot.Kind != BusinessKinds.FoodProducer || !_settings.EnableLocalProduction)
+        if(!Regional || !_settings.EnableLocalProduction)return;
+        if(_wildForageById.TryGetValue(actor.CurrentPlaceId,out var wild))
+        {
+            HarvestWildFood(actor,wild);
             return;
+        }
+        if(!_byBusiness.TryGetValue(actor.CurrentPlaceId,out var plot) ||
+            plot.Kind != BusinessKinds.FoodProducer)return;
         if(Detailed){HarvestCommoditySubsistence(actor,plot);return;}
         int harvested = Math.Min(2, plot.LandYieldRemaining);
         plot.LandYieldRemaining -= harvested;
@@ -258,6 +265,7 @@ public sealed partial class SettlementWorld
     private void RunRegionalDay()
     {
         if (_residents.Count == 0) return;
+        if(!Detailed)RegrowWildFood();
         // Environmental productivity: land regenerates a bounded harvest
         // potential once a day, not an inventory of magically delivered food.
         if (_settings.EnableLocalProduction && !Detailed)

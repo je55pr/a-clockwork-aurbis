@@ -129,7 +129,7 @@ public sealed record ResidentDefinition(
 public enum SettlementAction : byte
 {
     Idle, Travel, Work, Eat, Sleep, BuyFood, BuyGoods, HarvestFood,
-    BuyGroceries, CookAtHome
+    BuyGroceries, CookAtHome, CasualWork
 }
 
 public enum EconomyMode { Prototype, RegionalProduction, CommodityProduction }
@@ -194,6 +194,9 @@ public sealed class ResidentState
     public int GroceryKitsPurchased { get; internal set; }
     internal long LastFailedGrocerySearchDay { get; set; } = -1;
     public decimal WageIncome { get; internal set; }
+    public decimal CasualWageIncome { get; internal set; }
+    public int CasualHoursToday { get; internal set; }
+    public int RegularHoursToday { get; internal set; }
     public decimal DividendIncome { get; internal set; }
     public long UnpaidHours { get; internal set; }
     public long WorkMinutes { get; internal set; }
@@ -301,6 +304,13 @@ public sealed record SettlementSettings
     public int FoodSalesTax { get; init; } = 1;
     public int GoodsSalesTax { get; init; } = 2;
     public int DailyAssistanceLimit { get; init; } = 8;
+    // Paid casual work never replaces priority permanent farm/mine shifts.
+    public int RegularGuaranteedHoursPerDay { get; init; } = 2;
+    public int CasualHourlyWage { get; init; } = 2;
+    public int MaxCasualHoursPerDay { get; init; } = 4;
+    // Finite renewable wild commons per person in each local neighbourhood.
+    // They are not the crops growing on commercial or source-named farms.
+    public int WildForagePerResidentPerDay { get; init; } = 2;
     public bool EnableLocalProduction { get; init; } = true;
     public bool EnableExternalTrade { get; init; } = true;
     public bool EnablePublicAssistance { get; init; } = true;
@@ -425,6 +435,10 @@ public sealed record SettlementReport
     public int SimulatedContracts { get; init; }
     public long FoodProducedLocally { get; init; }
     public long FoodHarvestedForSubsistence { get; init; }
+    public long CasualWorkHours { get; init; }
+    public decimal CasualWages { get; init; }
+    public int CasualWorkers { get; init; }
+    public int WildForageSites { get; init; }
     public long RawMaterialsExtracted { get; init; }
     public long FoodExported { get; init; }
     public long GoodsExported { get; init; }

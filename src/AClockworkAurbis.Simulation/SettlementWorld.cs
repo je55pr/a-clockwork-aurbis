@@ -68,7 +68,10 @@ public sealed partial class SettlementWorld
            _settings.PublicForagePerFarmPerDay<0 ||
            _settings.FreightFeePer90Minutes<0 ||
            _settings.ExternalFoodImportPrice<0 ||
-           _settings.ExternalMaterialImportPrice<0 || _settings.DailyAssistanceLimit<0)
+           _settings.ExternalMaterialImportPrice<0 || _settings.DailyAssistanceLimit<0 ||
+           _settings.RegularGuaranteedHoursPerDay is <0 or >8 ||
+           _settings.CasualHourlyWage<0 || _settings.MaxCasualHoursPerDay is <0 or >8 ||
+           _settings.WildForagePerResidentPerDay<0)
             throw new ArgumentOutOfRangeException(nameof(settings));
 
         _sourcePlaces=catalog.Places.ToDictionary(p=>p.Id,StringComparer.Ordinal);
@@ -161,6 +164,7 @@ public sealed partial class SettlementWorld
                     HasNamedChef(b)).ToArray();
             }
             if (_settings.EnableHousing) InitializeHousing();
+            InitializeWildForage();
         }
         _initialGold=TotalGold();
         _initialFood=TotalFood();
@@ -230,7 +234,8 @@ public sealed partial class SettlementWorld
             _=>-0.053
         };
         actor.Energy=Math.Round(Math.Clamp(actor.Energy+delta*rate,0,100),3);
-        if(actor.Activity==SettlementAction.Work)actor.WorkMinutes+=delta;
+        if(actor.Activity is SettlementAction.Work or SettlementAction.CasualWork)
+            actor.WorkMinutes+=delta;
         if(actor.Activity==SettlementAction.Sleep)actor.SleepMinutes+=delta;
         actor.LastUpdate=minute;
     }
@@ -280,6 +285,9 @@ public sealed partial class SettlementWorld
                 break;
             case SettlementAction.HarvestFood:
                 CompleteSubsistenceHarvest(actor);
+                break;
+            case SettlementAction.CasualWork:
+                CompleteCasualShift(actor);
                 break;
         }
     }

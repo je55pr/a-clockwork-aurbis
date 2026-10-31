@@ -26,8 +26,14 @@ public sealed partial class SettlementWorld
             // Several workers can start a shift together. Respect the
             // shared shop payroll budget when each finishes, otherwise
             // simultaneous shifts overshoot the amount sales can fund.
+            // A skilled cook with ingredients may perform a single funded
+            // kitchen hour even when yesterday's retail margin budgeted no
+            // counter shift. This prevents a zero-sales kitchen deadlock.
+            int serviceBudget=business.ServiceHoursBudget;
+            if(IsNamedChef(actor) && ProfessionalCookCanWork(actor,business))
+                serviceBudget=Math.Max(1,serviceBudget);
             int available=Math.Max(0,
-                business.ServiceHoursBudget-business.ServiceHoursWorkedToday);
+                serviceBudget-business.ServiceHoursWorkedToday);
             int wasted=Math.Max(0,hours-available);
             hours=Math.Min(hours,available);
             _idleProductionHoursAvoided+=wasted;
@@ -53,6 +59,8 @@ public sealed partial class SettlementWorld
             Observe(actor,"unpaid",$"{business.Name} could not fund {hours} hour(s)");
             if(Regional)FurloughForInsolvency(actor,business);
         }
+        if(paid && OpenResourceJob(business))
+            actor.RegularHoursToday+=hours;
         if(CompleteRegionalWork(actor,business,paid?hours:0))return;
         // Craft workshops actually convert one raw-material unit into one
         // finished goods unit per completed productive hour.

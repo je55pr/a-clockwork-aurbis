@@ -267,6 +267,17 @@ public sealed partial class SettlementWorld
                         .Sum(p=>p.RequiredHours-p.CompletedHours)));
             if(!_settings.EnableLocalProduction && PlansProduction(business))
                 budget=0;
+            // Contracted farm, mine, forest, hunt and fishery workers have
+            // priority scheduled hours whenever physical resources and paid
+            // payroll exist. Casual labour only uses remaining capacity.
+            if(OpenResourceJob(business) && _settings.EnableLocalProduction)
+            {
+                // A permanent contract funds essential site tending even
+                // when the harvest is temporarily full or ore is exhausted.
+                int regulars=_staff[business.Id].Count(p=>p.WorkId==business.Id);
+                budget=Math.Max(budget,Math.Min(affordable,
+                    regulars*_settings.RegularGuaranteedHoursPerDay));
+            }
             if(estimatedMargin<0 && choice!=null)_unprofitablePlans++;
             if(business.PlannedProduct!=choice)_plansRevised++;
             business.PlannedProduct=choice;

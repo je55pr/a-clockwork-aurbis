@@ -136,12 +136,25 @@ public sealed partial class SettlementWorld
     {
         if(PlansProduction(company) &&
            company.PlannedHoursWorked>=company.PlannedHours)return false;
+        // Share the minimum contracted shifts among real employees before
+        // permitting overtime. Early starters must not consume the entire
+        // day's regular payroll ahead of colleagues starting later.
+        if(OpenResourceJob(company) &&
+           worker.RegularHoursToday>=_settings.RegularGuaranteedHoursPerDay &&
+           _staff[company.Id].Any(other=>!ReferenceEquals(other,worker) &&
+               other.WorkId==company.Id &&
+               other.RegularHoursToday<_settings.RegularGuaranteedHoursPerDay &&
+               Minute%DayMinutes<(other.WorkStart+8)*60))return false;
         if(!_settings.EnableLocalProduction &&
            company.Kind is not (BusinessKinds.FoodRetail or
                BusinessKinds.GoodsRetail or BusinessKinds.Institution or
                BusinessKinds.GuardPost or BusinessKinds.CleaningService or
                BusinessKinds.DomesticService))
             return false;
+        if(OpenResourceJob(company) &&
+           worker.RegularHoursToday<_settings.RegularGuaranteedHoursPerDay &&
+           company.Gold>=_settings.HourlyWage)
+            return true; // Contracted, paid site maintenance when no harvest exists.
         switch(company.Kind)
         {
             case BusinessKinds.FoodProducer:
@@ -173,7 +186,10 @@ public sealed partial class SettlementWorld
                 return false; // Domestic common-carrier freight is not dock work.
             case BusinessKinds.FoodRetail or BusinessKinds.GoodsRetail:
                 return company.ServiceHoursWorkedToday < company.ServiceHoursBudget ||
-                    IsNamedChef(worker) && ProfessionalCookCanWork(worker,company);
+                    IsNamedChef(worker) &&
+                    company.ServiceHoursWorkedToday<
+                        Math.Max(1,company.ServiceHoursBudget) &&
+                    ProfessionalCookCanWork(worker,company);
             default:
                 return true; // Other public services remain funded separately.
         }
@@ -182,6 +198,14 @@ public sealed partial class SettlementWorld
     private bool CompleteCommodityWork(ResidentState actor,BusinessState company,int hours)
     {
         if(!_settings.EnableLocalProduction || hours<=0)return true;
+        if(OpenResourceJob(company) && !CanCasualProduce(company))
+        {
+            // Full-time contracted workers still tend fields, maintain
+            // sites and equipment for their guaranteed paid hours.
+            // No output is fabricated when natural inputs are missing.
+            Observe(actor,"site_upkeep",hours+" funded upkeep hours at "+company.Name);
+            return true;
+        }
         switch(company.Kind)
         {
             case BusinessKinds.FoodProducer:
@@ -316,6 +340,12 @@ public sealed partial class SettlementWorld
     private void RunCommodityDay()
     {
         int day=checked((int)(Minute/DayMinutes));
+        RegrowWildFood();
+        foreach(var person in _residents)
+        {
+            person.CasualHoursToday=0;
+            person.RegularHoursToday=0;
+        }
         // Staff retailers for demand observed the preceding day. With no
         // customers, retain one management hour instead of paying for
         // multiple empty eight-hour shifts.

@@ -33,6 +33,8 @@ var tests=new (string Name,Action Run)[]
     ("Idle processing and unsold retail shifts do not burn full payroll", DemandDrivenLabour),
     ("Scarcity pricing and essential household purchases conserve accounts", CommodityPriceAndDemand),
     ("Public foraging cannot bypass finite commercial agriculture", FinitePublicForaging),
+    ("Wild foraging works without wages or farm gleaning", IndependentWildForaging),
+    ("Casual farm and mine shifts pay below permanent wages", CasualResourceShifts),
     ("One septim bread is a full meal with sustainable producer yields", BreadSeptimBenchmark),
     ("Bread prices respond to local stock and logistics", BreadScarcityPricing),
     ("Fractional septims really settle and all accounts reconcile", FractionalMarketSettlement),
@@ -949,7 +951,7 @@ static void FinitePublicForaging()
     {
         Economy=EconomyMode.CommodityProduction,
         EnableExternalTrade=false,EnablePublicAssistance=false,
-        PublicForagePerFarmPerDay=perFarm
+        PublicForagePerFarmPerDay=perFarm,WildForagePerResidentPerDay=0
     });
     limited.AdvanceTo(days*1440L);
     limited.CheckInvariants();
@@ -962,12 +964,91 @@ static void FinitePublicForaging()
     {
         Economy=EconomyMode.CommodityProduction,
         EnableExternalTrade=false,EnablePublicAssistance=false,
-        PublicForagePerFarmPerDay=0
+        PublicForagePerFarmPerDay=0,WildForagePerResidentPerDay=0
     });
     forbidden.AdvanceTo(days*1440L);
     forbidden.CheckInvariants();
     Expect(forbidden.Report().FoodHarvestedForSubsistence==0,
         "commercial farmland cannot provide unlimited free meals");
+}
+
+static void IndependentWildForaging()
+{
+    var catalog=CommodityFixture();
+    var noFarms=catalog with
+    {
+        Places=catalog.Places.Where(p=>p.Id is not ("sim:fields" or "sim:greens")).ToArray(),
+        Businesses=catalog.Businesses.Where(b=>b.Kind!=BusinessKinds.FoodProducer).ToArray(),
+        Residents=catalog.Residents.Select(p=>
+            p.WorkPlaceId is "sim:fields" or "sim:greens"
+                ?p with{WorkPlaceId=null,WorkEvidence="no_farm"}:p).ToArray()
+    };
+    var world=new SettlementWorld(noFarms,new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false,
+        EnablePublicAssistance=false,PublicForagePerFarmPerDay=0
+    });
+    world.AdvanceTo(12L*1440);
+    world.CheckInvariants();
+    var report=world.Report();
+    CheckCommodityBalance(report);
+    Expect(report.FoodProducers==0 && report.WildForageSites>0,
+        "wild food is distinct from commercial crops and paid employment");
+    Expect(report.FoodHarvestedForSubsistence>0 &&
+        Item(report,"foraged_greens").Extracted>0,
+        "hungry people gather finite food even without farms or wages");
+    Expect(report.AllAccountsGold==report.InitialAllAccountsGold,
+        "gathering natural food never credits an invented income");
+    var exhausted=new SettlementWorld(noFarms,new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false,
+        EnablePublicAssistance=false,PublicForagePerFarmPerDay=0,
+        WildForagePerResidentPerDay=0
+    });
+    exhausted.AdvanceTo(12L*1440);
+    exhausted.CheckInvariants();
+    Expect(exhausted.Report().FoodHarvestedForSubsistence==0,
+        "no natural regeneration means no imaginary foraging");
+}
+
+static void CasualResourceShifts()
+{
+    var settings=new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false,
+        RegularGuaranteedHoursPerDay=2,CasualHourlyWage=2,
+        MaxCasualHoursPerDay=4
+    };
+    var world=new SettlementWorld(CommodityFixture(),settings);
+    world.AdvanceTo(28L*1440);
+    world.CheckInvariants();
+    var report=world.Report();
+    CheckCommodityBalance(report);
+    Expect(report.CasualWorkHours>0 && report.CasualWorkers>0,
+        "cash-poor residents can work productive shifts without permanent contracts");
+    Expect(report.CasualWages==report.CasualWorkHours*2,
+        "casual wages are lower than the normal three-gold hourly contract");
+    Expect(world.Residents.Sum(p=>p.CasualWageIncome)==report.CasualWages &&
+        report.Wages==world.Businesses.Sum(b=>b.WagesPaid),
+        "casual pay is debited from employers and recorded in normal wage accounts");
+    Expect(world.Residents.Any(p=>p.CasualWageIncome>0 && p.WorkId is null),
+        "a noncontracted resident receives genuine paid work");
+    Expect(report.FoodProducedLocally>0 && report.RawMaterialsExtracted>0,
+        "resource work still relies on physical land, reserves and tools");
+
+    var opening=new SettlementWorld(CommodityFixture(),settings);
+    opening.AdvanceTo(1440L);
+    var plans=opening.Report().BusinessPlans;
+    var staffed=opening.Businesses.Where(b=>b.Kind is
+        BusinessKinds.FoodProducer or BusinessKinds.ResourceProducer)
+        .Select(b=>(Business:b,Workers:opening.Residents.Count(p=>p.WorkId==b.Id)))
+        .Where(x=>x.Workers>0 && x.Business.Gold>=x.Workers*6)
+        .ToArray();
+    Expect(staffed.Length>0,"the fixture includes financially staffed permanent resource jobs");
+    Expect(staffed.All(x=>plans.Any(p=>p.BusinessId==x.Business.Id &&
+        (p.Product==null || p.BudgetedHours>=
+            x.Workers*settings.RegularGuaranteedHoursPerDay))),
+        "solvent active farms and mines reserve regular scheduled shifts before casual work");
 }
 
 static void BreadSeptimBenchmark()
@@ -1003,7 +1084,10 @@ static void BreadSeptimBenchmark()
     var daySix=world.Report();
     CheckCommodityBalance(daySix);
     Expect(daySix.BreadUnitsSold>0 && daySix.BreadSalesRevenue>0,
-        "fractionally priced bread is really sold and its proceeds reach a seller");
+        "fractionally priced bread is really sold and its proceeds reach a seller: bread="+
+        daySix.BreadUnitsSold+" sales="+daySix.BreadSalesRevenue+
+        " retail="+daySix.RetailFoodSales+" groceries="+daySix.GroceryKitsSold+
+        " forage="+daySix.FoodHarvestedForSubsistence);
     Expect(daySix.AllAccountsGold==daySix.InitialAllAccountsGold,
         "cheap bread does not mint money or require a public subsidy");
 }
@@ -1052,7 +1136,10 @@ static void HouseholdCookingAndChefs()
     Expect(report.HomeCookedMeals>0 && report.GroceryKitsSold>0,
         "households buy ingredients and cook them into conserved meals");
     Expect(report.ChefCookedMeals>0 && report.SourceChefsEmployed>0,
-        "named chefs prepare food with their employer's actual ingredients");
+        "named chefs prepare food with their employer's actual ingredients: chefs="+
+        report.SourceChefsEmployed+" meals="+report.ChefCookedMeals+
+        " retail="+report.RetailFoodSales+" grocery="+report.GroceryKitsSold+
+        " casual="+report.CasualWorkHours);
     var rare=CommodityRecipes.All.Single(r=>r.Id=="chef_game_pie");
     Expect(rare.Products.Values.Sum()>0 &&
         !CommodityRecipes.HouseholdMeals.Any(r=>r.Id==rare.Id),

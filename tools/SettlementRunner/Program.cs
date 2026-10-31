@@ -6,6 +6,7 @@ try
 {
     string? catalogPath=null,trace=null;
     int days=3,seed=42,rentReserve=20;
+    int regularHours=2,casualWage=2,casualHours=4,wildForage=2;
     string? economicMode=null;
     bool traceFirst=false,details=false,allResidents=false;
     bool disableTrade=false,disableProduction=false,disableAid=false;
@@ -19,6 +20,10 @@ try
             case "--days":days=int.Parse(Next());break;
             case "--seed":seed=int.Parse(Next());break;
             case "--rent-reserve":rentReserve=int.Parse(Next());break;
+            case "--regular-hours":regularHours=int.Parse(Next());break;
+            case "--casual-wage":casualWage=int.Parse(Next());break;
+            case "--casual-hours":casualHours=int.Parse(Next());break;
+            case "--wild-forage":wildForage=int.Parse(Next());break;
             case "--trace":trace=Next();break;
             case "--trace-first":traceFirst=true;break;
             case "--details":details=true;break;
@@ -33,7 +38,8 @@ try
                     "--catalog catalog.json [--days 3] [--seed 42] [--trace-first] "+
                     "[--economy prototype|production|commodities] [--no-foreign-trade] "+
                     "[--no-local-production] [--no-assistance] [--rent-reserve GOLD] "+
-                    "[--trace NPC_ID] [--details] [--resident-details]");
+                    "[--regular-hours N] [--casual-wage GOLD] [--casual-hours N] "+
+                    "[--wild-forage UNITS] [--trace NPC_ID] [--details] [--resident-details]");
                 return 0;
             default:throw new ArgumentException("Unknown parameter "+args[i]);
         }
@@ -53,7 +59,10 @@ try
     var world=new SettlementWorld(catalog,new SettlementSettings
     {Seed=seed,Economy=mode,EnableExternalTrade=!disableTrade,
         EnableLocalProduction=!disableProduction,EnablePublicAssistance=!disableAid,
-        RentGoldReserve=rentReserve});
+        RentGoldReserve=rentReserve,
+        RegularGuaranteedHoursPerDay=regularHours,
+        CasualHourlyWage=casualWage,MaxCasualHoursPerDay=casualHours,
+        WildForagePerResidentPerDay=wildForage});
     loading.Stop();
     if(traceFirst && world.Residents.Count>0)trace=world.Residents[0].Source.Id;
     if(trace is not null)
@@ -85,6 +94,9 @@ try
         Scenario=disableProduction?"crop-failure":disableTrade?"no-foreign":disableAid?"no-assistance":"normal",
         Seed=seed,
         RentGoldReserve=rentReserve,
+        RegularGuaranteedHoursPerDay=regularHours,
+        CasualHourlyWage=casualWage,MaxCasualHoursPerDay=casualHours,
+        WildForagePerResidentPerDay=wildForage,
         summary.Settlement,
         summary.SourcePlaces,
         summary.SimulatedPlaces,
@@ -181,6 +193,10 @@ try
         summary.GoodsUsed,
         summary.FoodProducedLocally,
         summary.FoodHarvestedForSubsistence,
+        summary.WildForageSites,
+        summary.CasualWorkHours,
+        summary.CasualWages,
+        summary.CasualWorkers,
         summary.RawMaterialsExtracted,
         summary.FoodExported,
         summary.MaterialsExported,
@@ -246,6 +262,7 @@ try
             CommodityInventory=mode==EconomyMode.CommodityProduction?
                 r.CommodityStock:null,
             r.MealsEaten,r.Purchases,r.Journeys,r.WageIncome,
+            r.CasualWageIncome,r.CasualHoursToday,r.RegularHoursToday,
             r.DividendIncome,r.CooperativeIncome,r.AssistanceGold,
             r.SubsistenceFoodHarvested,r.UnpaidHours,r.WorkMinutes,
             r.SleepMinutes,r.JourneyMinutes,r.OnUnpaidLeave,r.InsolvencyJobChanges
@@ -259,7 +276,7 @@ try
                 Home=r.Source.HomePlaceId,
                 Workplace=world.Businesses.FirstOrDefault(b=>b.Id==r.WorkId)?.Name,
                 r.Gold,r.Food,r.Goods,r.Satiation,r.Energy,r.MealsEaten,r.Purchases,
-                r.WageIncome,r.DividendIncome,r.CooperativeIncome,r.AssistanceGold,
+                r.WageIncome,r.CasualWageIncome,r.DividendIncome,r.CooperativeIncome,r.AssistanceGold,
                 r.SubsistenceFoodHarvested,r.WorkMinutes
             }).ToArray(),
         Assumptions="Source identities and map markers are preserved. Contracts, co-ops, "+

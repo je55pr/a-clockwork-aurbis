@@ -64,6 +64,8 @@ public sealed partial class SettlementWorld
             SimulatedContracts=_simulatedContracts,
             FoodProducedLocally=_localFood,
             FoodHarvestedForSubsistence=_subsistenceFood,
+            CasualWorkHours=_casualHours,CasualWages=_casualWages,
+            CasualWorkers=_casualWorkers.Count,WildForageSites=_wildForageSites.Count,
             RawMaterialsExtracted=_localMaterials,
             FoodExported=_foodExports,GoodsExported=_goodsExports,
             MaterialsExported=_materialsExports,
@@ -210,6 +212,12 @@ public sealed partial class SettlementWorld
         if(_wages!=_residents.Sum(r=>r.WageIncome)||
            _wages!=_businesses.Sum(b=>b.WagesPaid))
             throw new InvalidOperationException("Worker wages do not reconcile to business wages");
+        if(_casualWages!=_residents.Sum(r=>r.CasualWageIncome) ||
+           _casualWages>_wages || _casualHours<0)
+            throw new InvalidOperationException("Casual payroll does not reconcile");
+        if(_wildForageSites.Any(s=>s.Available<0 ||
+            s.Available>s.DailyRegrowth))
+            throw new InvalidOperationException("Wild commons exceeded finite regrowth");
         if (Regional && _settings.EnableHousing)
         {
             if (_housing.Any(h => h.Occupied < 0 || h.Occupied > h.Beds) ||
