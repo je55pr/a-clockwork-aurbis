@@ -38,6 +38,7 @@ var tests=new (string Name,Action Run)[]
     ("Personal gathering, processing, selling and sword forging conserve stock", PersonalOwnershipAndSword),
     ("Cancelled personal actions cannot duplicate or shortcut gathering", PersonalCancellationAndExhaustion),
     ("Commodity-market tax rates are configurable and cannot mint gold", ConfigurableDetailedTaxes),
+    ("Crop failure blocks harvesting but not existing personal trade", PersonalTradeDuringCropFailure),
     ("One septim bread is a full meal with sustainable producer yields", BreadSeptimBenchmark),
     ("Bread prices respond to local stock and logistics", BreadScarcityPricing),
     ("Fractional septims really settle and all accounts reconcile", FractionalMarketSettlement),
@@ -1233,6 +1234,27 @@ static void ConfigurableDetailedTaxes()
     Expect(taxed.Report().AllAccountsGold==taxed.Report().InitialAllAccountsGold &&
         noTax.Report().AllAccountsGold==noTax.Report().InitialAllAccountsGold,
         "neither tax setting creates or destroys any gold");
+}
+
+static void PersonalTradeDuringCropFailure()
+{
+    var world=new SettlementWorld(Fixture(1,production:true),new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableLocalProduction=false,EnableExternalTrade=false
+    });
+    var person=world.Residents.Single();
+    var shop=world.Businesses.First(b=>b.Kind==BusinessKinds.FoodRetail);
+    Expect(!world.RequestPersonalGather(person.Source.Id,"iron_ore"),
+        "disabled production cannot create new independent resources");
+    Expect(world.RequestPersonalPurchase(person.Source.Id,shop.Id,"bread"),
+        "crop failure does not prevent purchasing already-stocked food");
+    world.AdvanceTo(2L*1440);
+    world.CheckInvariants();
+    var report=world.Report();
+    CheckCommodityBalance(report);
+    Expect(report.PersonalTrades==1 && report.AllAccountsGold==report.InitialAllAccountsGold,
+        "actual purchase settles despite production closure with balanced accounts");
 }
 
 static void BreadSeptimBenchmark()

@@ -31,7 +31,8 @@ if(!['normal','no-foreign','crop-failure','no-assistance'].includes(scenario))th
 const economicMode=param('economy','production');
 if(!['prototype','production','commodities'].includes(economicMode))
  throw Error('Expected economy prototype|production|commodities');
-const filename=zone.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')+(scenario==='normal'?'':'-'+scenario);
+const filename=zone.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')+
+ (scenario==='normal'?'':'-'+scenario)+'-'+economicMode+'-seed-'+seed;
 fs.mkdirSync(folder,{recursive:true});
 const catalogPath=path.join(folder,filename+'-catalog.json');
 const exporter=path.join(__dirname,'export.js');

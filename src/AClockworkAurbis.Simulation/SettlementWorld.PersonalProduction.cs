@@ -99,7 +99,11 @@ public sealed partial class SettlementWorld
 
     private bool EnqueuePersonal(ResidentState resident,PersonalTask task)
     {
-        if(!Detailed || !_settings.EnableLocalProduction ||
+        // A crop failure blocks new harvesting and crafting, not exchange
+        // of stock already held by people and shops.
+        if(!Detailed ||
+           !_settings.EnableLocalProduction &&
+               (task.Kind is PersonalTaskKind.Gather or PersonalTaskKind.Craft) ||
            _personalTasks.ContainsKey(resident.Source.Id) ||
            resident.Activity is SettlementAction.PersonalGather or
                SettlementAction.PersonalCraft or SettlementAction.PersonalBuy or
