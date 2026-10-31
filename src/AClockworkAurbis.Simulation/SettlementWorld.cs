@@ -146,7 +146,8 @@ public sealed partial class SettlementWorld
             Detailed && b.Kind==BusinessKinds.Bakery).ToArray();
         _goodsShops=_businesses.Where(b=>b.Kind is BusinessKinds.GoodsRetail or
             BusinessKinds.Workshop || Detailed && b.Kind is
-            BusinessKinds.Sawmill or BusinessKinds.Leatherworker).ToArray();
+            BusinessKinds.Sawmill or BusinessKinds.Leatherworker or
+            BusinessKinds.Tailor).ToArray();
         foreach(var business in _businesses)
         {
             if(business.OwnerId is not null)
@@ -324,6 +325,9 @@ public sealed partial class SettlementWorld
                 break;
             case SettlementAction.PersonalSell:
                 CompletePersonalTask(actor,PersonalTaskKind.Sell);
+                break;
+            case SettlementAction.VisitTavern:
+                CompleteTavernVisit(actor);
                 break;
         }
     }

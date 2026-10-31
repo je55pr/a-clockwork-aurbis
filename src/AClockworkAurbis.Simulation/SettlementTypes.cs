@@ -99,6 +99,8 @@ public static class BusinessKinds
     public const string Sawmill = "sawmill";
     public const string Tannery = "tannery";
     public const string Bakery = "bakery";
+    public const string Brewery = "brewery";
+    public const string Tailor = "tailor";
     public const string Hunter = "hunter";
     public const string Fishery = "fishery";
     public const string Leatherworker = "leatherworker";
@@ -109,7 +111,7 @@ public static class BusinessKinds
         new HashSet<string>(StringComparer.Ordinal)
         { FoodRetail, FoodProducer, ResourceProducer, GoodsRetail, Workshop,
           ImportHub, Institution, Smeltery, Sawmill, Tannery,
-          Bakery, Hunter, Fishery, Leatherworker,
+          Bakery, Brewery, Tailor, Hunter, Fishery, Leatherworker,
           GuardPost, CleaningService, DomesticService };
 }
 
@@ -138,7 +140,7 @@ public enum SettlementAction : byte
 {
     Idle, Travel, Work, Eat, Sleep, BuyFood, BuyGoods, HarvestFood,
     BuyGroceries, CookAtHome, CasualWork, PersonalGather, PersonalCraft,
-    PersonalBuy, PersonalSell
+    PersonalBuy, PersonalSell, VisitTavern
 }
 
 public enum EconomyMode { Prototype, RegionalProduction, CommodityProduction }
@@ -232,6 +234,8 @@ public sealed class ResidentState
     public long SleepMinutes { get; internal set; }
     public long JourneyMinutes { get; internal set; }
     internal long LastGoodsShoppingDay { get; set; } = -10;
+    internal long LastTavernDay { get; set; } = -10;
+    public int TavernVisits { get; internal set; }
 }
 
 public sealed class BusinessState
@@ -534,6 +538,10 @@ public sealed record SettlementReport
     public decimal AssistanceGoldPaid { get; init; }
     public int AssistedResidents { get; init; }
     public decimal RevenueTaxed { get; init; }
+    public long TavernVisits { get; init; }
+    public decimal TavernGoldSpent { get; init; }
+    public long ClothingWornOut { get; init; }
+    public long ClothingPurchased { get; init; }
     public decimal RetailSalesTaxRevenue { get; init; }
     public decimal CooperativeDistributions { get; init; }
     public decimal PublicGold { get; init; }

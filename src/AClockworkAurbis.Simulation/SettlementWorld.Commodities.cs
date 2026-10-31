@@ -189,6 +189,9 @@ public sealed partial class SettlementWorld
                     Quantity(company.Stock,"fish")<_settings.MaxCommodityStockPerSite;
             case BusinessKinds.Bakery:
                 return ProfessionalCookCanWork(worker,company);
+            case BusinessKinds.Brewery or BusinessKinds.Tailor:
+                return CommodityRecipes.For(company).Any(r=>
+                    RecipeAvailable(r,company.Stock,_settings.MaxCommodityStockPerSite));
             case BusinessKinds.Smeltery or BusinessKinds.Sawmill or BusinessKinds.Tannery
                 or BusinessKinds.Leatherworker or BusinessKinds.Workshop:
                 return HasConstructionOrders(company) ||
@@ -246,8 +249,12 @@ public sealed partial class SettlementWorld
                     if(picked==0)break;
                     company.LandYieldRemaining-=picked;
                     ExtractMarketStock(company,crop,picked,1,hourlyWage);
-                    company.FoodProduced+=picked;
-                    _localFood+=picked;
+                    if(crop=="flax")_localMaterials+=picked;
+                    else
+                    {
+                        company.FoodProduced+=picked;
+                        _localFood+=picked;
+                    }
                 }
                 break;
             }
@@ -313,6 +320,8 @@ public sealed partial class SettlementWorld
             case BusinessKinds.Sawmill:
             case BusinessKinds.Tannery:
             case BusinessKinds.Leatherworker:
+            case BusinessKinds.Brewery:
+            case BusinessKinds.Tailor:
             case BusinessKinds.Workshop:
             {
                 int productive=hours;
@@ -424,6 +433,20 @@ public sealed partial class SettlementWorld
                 _goodsUsed++;
             }
 
+        if(day>0)
+            foreach(var resident in _residents)
+            {
+                // Replacement dates vary by person instead of causing an
+                // island-wide demand spike every 45th day.
+                if(day%45!=StableRandom.Between(resident.Source.Id,
+                    _settings.Seed,73,45) ||
+                   Quantity(resident.Stock,"clothing")<=0)continue;
+                UseFinished(resident.Stock,"clothing",1);
+                resident.Goods=Math.Max(0,resident.Goods-1);
+                _goodsUsed++;
+                _clothingWornOut++;
+            }
+
         if(day>0 && day%20==0)
             foreach(var resident in _residents)
             {
@@ -452,6 +475,8 @@ public sealed partial class SettlementWorld
             case BusinessKinds.Smeltery:return Pair("iron_ore","firewood");
             case BusinessKinds.Sawmill:return Pair("logs");
             case BusinessKinds.Tannery:return Pair("raw_hide","firewood");
+            case BusinessKinds.Brewery:return Pair("wheat","firewood");
+            case BusinessKinds.Tailor:return Pair("flax","leather");
             case BusinessKinds.Bakery:
                 return Pair("wheat","potato","onion","lettuce","fish",
                     "game_meat","firewood");
@@ -464,6 +489,7 @@ public sealed partial class SettlementWorld
                 var meals=Pair("bread","vegetable_stew","garden_salad",
                     "fish_meal","roast_meat","chef_game_pie")
                     .Select(x=>(x.Item1,x.Item1=="bread"?24:12));
+                meals=meals.Concat(new (string,int)[]{("ale",8)});
                 return IsProvisionsMarket(company)||HasNamedChef(company)
                     ? meals.Concat(new (string,int)[]{("wheat",8),("potato",8),
                         ("onion",8),("lettuce",8),("firewood",6),
@@ -471,7 +497,7 @@ public sealed partial class SettlementWorld
                     : meals;
             case BusinessKinds.GoodsRetail:
                 var goods=new (string,int)[]{("firewood",9),("iron_tools",5),
-                    ("leather_goods",5),("furnishings",2)};
+                    ("leather_goods",5),("furnishings",2),("clothing",6)};
                 return HasNamedChef(company)
                     ? goods.Concat(new (string,int)[]{("wheat",8),("potato",8),
                         ("onion",8),("lettuce",8),("firewood",8),
@@ -494,6 +520,8 @@ public sealed partial class SettlementWorld
             BusinessKinds.Sawmill => sku is "lumber" or "firewood",
             BusinessKinds.Smeltery => sku=="iron_ingot",
             BusinessKinds.Tannery => sku=="leather",
+            BusinessKinds.Brewery => sku=="ale",
+            BusinessKinds.Tailor => sku is "cloth" or "clothing",
             BusinessKinds.Bakery => sku is "bread" or "vegetable_stew" or
                 "garden_salad" or "fish_meal" or "roast_meat" or
                 "chef_game_pie",
@@ -656,7 +684,8 @@ public sealed partial class SettlementWorld
         return NeedsHeatingFuel(resident) ||
             day>=10 && Quantity(resident.Stock,"iron_tools")==0 ||
             day>=20 && Quantity(resident.Stock,"leather_goods")==0 ||
-            day>=30 && Quantity(resident.Stock,"furnishings")==0;
+            day>=30 && Quantity(resident.Stock,"furnishings")==0 ||
+            day>=12 && Quantity(resident.Stock,"clothing")==0;
     }
 
     private string? NeededSupplyAtShop(ResidentState resident,BusinessState shop)
@@ -670,6 +699,8 @@ public sealed partial class SettlementWorld
             Quantity(shop.Stock,"leather_goods")>0)return "leather_goods";
         if(day>=30 && Quantity(resident.Stock,"furnishings")==0 &&
             Quantity(shop.Stock,"furnishings")>0)return "furnishings";
+        if(day>=12 && Quantity(resident.Stock,"clothing")==0 &&
+            Quantity(shop.Stock,"clothing")>0)return "clothing";
         return null;
     }
 
@@ -678,11 +709,12 @@ public sealed partial class SettlementWorld
         if(!_byBusiness.TryGetValue(resident.CurrentPlaceId,out var shop))return;
         if(food && !IsKitchenBusiness(shop) ||
             !food && shop.Kind is not (BusinessKinds.GoodsRetail or BusinessKinds.Workshop or
-                BusinessKinds.Sawmill or BusinessKinds.Leatherworker))
+                BusinessKinds.Sawmill or BusinessKinds.Leatherworker or
+                BusinessKinds.Tailor))
             return;
         decimal cost=0;
         string[] candidates=food?CommodityRecipes.Meals:
-            ["firewood","iron_tools","leather_goods","furnishings"];
+            ["firewood","iron_tools","leather_goods","furnishings","clothing"];
         string? plannedFood=food && resident.PlannedMealShopId==shop.Id
             ?resident.PlannedMealSku:null;
         if(food)
@@ -718,6 +750,7 @@ public sealed partial class SettlementWorld
         {
             resident.Goods++;
             _goodsSales++;
+            if(sku=="clothing")_clothingPurchased+=count;
             resident.LastGoodsShoppingDay=Minute/DayMinutes;
         }
         resident.Gold-=cost;

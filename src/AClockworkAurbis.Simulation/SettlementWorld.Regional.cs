@@ -143,7 +143,8 @@ public sealed partial class SettlementWorld
                 or BusinessKinds.Bakery or BusinessKinds.Hunter or BusinessKinds.Fishery
                 or BusinessKinds.Leatherworker => 5,
             BusinessKinds.ResourceProducer => 4,
-            BusinessKinds.Workshop => 5,
+            BusinessKinds.Workshop or BusinessKinds.Brewery or
+                BusinessKinds.Tailor => 5,
             BusinessKinds.FoodRetail => 3,
             BusinessKinds.GoodsRetail => 3,
             BusinessKinds.ImportHub => 3,
@@ -307,7 +308,8 @@ public sealed partial class SettlementWorld
     }
 
     private bool IsDetailedProcessor(BusinessState business) =>
-        Detailed && business.Kind is BusinessKinds.Bakery or BusinessKinds.Sawmill
+        Detailed && business.Kind is BusinessKinds.Bakery or BusinessKinds.Brewery or
+            BusinessKinds.Tailor or BusinessKinds.Sawmill
             or BusinessKinds.Smeltery or BusinessKinds.Tannery
             or BusinessKinds.Workshop or BusinessKinds.Leatherworker;
 

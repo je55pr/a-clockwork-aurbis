@@ -143,6 +143,9 @@ public sealed partial class SettlementWorld
             }
         }
 
+        if(Detailed && hour>=17 && hour<21 &&
+           TryVisitTavern(index,actor))return;
+
         if(actor.CurrentPlaceId!=actor.HomeId &&
            (hour>=18||actor.Energy<28||actor.WorkId is null))
         {
@@ -181,7 +184,8 @@ public sealed partial class SettlementWorld
                     continue;
             }
             else if(shop.Kind is not (BusinessKinds.GoodsRetail or BusinessKinds.Workshop
-                    or BusinessKinds.Sawmill or BusinessKinds.Leatherworker) ||
+                    or BusinessKinds.Sawmill or BusinessKinds.Leatherworker or
+                    BusinessKinds.Tailor) ||
                     (Detailed?NeededSupplyAtShop(actor,shop) is not string sku ||
                         HouseholdGoodsQuote(shop,sku)>actor.Gold:
                         shop.Goods<1))continue;

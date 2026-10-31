@@ -203,6 +203,10 @@ try
         summary.UnpaidHours,
         summary.RetailFoodSales,
         summary.RetailGoodsSales,
+        summary.TavernVisits,
+        summary.TavernGoldSpent,
+        summary.ClothingWornOut,
+        summary.ClothingPurchased,
         summary.Meals,
         summary.Travel,
         summary.TravelMinutes,
@@ -291,6 +295,7 @@ try
             CommodityInventory=mode==EconomyMode.CommodityProduction?
                 r.CommodityStock:null,
             r.MealsEaten,r.Purchases,r.Journeys,r.WageIncome,
+            r.TavernVisits,
             r.CasualWageIncome,r.CasualHoursToday,r.RegularHoursToday,
             r.PersonalTask,r.EquippedWeaponSku,r.PersonalGathered,
             r.PersonalCrafts,r.PersonalSaleIncome,

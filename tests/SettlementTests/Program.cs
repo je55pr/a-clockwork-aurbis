@@ -44,6 +44,7 @@ var tests=new (string Name,Action Run)[]
     ("Public payroll is allocated fairly without minting or phantom contracts", PublicPayrollBudget),
     ("Permanent private hires require observed demand and cash runway", SustainablePrivateHiring),
     ("Unfunded processors may offer real casual manufacturing shifts", CasualProcessorWork),
+    ("Brewing, tavern leisure and clothing form conserved economic activities", BrewingClothingAndTaverns),
     ("Autonomous fisher earns real income from catch and buyers", AutonomousFisher),
     ("Autonomous smith builds and equips a personally owned sword", AutonomousSmith),
     ("Concurrent personal gather requests reserve finite ore", AutonomousResourceReservation),
@@ -1873,4 +1874,76 @@ static void CasualProcessorWork()
         "temporary industrial shifts pay the lower rate from real employer balances");
     Expect(report.AllAccountsGold==report.InitialAllAccountsGold,
         "no temporary employment can create gold");
+}
+
+static void BrewingClothingAndTaverns()
+{
+    var source=CommodityFixture();
+    var places=source.Places.ToList();
+    var businesses=source.Businesses.ToList();
+    var anchor=places.First(p=>p.Id=="b:market");
+    void Add(string id,string kind,string? crop=null)
+    {
+        places.Add(new PlaceDefinition(id,0,"Simulated "+kind,kind,
+            anchor.Settlement,anchor.Zone,kind,"",anchor.MapX,anchor.MapY,
+            "simulation_at_source_anchor",anchor.District));
+        businesses.Add(new BusinessDefinition(id,kind,null,[],
+            "SIMULATION HYPOTHESIS for activity fixture",crop));
+    }
+    Add("sim:test:brewer",BusinessKinds.Brewery);
+    Add("sim:test:tailor",BusinessKinds.Tailor);
+    Add("sim:test:flax",BusinessKinds.FoodProducer,"flax");
+    var catalog=source with
+    {
+        Places=places.ToArray(),
+        Businesses=businesses.ToArray()
+    };
+    var settings=new SettlementSettings
+    {
+        Seed=42,Economy=EconomyMode.CommodityProduction,
+        EnableExternalTrade=false,EnableEstablishedOpeningEconomy=true
+    };
+    var world=new SettlementWorld(catalog,settings);
+    world.AdvanceTo(65L*1440);
+    world.CheckInvariants();
+    var report=world.Report();
+    CheckCommodityBalance(report);
+    Expect(Item(report,"ale").Crafted>0 && report.TavernVisits>0 &&
+        Item(report,"ale").Consumed==report.TavernVisits,
+        "real brewing and patron visits consume purchased physical drinks");
+    Expect(world.Businesses.Single(b=>b.Id=="sim:test:brewer").WagesPaid>0,
+        "brewing creates funded employment, not free stock");
+    Expect(Item(report,"flax").Extracted>0 &&
+        Item(report,"cloth").Crafted>0 &&
+        Item(report,"clothing").Crafted>0,
+        "flax is grown, woven into cloth and tailored into clothing");
+    Expect(world.Businesses.Single(b=>b.Id=="sim:test:tailor").WagesPaid>0,
+        "tailoring requires paid working hours");
+    Expect(report.ClothingWornOut>0 &&
+        Item(report,"clothing").Consumed>=report.ClothingWornOut,
+        "residents buy and eventually wear out physical clothing");
+    Expect(world.Residents.Any(r=>r.TavernVisits>0),
+        "tavern patrons exist independently of any named brewer profession");
+    Expect(report.TavernGoldSpent>0 &&
+        report.AllAccountsGold==report.InitialAllAccountsGold,
+        "leisure spending and trade move finite money between accounts");
+
+    world.AdvanceTo(160L*1440);
+    world.CheckInvariants();
+    var later=world.Report();
+    Expect(Item(later,"clothing").Crafted>Item(report,"clothing").Crafted &&
+        later.ClothingWornOut>report.ClothingWornOut,
+        "the textile chain remains active after its opening stock is worn out");
+    Expect(later.TavernVisits>report.TavernVisits,
+        "tavern visits remain a recurring activity rather than opening-stock sales");
+
+    var disabled=new SettlementWorld(catalog,settings with
+    {
+        EnableLocalProduction=false
+    });
+    disabled.AdvanceTo(14L*1440);
+    disabled.CheckInvariants();
+    Expect(Item(disabled.Report(),"ale").Crafted==0 &&
+        Item(disabled.Report(),"clothing").Crafted==0,
+        "when real production is disabled neither industry creates goods");
 }

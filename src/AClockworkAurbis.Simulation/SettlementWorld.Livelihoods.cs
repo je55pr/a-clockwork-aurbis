@@ -109,6 +109,9 @@ public sealed partial class SettlementWorld
                 Quantity(company.Stock,"game_meat")<cap,
             BusinessKinds.Fishery =>
                 company.LandYieldRemaining>0 && Quantity(company.Stock,"fish")<cap,
+            BusinessKinds.Brewery or BusinessKinds.Tailor =>
+                CommodityRecipes.For(company).Any(r=>
+                    RecipeAvailable(r,company.Stock,cap)),
             BusinessKinds.Bakery => CommodityRecipes.All.Any(r=>
                 r.Industry==BusinessKinds.Bakery && r.Id!="chef_game_pie" &&
                 RecipeAvailable(r,company.Stock,cap)),

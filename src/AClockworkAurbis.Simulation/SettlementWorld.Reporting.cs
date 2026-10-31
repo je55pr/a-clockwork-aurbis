@@ -88,6 +88,9 @@ public sealed partial class SettlementWorld
             AssistanceGoldPaid=_aidPaid,AssistedResidents=_aidRecipients.Count,
             RevenueTaxed=_taxRevenue,
             RetailSalesTaxRevenue=_retailSalesTaxRevenue,
+            TavernVisits=_tavernVisits,TavernGoldSpent=_tavernGoldSpent,
+            ClothingWornOut=_clothingWornOut,
+            ClothingPurchased=_clothingPurchased,
             CooperativeDistributions=_cooperativeDistributions,
             PublicGold=_publicGold,ExternalGold=_outsideGold,
             InitialAllAccountsGold=Regional?_initialAllGold:_initialGold,
@@ -141,14 +144,16 @@ public sealed partial class SettlementWorld
                 .SelectMany(b=>b.Stock.OrderBy(s=>s.Key,StringComparer.Ordinal)
                     .Where(s=>CanSellCommodity(b,s.Key) ||
                         IsKitchenBusiness(b) && CommodityRecipes.Edible(s.Key) ||
+                        b.Kind==BusinessKinds.FoodRetail && s.Key=="ale" ||
                         b.Kind==BusinessKinds.GoodsRetail &&
                             CommodityRecipes.HouseholdGoods.Contains(s.Key))
                     .Select(s=>new MarketQuoteSnapshot(b.Id,b.Name,b.Kind,
                         s.Key,s.Value,UnitCostMilli(b,s.Key),
                         CanSellCommodity(b,s.Key)?ToSeptims(MarketAskMilli(b,s.Key)):0m,
                         CommodityRecipes.Edible(s.Key) ||
+                            b.Kind==BusinessKinds.FoodRetail && s.Key=="ale" ||
                             CommodityRecipes.HouseholdGoods.Contains(s.Key) &&
-                            b.Kind==BusinessKinds.GoodsRetail ?
+                            b.Kind is (BusinessKinds.GoodsRetail or BusinessKinds.Tailor) ?
                             MarketRetailQuote(b,s.Key):0))).ToArray():[],
             ScarcityPricePremiumGold=_scarcityPremiumGold,
             SurplusPriceDiscountGold=_surplusDiscountGold,

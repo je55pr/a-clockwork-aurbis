@@ -42,6 +42,7 @@ public sealed partial class SettlementWorld
             {
                 case BusinessKinds.FoodRetail:
                     Add(company,"bread",18);
+                    Add(company,"ale",5);
                     Add(company,"vegetable_stew",8);
                     Add(company,"garden_salad",8);
                     Add(company,"fish_meal",3);
@@ -63,6 +64,7 @@ public sealed partial class SettlementWorld
                     Add(company,"iron_tools",5);
                     Add(company,"leather_goods",5);
                     Add(company,"furnishings",4);
+                    Add(company,"clothing",5);
                     Add(company,"pickaxe",2);
                     Add(company,"felling_axe",2);
                     break;
@@ -76,6 +78,17 @@ public sealed partial class SettlementWorld
                     Add(company,"vegetable_stew",6);
                     Add(company,"garden_salad",6);
                     if(HasNamedChef(company))Add(company,"chef_game_pie",2);
+                    break;
+                case BusinessKinds.Brewery:
+                    Add(company,"wheat",14);
+                    Add(company,"firewood",9);
+                    Add(company,"ale",18);
+                    break;
+                case BusinessKinds.Tailor:
+                    Add(company,"flax",10);
+                    Add(company,"cloth",8);
+                    Add(company,"leather",6);
+                    Add(company,"clothing",10);
                     break;
                 case BusinessKinds.Sawmill:
                     Add(company,"logs",12);
