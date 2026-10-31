@@ -15,6 +15,7 @@ public sealed partial class SettlementWorld
     private long _foodExports, _goodsExports, _materialsExports;
     private decimal _goldImportsPaid, _goldExportsEarned;
     private decimal _aidPaid, _taxRevenue, _cooperativeDistributions;
+    private decimal _retailSalesTaxRevenue;
     private long _foodImportsPaidUnits, _materialsImportsPaidUnits;
     private readonly HashSet<string> _aidRecipients = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<ResidentState>> _staff = new(StringComparer.Ordinal);

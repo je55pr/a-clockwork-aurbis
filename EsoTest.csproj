@@ -7,7 +7,7 @@
     <RootNamespace>EsoTest</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <!-- The CLI uses original archives but is not part of the Godot assembly. -->
-    <Compile Remove="tools/**/*.cs;src/**/*.cs;tests/**/*.cs" />
+    <!-- Keep the standalone simulation, tools and their tests out of the Godot assembly. -->
+    <Compile Remove="tools/**/*.cs;src/AClockworkAurbis.Simulation/**/*.cs;tests/SimulationTests/**/*.cs;tests/SettlementTests/**/*.cs" />
   </ItemGroup>
 </Project>

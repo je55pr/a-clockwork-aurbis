@@ -55,11 +55,11 @@ public sealed partial class SettlementWorld
     private void RegrowWildFood()
     {
         if(!_settings.EnableLocalProduction)return;
-        // Finite stocks. Regrowth is an explicit environmental assumption,
-        // capped at one day's supply per local population.
+        // A daily public harvest quota, restored at the start of each day.
+        // This is not persistent ecological depletion; commercial farm stocks
+        // and private resource deposits are separate pools.
         foreach(var site in _wildForageSites)
-            site.Available=Math.Min(site.DailyRegrowth,
-                checked(site.Available+site.DailyRegrowth));
+            site.Available=site.DailyRegrowth;
     }
 
     private WildForageSite? NearestWildFood(ResidentState person) =>

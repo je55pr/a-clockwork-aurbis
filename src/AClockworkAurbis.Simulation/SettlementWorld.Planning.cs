@@ -122,8 +122,9 @@ public sealed partial class SettlementWorld
         // Demand-sensitive safety stock: unfamiliar luxury dishes receive
         // small trial orders rather than a fictional twelve-unit demand.
         bool luxury=sku=="chef_game_pie";
-        int target=luxury && recent==0 ? Math.Min(1,perDay) :
-            Math.Max(baseline/4,Math.Min(72,checked(perDay*3+baseline/4)));
+        int target=luxury && recent==0 ? 1 :
+            Math.Max(1,Math.Max(baseline/4,
+                Math.Min(72,checked(perDay*3+baseline/4))));
         // Never discard a potentially vital staple safety buffer.
         if(firm.Kind==BusinessKinds.FoodRetail && sku=="bread")
             target=Math.Max(16,target);
@@ -147,8 +148,9 @@ public sealed partial class SettlementWorld
                 long delta=Math.Max(0,total-prior);
                 business.LastPlannedSales[sku]=total;
                 decimal previous=business.RecentDemand.GetValueOrDefault(sku);
-                business.RecentDemand[sku]=Math.Min(100m,
-                    Math.Round((previous*2+Math.Min(100,delta))/3m,2));
+                decimal smoothed=(previous*2+Math.Min(100,delta))/3m;
+                business.RecentDemand[sku]=smoothed<0.01m?0m:
+                    Math.Min(100m,Math.Round(smoothed,3));
             }
             if(!PlansProduction(business) &&
                business.Kind is not (BusinessKinds.FoodRetail or BusinessKinds.GoodsRetail))
@@ -286,7 +288,9 @@ public sealed partial class SettlementWorld
             business.PlannedHoursWorked=0;
             business.LastPlannedDay=day;
             _plansMade++;
-            string reason=choice==null?"no feasible production recipe or output space":
+            string reason=business.Kind is BusinessKinds.FoodRetail or
+                BusinessKinds.GoodsRetail ? "staffing from realised retail margin" :
+                choice==null?"no feasible production recipe or output space":
                 "observed demand, quoted output, paid inputs and cash";
             _latestPlans.Add(new BusinessPlanSnapshot(business.Id,business.Name,
                 day,choice,business.PlannedHours,estimatedMargin,reason));

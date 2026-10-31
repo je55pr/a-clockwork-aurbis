@@ -52,6 +52,8 @@ public sealed partial class SettlementWorld
            _settings.FoodSalesTax<0 || _settings.GoodsSalesTax<0 ||
            _settings.FoodSalesTax>_settings.MealPrice ||
            _settings.GoodsSalesTax>_settings.GoodsPrice ||
+           _settings.DetailedFoodTaxRate is <0m or >1m ||
+           _settings.DetailedGoodsTaxRate is <0m or >1m ||
            _settings.InitialOutsideGold<0 || _settings.InitialOutsideFood<0 ||
            _settings.InitialOutsideMaterials<0 || _settings.InitialPublicGoldPerResident<0 ||
            _settings.DailyLandRegrowthPerResident<0 || _settings.InitialMineralReservePerSite<0 ||
@@ -236,8 +238,8 @@ public sealed partial class SettlementWorld
         double rate=actor.Activity switch
         {
             SettlementAction.Sleep=>RegionalSleepRate(actor),
-            SettlementAction.Work or SettlementAction.PersonalGather or
-                SettlementAction.PersonalCraft=>-0.076,
+            SettlementAction.Work or SettlementAction.CasualWork or
+                SettlementAction.PersonalGather or SettlementAction.PersonalCraft=>-0.076,
             _=>-0.053
         };
         actor.Energy=Math.Round(Math.Clamp(actor.Energy+delta*rate,0,100),3);

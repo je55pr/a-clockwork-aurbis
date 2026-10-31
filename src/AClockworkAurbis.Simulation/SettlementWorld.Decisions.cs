@@ -96,6 +96,9 @@ public sealed partial class SettlementWorld
             else
             {
                 int untilShiftEnds=(actor.WorkStart+8)*60-localMinute;
+                if(Detailed && _byBusiness.TryGetValue(actor.WorkId,out var shop) &&
+                   shop.Kind is BusinessKinds.FoodRetail or BusinessKinds.GoodsRetail)
+                    shop.ServiceHoursReservedToday++;
                 Enqueue(index,Math.Min(60,untilShiftEnds),SettlementAction.Work);
                 Observe(actor,"work",DisplayPlace(actor.WorkId));
             }
@@ -111,8 +114,9 @@ public sealed partial class SettlementWorld
         // Household tool/general-goods purchases are deliberately modest.
         // We do not assert which specific TES items residents need yet.
         if((Detailed?WantsHouseholdSupply(actor):actor.Goods==0) &&
-           actor.Gold>=EverydayMealCost+
-               (Detailed && actor.HousingId is not null ? _settings.DailySharedRent*3 : 0) &&
+           actor.Gold>=(Detailed ? EverydayMealCost+
+               (actor.HousingId is not null ? _settings.DailySharedRent*3 : 0) :
+               _settings.GoodsPrice) &&
            Minute/DayMinutes>actor.LastGoodsShoppingDay+2 &&
            hour>=9&&hour<20 && actor.Satiation>=37)
         {
@@ -143,7 +147,12 @@ public sealed partial class SettlementWorld
     {
         BusinessState? best=null;
         decimal lowest=decimal.MaxValue;
-        foreach(var shop in food?_foodShops:_goodsShops)
+        // Chef staffing changes over time; don't cache which shops can
+        // sell already-cooked meals after a cook leaves or joins.
+        IEnumerable<BusinessState> outlets=food && Detailed
+            ? _businesses.Where(IsKitchenBusiness)
+            : food?_foodShops:_goodsShops;
+        foreach(var shop in outlets)
         {
             if(food)
             {

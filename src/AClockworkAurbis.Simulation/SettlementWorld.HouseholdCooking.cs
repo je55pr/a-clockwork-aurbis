@@ -16,7 +16,8 @@ public sealed partial class SettlementWorld
 
     private bool IsKitchenBusiness(BusinessState company) =>
         company.Kind is BusinessKinds.Bakery or BusinessKinds.FoodRetail ||
-        company.Kind==BusinessKinds.GoodsRetail && HasNamedChef(company);
+        company.Kind==BusinessKinds.GoodsRetail &&
+            (HasNamedChef(company) || HasPreparedMeal(company));
 
     private static bool RecipeAvailable(CommodityRecipe recipe,
         IReadOnlyDictionary<string,int> stock,int storageLimit,int outputMultiplier=1,
@@ -131,10 +132,12 @@ public sealed partial class SettlementWorld
             if(item.Key=="firewood")person.Goods=checked(person.Goods+amount);
         }
         person.Gold-=cost;
-        decimal tax=Money(cost*0.05m);
+        decimal tax=Math.Min(Money(cost*_settings.DetailedFoodTaxRate),
+            Math.Max(0m,cost-0.01m));
         seller.Gold+=cost-tax;
         _publicGold+=tax;
         _taxRevenue+=tax;
+        _retailSalesTaxRevenue+=tax;
         seller.RetailRevenue+=cost-tax;
         seller.RetailSales++;
         person.GroceryKitsPurchased++;

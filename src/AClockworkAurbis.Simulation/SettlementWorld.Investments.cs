@@ -159,6 +159,16 @@ public sealed partial class SettlementWorld
                     "observed sales and projected positive capital payback");
             }
             if(!firm.RequestedCapital)continue;
+            // Requests are not perpetual authorisations: re-evaluate the
+            // payback, demand and operating reserve before spending cash.
+            if(payback>90m || firm.RecentDemand.Values.Sum()<2m ||
+               firm.Gold<=_settings.StartingBusinessGold+25m)
+            {
+                firm.RequestedCapital=false;
+                RecordCapitalDecision(firm,"withdrawn",payback,
+                    "forecast demand or capital reserve no longer sufficient");
+                continue;
+            }
             if(!CanFundCapital(firm))continue;
 
             var builder=_businesses.Where(b=>b.Kind==BusinessKinds.Workshop &&

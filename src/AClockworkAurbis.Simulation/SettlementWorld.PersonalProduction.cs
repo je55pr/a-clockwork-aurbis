@@ -244,22 +244,31 @@ public sealed partial class SettlementWorld
            task.Kind!=kind)return;
         _personalTasks.Remove(resident.Source.Id);
         resident.PersonalTask=null;
-        if(resident.CurrentPlaceId!=task.Destination)return;
-        switch(kind)
+        if(resident.CurrentPlaceId!=task.Destination)
         {
-            case PersonalTaskKind.Gather: CompletePersonalGather(resident,task);break;
-            case PersonalTaskKind.Craft: CompletePersonalCraft(resident,task);break;
-            case PersonalTaskKind.Buy: CompletePersonalBuy(resident,task);break;
-            case PersonalTaskKind.Sell: CompletePersonalSell(resident,task);break;
+            Observe(resident,"personal_failed",task.Kind+":"+task.Sku+
+                " destination changed before completion");
+            return;
         }
+        bool succeeded=kind switch
+        {
+            PersonalTaskKind.Gather=>CompletePersonalGather(resident,task),
+            PersonalTaskKind.Craft=>CompletePersonalCraft(resident,task),
+            PersonalTaskKind.Buy=>CompletePersonalBuy(resident,task),
+            PersonalTaskKind.Sell=>CompletePersonalSell(resident,task),
+            _=>false
+        };
+        if(!succeeded)
+            Observe(resident,"personal_failed",task.Kind+":"+task.Sku+
+                " no longer has the required funds, resources or capacity");
     }
 
-    private void CompletePersonalGather(ResidentState resident,PersonalTask task)
+    private bool CompletePersonalGather(ResidentState resident,PersonalTask task)
     {
         if(!_openResourceSites.TryGetValue(task.Destination,out var site) ||
            site.Remaining(task.Sku)<=0 ||
            GatheringTool(task.Sku) is string tool &&
-               Quantity(resident.Stock,tool)==0)return;
+               Quantity(resident.Stock,tool)==0)return false;
         int amount=Math.Min(site.Remaining(task.Sku),
             task.Sku is "fish" or "game_meat" ? 1 : _settings.RawMaterialPerWorkHour);
         amount=Math.Min(amount,_settings.MaxPersonalCommodityStock-
@@ -267,7 +276,7 @@ public sealed partial class SettlementWorld
         if(task.Sku=="game_meat")
             amount=Math.Min(amount,_settings.MaxPersonalCommodityStock-
                 Quantity(resident.Stock,"raw_hide"));
-        if(amount<=0)return;
+        if(amount<=0)return false;
         site.Take(task.Sku,amount);
         Extract(resident.Stock,task.Sku,amount);
         if(task.Sku=="game_meat")Extract(resident.Stock,"raw_hide",amount);
@@ -289,15 +298,16 @@ public sealed partial class SettlementWorld
         }
         Observe(resident,"personal_gather",task.Sku+": "+amount+
             " kept in personal inventory");
+        return true;
     }
 
-    private void CompletePersonalCraft(ResidentState resident,PersonalTask task)
+    private bool CompletePersonalCraft(ResidentState resident,PersonalTask task)
     {
         var recipe=CommodityRecipes.PersonalRecipes.FirstOrDefault(r=>r.Id==task.Sku);
         if(recipe is null || !_byBusiness.TryGetValue(task.Destination,out var station) ||
            station.Kind!=recipe.Industry ||
            !RecipeAvailable(recipe,resident.Stock,_settings.MaxPersonalCommodityStock))
-            return;
+            return false;
         foreach(var (sku,count) in recipe.Ingredients)
         {
             UseIngredient(resident.Stock,sku,count);
@@ -314,17 +324,18 @@ public sealed partial class SettlementWorld
         _personalCraftBatches++;
         _recipeBatches++;
         Observe(resident,"personal_craft",recipe.Id+" at "+station.Name);
+        return true;
     }
 
-    private void CompletePersonalBuy(ResidentState resident,PersonalTask task)
+    private bool CompletePersonalBuy(ResidentState resident,PersonalTask task)
     {
         if(!_byBusiness.TryGetValue(task.Destination,out var seller) ||
            !SellsToIndividuals(seller,task.Sku) ||
            Quantity(seller.Stock,task.Sku)<task.Quantity ||
            Quantity(resident.Stock,task.Sku)>
-               _settings.MaxPersonalCommodityStock-task.Quantity)return;
+               _settings.MaxPersonalCommodityStock-task.Quantity)return false;
         decimal cost=checked(MarketRetailQuote(seller,task.Sku)*task.Quantity);
-        if(resident.Gold<cost)return;
+        if(resident.Gold<cost)return false;
         long basis=WithdrawInventoryValue(seller,task.Sku,task.Quantity);
         StockRemove(seller.Stock,task.Sku,task.Quantity);
         StockAdd(resident.Stock,task.Sku,task.Quantity);
@@ -332,11 +343,15 @@ public sealed partial class SettlementWorld
             resident.Food=checked(resident.Food+task.Quantity);
         if(CommodityRecipes.HouseholdGoods.Contains(task.Sku,StringComparer.Ordinal))
             resident.Goods=checked(resident.Goods+task.Quantity);
-        decimal tax=Money(cost*0.05m);
+        decimal tax=Money(cost*(CommodityRecipes.HouseholdGoods.Contains(
+            task.Sku,StringComparer.Ordinal)?_settings.DetailedGoodsTaxRate:
+            _settings.DetailedFoodTaxRate));
+        tax=Math.Min(tax,Math.Max(0,cost-0.01m));
         resident.Gold-=cost;
         seller.Gold+=cost-tax;
         _publicGold+=tax;
         _taxRevenue+=tax;
+        _retailSalesTaxRevenue+=tax;
         seller.RetailRevenue+=cost-tax;
         seller.RetailSales++;
         MarketObserveSale(seller,task.Sku,task.Quantity,cost,basis,false);
@@ -345,9 +360,10 @@ public sealed partial class SettlementWorld
         _personalTrades++;
         Observe(resident,"personal_buy",task.Sku+": "+task.Quantity+
             " for "+cost+" gold from "+seller.Name);
+        return true;
     }
 
-    private void CompletePersonalSell(ResidentState resident,PersonalTask task)
+    private bool CompletePersonalSell(ResidentState resident,PersonalTask task)
     {
         if(!_byBusiness.TryGetValue(task.Destination,out var buyer) ||
            !BuysFromIndividuals(buyer,task.Sku) ||
@@ -355,9 +371,9 @@ public sealed partial class SettlementWorld
            resident.EquippedWeaponSku==task.Sku &&
                Quantity(resident.Stock,task.Sku)<=task.Quantity ||
            Quantity(buyer.Stock,task.Sku)>
-               _settings.MaxCommodityStockPerSite-task.Quantity)return;
+               _settings.MaxCommodityStockPerSite-task.Quantity)return false;
         decimal payment=checked(IndividualBuyback(task.Sku)*task.Quantity);
-        if(buyer.Gold<payment)return;
+        if(buyer.Gold<payment)return false;
         StockRemove(resident.Stock,task.Sku,task.Quantity);
         StockAdd(buyer.Stock,task.Sku,task.Quantity);
         CreditInventoryValue(buyer,task.Sku,ToMilli(payment));
@@ -373,5 +389,6 @@ public sealed partial class SettlementWorld
         _personalTrades++;
         Observe(resident,"personal_sell",task.Sku+": "+task.Quantity+
             " for "+payment+" gold to "+buyer.Name);
+        return true;
     }
 }

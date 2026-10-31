@@ -62,7 +62,9 @@ public sealed partial class SettlementWorld
             return (ordinaryRent+1)/2;
         if(name.Contains("manor",StringComparison.OrdinalIgnoreCase) ||
             name.Contains("manse",StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("villa",StringComparison.OrdinalIgnoreCase))
+            name.Split([' ','-','.',',',':','(',')'],
+                StringSplitOptions.RemoveEmptyEntries).Contains(
+                    "villa",StringComparer.OrdinalIgnoreCase))
             return (int)Math.Min(int.MaxValue,((long)ordinaryRent*5+1)/2);
         return ordinaryRent;
     }

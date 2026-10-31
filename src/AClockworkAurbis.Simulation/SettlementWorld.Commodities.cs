@@ -193,11 +193,16 @@ public sealed partial class SettlementWorld
                     r.Products.All(x=>Quantity(company.Stock,x.Key)+x.Value<=
                         _settings.MaxCommodityStockPerSite));
             case BusinessKinds.ImportHub:
-                return false; // Domestic common-carrier freight is not dock work.
+                // Paid handlers create finite cargo-handling capacity rather
+                // than remaining indefinitely employed but unable to work.
+                return company.CargoCapacity<_settings.MaxPortCargoCapacity &&
+                    _settings.PortCargoUnitsPerWorkHour>0;
             case BusinessKinds.FoodRetail or BusinessKinds.GoodsRetail:
-                return company.ServiceHoursWorkedToday < company.ServiceHoursBudget ||
+                return company.ServiceHoursWorkedToday+
+                        company.ServiceHoursReservedToday<company.ServiceHoursBudget ||
                     IsNamedChef(worker) &&
-                    company.ServiceHoursWorkedToday<
+                    company.ServiceHoursWorkedToday+
+                        company.ServiceHoursReservedToday<
                         Math.Max(1,company.ServiceHoursBudget) &&
                     ProfessionalCookCanWork(worker,company);
             default:
@@ -381,6 +386,7 @@ public sealed partial class SettlementWorld
             store.ServiceHoursBudget=Math.Clamp(affordableHours,0,
                 Math.Max(1,ContractCapacity(store)*8));
             store.ServiceHoursWorkedToday=0;
+            store.ServiceHoursReservedToday=0;
         }
         if(_settings.EnableLocalProduction)
         {
@@ -702,8 +708,10 @@ public sealed partial class SettlementWorld
         }
         resident.Gold-=cost;
         decimal tax=food
-            ?Math.Min(Money(cost*0.05m),Math.Max(0m,cost-0.01m))
-            :Math.Min(Money(cost*0.10m),Math.Max(0m,cost-0.01m));
+            ?Math.Min(Money(cost*_settings.DetailedFoodTaxRate),
+                Math.Max(0m,cost-0.01m))
+            :Math.Min(Money(cost*_settings.DetailedGoodsTaxRate),
+                Math.Max(0m,cost-0.01m));
         if(food && sku=="bread")
         {
             _breadSalesUnits+=count;
@@ -716,6 +724,7 @@ public sealed partial class SettlementWorld
         shop.Gold+=cost-tax;
         _publicGold+=tax;
         _taxRevenue+=tax;
+        _retailSalesTaxRevenue+=tax;
         shop.RetailRevenue+=cost-tax;
         shop.RetailSales++;
         resident.Purchases++;

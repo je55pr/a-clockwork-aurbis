@@ -69,11 +69,12 @@ public sealed record SettlementCatalog(
             if (string.IsNullOrWhiteSpace(resident.Id) || !actorIds.Add(resident.Id) ||
                 string.IsNullOrWhiteSpace(resident.Name) ||
                 resident.HomePlaceId is not null && !placeIds.Contains(resident.HomePlaceId) ||
-                resident.WorkPlaceId is not null && !businessIds.Contains(resident.WorkPlaceId) ||
-                resident.SimulatedStartingItems is not null &&
-                    resident.SimulatedStartingItems.Any(x=>
-                        !CommodityRecipes.Prices.ContainsKey(x.Key) || x.Value is <0 or >100))
+                resident.WorkPlaceId is not null && !businessIds.Contains(resident.WorkPlaceId))
                 throw new InvalidDataException("Unknown resident identity, home or workplace");
+            if(resident.SimulatedStartingItems is not null &&
+                resident.SimulatedStartingItems.Any(x=>
+                    !CommodityRecipes.Prices.ContainsKey(x.Key) || x.Value<0))
+                throw new InvalidDataException("Invalid simulated starting commodity stock");
         }
         foreach (var business in Businesses)
         {
@@ -282,6 +283,7 @@ public sealed class BusinessState
     internal long LastBreadSalesAtDay { get; set; }
     internal int ServiceHoursBudget { get; set; } = 2;
     internal int ServiceHoursWorkedToday { get; set; }
+    internal int ServiceHoursReservedToday { get; set; }
     public int WorkHours { get; internal set; }
     public int ItemsCrafted { get; internal set; }
     public int FoodProduced { get; internal set; }
@@ -316,6 +318,10 @@ public sealed record SettlementSettings
     public int ExternalMaterialImportPrice { get; init; } = 2;
     public int FoodSalesTax { get; init; } = 1;
     public int GoodsSalesTax { get; init; } = 2;
+    // Detailed commodity prices are fractional, so detailed markets use
+    // independently tunable ad-valorem rates instead of per-unit tax integers.
+    public decimal DetailedFoodTaxRate { get; init; } = 0.05m;
+    public decimal DetailedGoodsTaxRate { get; init; } = 0.10m;
     public int DailyAssistanceLimit { get; init; } = 8;
     // Paid casual work never replaces priority permanent farm/mine shifts.
     public int RegularGuaranteedHoursPerDay { get; init; } = 2;
@@ -474,6 +480,7 @@ public sealed record SettlementReport
     public decimal AssistanceGoldPaid { get; init; }
     public int AssistedResidents { get; init; }
     public decimal RevenueTaxed { get; init; }
+    public decimal RetailSalesTaxRevenue { get; init; }
     public decimal CooperativeDistributions { get; init; }
     public decimal PublicGold { get; init; }
     public decimal ExternalGold { get; init; }

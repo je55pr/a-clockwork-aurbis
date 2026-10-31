@@ -37,6 +37,7 @@ var tests=new (string Name,Action Run)[]
     ("Casual farm and mine shifts pay below permanent wages", CasualResourceShifts),
     ("Personal gathering, processing, selling and sword forging conserve stock", PersonalOwnershipAndSword),
     ("Cancelled personal actions cannot duplicate or shortcut gathering", PersonalCancellationAndExhaustion),
+    ("Commodity-market tax rates are configurable and cannot mint gold", ConfigurableDetailedTaxes),
     ("One septim bread is a full meal with sustainable producer yields", BreadSeptimBenchmark),
     ("Bread prices respond to local stock and logistics", BreadScarcityPricing),
     ("Fractional septims really settle and all accounts reconcile", FractionalMarketSettlement),
@@ -462,6 +463,8 @@ static void FiniteHousing()
             plain with {Name="Greenwater Manse"},2)==5 &&
         SettlementWorld.SuggestedHousingRent(
             plain with {Name="Seabloom Villa"},2)==5 &&
+        SettlementWorld.SuggestedHousingRent(
+            plain with {Name="Village House"},2)==2 &&
         SettlementWorld.SuggestedHousingRent(
             plain with {Name="Unknown Dwelling"},2)==2 &&
         SettlementWorld.SuggestedHousingRent(
@@ -1159,7 +1162,11 @@ static void PersonalOwnershipAndSword()
 
 static void PersonalCancellationAndExhaustion()
 {
-    var catalog=CommodityFixture();
+    var fixture=CommodityFixture();
+    string id=fixture.Residents.OrderBy(r=>r.Id,StringComparer.Ordinal).First().Id;
+    var catalog=fixture with { Residents=fixture.Residents.Select(r=>r.Id==id?
+        r with {SimulatedStartingItems=new Dictionary<string,int>{["pickaxe"]=1}}:
+        r).ToArray() };
     var settings=new SettlementSettings
     {
         Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false,
@@ -1167,7 +1174,6 @@ static void PersonalCancellationAndExhaustion()
         OpenFishPerResidentPerDay=1
     };
     var world=new SettlementWorld(catalog,settings);
-    string id=catalog.Residents.OrderBy(r=>r.Id,StringComparer.Ordinal).First().Id;
     var person=world.Residents.Single(p=>p.Source.Id==id);
     Expect(world.OpenResources.All(s=>s.Ore==0) &&
         !world.RequestPersonalGather(id,"iron_ore"),
@@ -1195,6 +1201,33 @@ static void PersonalCancellationAndExhaustion()
     CheckCommodityBalance(world.Report());
     Expect(person.PersonalGathered==1 && world.Report().PersonalGatherHours==1,
         "only the later completed request extracts one fish");
+}
+
+static void ConfigurableDetailedTaxes()
+{
+    var catalog=CommodityFixture();
+    var noTax=new SettlementWorld(catalog,new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false,
+        DetailedFoodTaxRate=0m,DetailedGoodsTaxRate=0m
+    });
+    noTax.AdvanceTo(1440L*7);
+    noTax.CheckInvariants();
+    CheckCommodityBalance(noTax.Report());
+    Expect(noTax.Report().RetailSalesTaxRevenue==0m,
+        "disabling both detailed tax rates must disable all retail sales tax");
+    var taxed=new SettlementWorld(catalog,new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false
+    });
+    taxed.AdvanceTo(1440L*7);
+    taxed.CheckInvariants();
+    CheckCommodityBalance(taxed.Report());
+    Expect(taxed.Report().RetailSalesTaxRevenue>0m,
+        "default detailed market tax rates yield funded treasury revenue");
+    Expect(taxed.Report().AllAccountsGold==taxed.Report().InitialAllAccountsGold &&
+        noTax.Report().AllAccountsGold==noTax.Report().InitialAllAccountsGold,
+        "neither tax setting creates or destroys any gold");
 }
 
 static void BreadSeptimBenchmark()

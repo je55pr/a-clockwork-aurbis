@@ -28,10 +28,20 @@ public static class NpcSeeds
         if (limit == 0) return result;
         using var file = File.OpenRead(jsonlPath);
         using var reader = new StreamReader(file);
-        while (reader.ReadLine() is { } line && result.Count < limit)
+        int lineNumber = 0;
+        while (result.Count < limit && reader.ReadLine() is { } line)
         {
-            if (line.Length == 0) continue;
-            using var document = JsonDocument.Parse(line);
+            lineNumber++;
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            JsonDocument document;
+            try { document = JsonDocument.Parse(line); }
+            catch (JsonException e)
+            {
+                throw new InvalidDataException(
+                    $"Malformed source profile JSON at line {lineNumber}",e);
+            }
+            using (document)
+            {
             var root = document.RootElement;
             var locations = Element(root, "locations");
             if (area is not null && !MatchesArea(locations, area))
@@ -41,12 +51,14 @@ public static class NpcSeeds
             var primary = Element(locations, "primary");
             string? id = String(root, "id");
             if (string.IsNullOrWhiteSpace(id))
-                throw new InvalidDataException("Source profile has no stable ID");
+                throw new InvalidDataException(
+                    $"Source profile has no stable ID at line {lineNumber}");
             result.Add(new NpcSeed(
                 id, String(identity, "name") ?? id,
                 String(identity, "race"),
                 String(society, "occupation") ?? String(society, "serviceRole"),
                 String(primary, "name")));
+            }
         }
         return result;
     }

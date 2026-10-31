@@ -114,8 +114,10 @@ public sealed partial class SettlementWorld
         long markup=125;
         if(units<12)markup+=25;
         if(units>90)markup-=20;
-        long sold=producer.SoldBySku.GetValueOrDefault(sku);
-        if(sold>0 && units<sold/2)markup+=15;
+        // Use smoothed recent demand, not unbounded lifetime sales, so a
+        // long-lived seller does not acquire a permanent scarcity surcharge.
+        decimal recent=producer.RecentDemand.GetValueOrDefault(sku);
+        if(recent>0m && units<recent/2m)markup+=15;
         return Math.Max(100,checked(basis*markup/100));
     }
 
