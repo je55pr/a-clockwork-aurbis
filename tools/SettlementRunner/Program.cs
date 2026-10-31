@@ -197,6 +197,9 @@ try
         summary.CasualWorkHours,
         summary.CasualWages,
         summary.CasualWorkers,
+        summary.OpenResourceSites,summary.PersonalGatherHours,
+        summary.PersonalCraftBatches,summary.PersonalTrades,
+        summary.PersonalSaleIncome,
         summary.RawMaterialsExtracted,
         summary.FoodExported,
         summary.MaterialsExported,
@@ -247,6 +250,7 @@ try
         BusinessesDetail=details?summary.BusinessDetails:
             summary.BusinessDetails.Where(x=>x.RetailSales>0||x.WorkHours>0||
                 x.ItemsCrafted>0).Take(12).ToArray(),
+        OpenResources=details?world.OpenResources:null,
         ResidentDetails=allResidents?world.Residents.Select(r=>new {
             Id=r.Source.Id,Name=r.Source.Name,Race=r.Source.Race,
             SourceProfession=r.Source.Profession,
@@ -263,6 +267,8 @@ try
                 r.CommodityStock:null,
             r.MealsEaten,r.Purchases,r.Journeys,r.WageIncome,
             r.CasualWageIncome,r.CasualHoursToday,r.RegularHoursToday,
+            r.PersonalTask,r.EquippedWeaponSku,r.PersonalGathered,
+            r.PersonalCrafts,r.PersonalSaleIncome,
             r.DividendIncome,r.CooperativeIncome,r.AssistanceGold,
             r.SubsistenceFoodHarvested,r.UnpaidHours,r.WorkMinutes,
             r.SleepMinutes,r.JourneyMinutes,r.OnUnpaidLeave,r.InsolvencyJobChanges

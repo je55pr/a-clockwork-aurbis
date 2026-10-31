@@ -66,6 +66,10 @@ public sealed partial class SettlementWorld
             FoodHarvestedForSubsistence=_subsistenceFood,
             CasualWorkHours=_casualHours,CasualWages=_casualWages,
             CasualWorkers=_casualWorkers.Count,WildForageSites=_wildForageSites.Count,
+            PersonalGatherHours=_personalGatherHours,
+            PersonalCraftBatches=_personalCraftBatches,
+            PersonalTrades=_personalTrades,PersonalSaleIncome=_personalSaleIncome,
+            OpenResourceSites=_openResourceSites.Count,
             RawMaterialsExtracted=_localMaterials,
             FoodExported=_foodExports,GoodsExported=_goodsExports,
             MaterialsExported=_materialsExports,
@@ -215,6 +219,12 @@ public sealed partial class SettlementWorld
         if(_casualWages!=_residents.Sum(r=>r.CasualWageIncome) ||
            _casualWages>_wages || _casualHours<0)
             throw new InvalidOperationException("Casual payroll does not reconcile");
+        if(_personalSaleIncome!=_residents.Sum(r=>r.PersonalSaleIncome) ||
+           _personalCraftBatches!=_residents.Sum(r=>r.PersonalCrafts))
+            throw new InvalidOperationException("Personal economy ledger mismatch");
+        if(_openResourceSites.Values.Any(s=>s.Ore<0 || s.Logs<0 ||
+            s.Fish<0 || s.Game<0))
+            throw new InvalidOperationException("Negative independent resources");
         if(_wildForageSites.Any(s=>s.Available<0 ||
             s.Available>s.DailyRegrowth))
             throw new InvalidOperationException("Wild commons exceeded finite regrowth");

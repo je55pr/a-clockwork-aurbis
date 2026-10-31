@@ -69,7 +69,10 @@ public sealed record SettlementCatalog(
             if (string.IsNullOrWhiteSpace(resident.Id) || !actorIds.Add(resident.Id) ||
                 string.IsNullOrWhiteSpace(resident.Name) ||
                 resident.HomePlaceId is not null && !placeIds.Contains(resident.HomePlaceId) ||
-                resident.WorkPlaceId is not null && !businessIds.Contains(resident.WorkPlaceId))
+                resident.WorkPlaceId is not null && !businessIds.Contains(resident.WorkPlaceId) ||
+                resident.SimulatedStartingItems is not null &&
+                    resident.SimulatedStartingItems.Any(x=>
+                        !CommodityRecipes.Prices.ContainsKey(x.Key) || x.Value is <0 or >100))
                 throw new InvalidDataException("Unknown resident identity, home or workplace");
         }
         foreach (var business in Businesses)
@@ -124,12 +127,15 @@ public sealed record ResidentDefinition(
     string? HomePlaceId, string HomeEvidence,
     string? WorkPlaceId, string WorkEvidence,
     string[] LocationPlaceIds, string? SourceUrl,
-    string? AnchorPlaceId = null, string? AnchorEvidence = null);
+    string? AnchorPlaceId = null, string? AnchorEvidence = null,
+    // An explicit scenario/player endowment, never inferred from ESO source data.
+    IReadOnlyDictionary<string,int>? SimulatedStartingItems = null);
 
 public enum SettlementAction : byte
 {
     Idle, Travel, Work, Eat, Sleep, BuyFood, BuyGoods, HarvestFood,
-    BuyGroceries, CookAtHome, CasualWork
+    BuyGroceries, CookAtHome, CasualWork, PersonalGather, PersonalCraft,
+    PersonalBuy, PersonalSell
 }
 
 public enum EconomyMode { Prototype, RegionalProduction, CommodityProduction }
@@ -197,6 +203,13 @@ public sealed class ResidentState
     public decimal CasualWageIncome { get; internal set; }
     public int CasualHoursToday { get; internal set; }
     public int RegularHoursToday { get; internal set; }
+    public string? PersonalTask { get; internal set; }
+    public string? EquippedWeaponSku { get; internal set; }
+    public long PersonalGathered { get; internal set; }
+    public long PersonalCrafts { get; internal set; }
+    public decimal PersonalSaleIncome { get; internal set; }
+    internal Dictionary<string,int> PersonalToolWorkHours { get; } =
+        new(StringComparer.Ordinal);
     public decimal DividendIncome { get; internal set; }
     public long UnpaidHours { get; internal set; }
     public long WorkMinutes { get; internal set; }
@@ -311,6 +324,12 @@ public sealed record SettlementSettings
     // Finite renewable wild commons per person in each local neighbourhood.
     // They are not the crops growing on commercial or source-named farms.
     public int WildForagePerResidentPerDay { get; init; } = 2;
+    // Independent wilderness supplies do not consume employer-owned reserves.
+    public int OpenOrePerResident { get; init; } = 8;
+    public int OpenLogsPerResidentPerDay { get; init; } = 2;
+    public int OpenFishPerResidentPerDay { get; init; } = 1;
+    public int OpenGamePerResidentPerDay { get; init; } = 1;
+    public int MaxPersonalCommodityStock { get; init; } = 100;
     public bool EnableLocalProduction { get; init; } = true;
     public bool EnableExternalTrade { get; init; } = true;
     public bool EnablePublicAssistance { get; init; } = true;
@@ -439,6 +458,11 @@ public sealed record SettlementReport
     public decimal CasualWages { get; init; }
     public int CasualWorkers { get; init; }
     public int WildForageSites { get; init; }
+    public long PersonalGatherHours { get; init; }
+    public long PersonalCraftBatches { get; init; }
+    public long PersonalTrades { get; init; }
+    public decimal PersonalSaleIncome { get; init; }
+    public int OpenResourceSites { get; init; }
     public long RawMaterialsExtracted { get; init; }
     public long FoodExported { get; init; }
     public long GoodsExported { get; init; }

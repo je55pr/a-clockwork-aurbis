@@ -67,6 +67,10 @@ public sealed partial class SettlementWorld
         if (Regional && actor.Food==0 &&
             actor.Satiation<53 && ChooseSubsistence(index,actor))return;
 
+        // Explicitly requested work for personal ownership takes precedence
+        // over employment; the request is still subject to travel and time.
+        if(Detailed && SchedulePersonalTask(index,actor))return;
+
         if(actor.WorkId is not null &&
            localMinute>=actor.WorkStart*60&&
            localMinute<(actor.WorkStart+8)*60 &&

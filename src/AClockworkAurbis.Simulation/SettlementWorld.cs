@@ -71,7 +71,12 @@ public sealed partial class SettlementWorld
            _settings.ExternalMaterialImportPrice<0 || _settings.DailyAssistanceLimit<0 ||
            _settings.RegularGuaranteedHoursPerDay is <0 or >8 ||
            _settings.CasualHourlyWage<0 || _settings.MaxCasualHoursPerDay is <0 or >8 ||
-           _settings.WildForagePerResidentPerDay<0)
+           _settings.WildForagePerResidentPerDay<0 ||
+           _settings.OpenOrePerResident is <0 or >1000 ||
+           _settings.OpenLogsPerResidentPerDay is <0 or >1000 ||
+           _settings.OpenFishPerResidentPerDay is <0 or >1000 ||
+           _settings.OpenGamePerResidentPerDay is <0 or >1000 ||
+           _settings.MaxPersonalCommodityStock is <1 or >10000)
             throw new ArgumentOutOfRangeException(nameof(settings));
 
         _sourcePlaces=catalog.Places.ToDictionary(p=>p.Id,StringComparer.Ordinal);
@@ -165,6 +170,7 @@ public sealed partial class SettlementWorld
             }
             if (_settings.EnableHousing) InitializeHousing();
             InitializeWildForage();
+            InitializeOpenResources();
         }
         _initialGold=TotalGold();
         _initialFood=TotalFood();
@@ -230,11 +236,13 @@ public sealed partial class SettlementWorld
         double rate=actor.Activity switch
         {
             SettlementAction.Sleep=>RegionalSleepRate(actor),
-            SettlementAction.Work=>-0.076,
+            SettlementAction.Work or SettlementAction.PersonalGather or
+                SettlementAction.PersonalCraft=>-0.076,
             _=>-0.053
         };
         actor.Energy=Math.Round(Math.Clamp(actor.Energy+delta*rate,0,100),3);
-        if(actor.Activity is SettlementAction.Work or SettlementAction.CasualWork)
+        if(actor.Activity is SettlementAction.Work or SettlementAction.CasualWork or
+            SettlementAction.PersonalGather or SettlementAction.PersonalCraft)
             actor.WorkMinutes+=delta;
         if(actor.Activity==SettlementAction.Sleep)actor.SleepMinutes+=delta;
         actor.LastUpdate=minute;
@@ -288,6 +296,18 @@ public sealed partial class SettlementWorld
                 break;
             case SettlementAction.CasualWork:
                 CompleteCasualShift(actor);
+                break;
+            case SettlementAction.PersonalGather:
+                CompletePersonalTask(actor,PersonalTaskKind.Gather);
+                break;
+            case SettlementAction.PersonalCraft:
+                CompletePersonalTask(actor,PersonalTaskKind.Craft);
+                break;
+            case SettlementAction.PersonalBuy:
+                CompletePersonalTask(actor,PersonalTaskKind.Buy);
+                break;
+            case SettlementAction.PersonalSell:
+                CompletePersonalTask(actor,PersonalTaskKind.Sell);
                 break;
         }
     }

@@ -79,6 +79,16 @@ public sealed partial class SettlementWorld
         foreach(var resident in _residents)
         {
             if(resident.Food>0)StockAdd(resident.Stock,"provisions",resident.Food);
+            if(resident.Source.SimulatedStartingItems is not null)
+                foreach(var (sku,count) in resident.Source.SimulatedStartingItems)
+                {
+                    if(count>_settings.MaxPersonalCommodityStock)
+                        throw new InvalidDataException("Starting personal stock exceeds configured cap");
+                    if(count>0)StockAdd(resident.Stock,sku,count);
+                    if(CommodityRecipes.Edible(sku))resident.Food=checked(resident.Food+count);
+                    if(CommodityRecipes.HouseholdGoods.Contains(sku,StringComparer.Ordinal))
+                        resident.Goods=checked(resident.Goods+count);
+                }
         }
         foreach(var company in _businesses)
         {
@@ -341,6 +351,7 @@ public sealed partial class SettlementWorld
     {
         int day=checked((int)(Minute/DayMinutes));
         RegrowWildFood();
+        RegrowOpenResources();
         foreach(var person in _residents)
         {
             person.CasualHoursToday=0;

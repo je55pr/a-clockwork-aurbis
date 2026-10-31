@@ -38,7 +38,7 @@ public static class CommodityRecipes
         ["firewood","iron_tools","leather_goods","furnishings"];
     public static readonly string[] Crops = ["wheat","potato","onion","lettuce"];
     public static readonly string[] FinishedGoods =
-        ["firewood","pickaxe","felling_axe","horseshoes","iron_tools",
+        ["firewood","pickaxe","felling_axe","horseshoes","iron_tools","iron_sword",
          "leather_goods","furnishings","harness"];
     public static readonly IReadOnlyDictionary<string,int> Prices =
         new Dictionary<string,int>(StringComparer.Ordinal)
@@ -51,7 +51,7 @@ public static class CommodityRecipes
             ["bread"]=1, ["vegetable_stew"]=3, ["garden_salad"]=2,
             ["fish_meal"]=4, ["roast_meat"]=4, ["chef_game_pie"]=7,
             ["pickaxe"]=16, ["felling_axe"]=16, ["horseshoes"]=9,
-            ["iron_tools"]=7, ["leather_goods"]=7, ["furnishings"]=9,
+            ["iron_tools"]=7, ["iron_sword"]=20, ["leather_goods"]=7, ["furnishings"]=9,
             ["harness"]=15
         };
 
@@ -121,6 +121,14 @@ public static class CommodityRecipes
                 Products=r.Products.ToDictionary(
                     x=>x.Key,x=>Math.Max(1,x.Value/2),StringComparer.Ordinal)
             }).ToArray();
+
+    // The same physical inputs can be worked for personal ownership at a
+    // public-access workstation. Access and yields are simulation assumptions.
+    public static readonly IReadOnlyList<CommodityRecipe> PersonalRecipes =
+        All.Where(r=>r.Id is "saw_logs" or "smelt_iron").Append(
+            new CommodityRecipe("forge_personal_iron_sword",BusinessKinds.Workshop,
+                Stock(("iron_ingot",2),("lumber",1)),
+                Stock(("iron_sword",1)))).ToArray();
 
     public static bool Edible(string sku) => Meals.Contains(sku,StringComparer.Ordinal);
 }

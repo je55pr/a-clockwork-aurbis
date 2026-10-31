@@ -35,6 +35,8 @@ var tests=new (string Name,Action Run)[]
     ("Public foraging cannot bypass finite commercial agriculture", FinitePublicForaging),
     ("Wild foraging works without wages or farm gleaning", IndependentWildForaging),
     ("Casual farm and mine shifts pay below permanent wages", CasualResourceShifts),
+    ("Personal gathering, processing, selling and sword forging conserve stock", PersonalOwnershipAndSword),
+    ("Cancelled personal actions cannot duplicate or shortcut gathering", PersonalCancellationAndExhaustion),
     ("One septim bread is a full meal with sustainable producer yields", BreadSeptimBenchmark),
     ("Bread prices respond to local stock and logistics", BreadScarcityPricing),
     ("Fractional septims really settle and all accounts reconcile", FractionalMarketSettlement),
@@ -1049,6 +1051,150 @@ static void CasualResourceShifts()
         (p.Product==null || p.BudgetedHours>=
             x.Workers*settings.RegularGuaranteedHoursPerDay))),
         "solvent active farms and mines reserve regular scheduled shifts before casual work");
+}
+
+static void PersonalOwnershipAndSword()
+{
+    // This tiny scenario gives one future player/NPC explicit *simulated*
+    // starting tools. ESO source profiles are not assumed to own anything.
+    var source=CommodityFixture();
+    string id=source.Residents.OrderBy(r=>r.Id,StringComparer.Ordinal).First().Id;
+    var catalog=source with
+    {
+        Places=source.Places.Select(p=>p with
+        {
+            MapX=10_000,MapY=10_000,District="Exampleton"
+        }).ToArray(),
+        Residents=source.Residents.Select(r=>r.Id==id?r with
+        {
+            SimulatedStartingItems=new Dictionary<string,int>
+            {
+                ["pickaxe"]=1,["felling_axe"]=1
+            }
+        }:r).ToArray()
+    };
+    var settings=new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableExternalTrade=false,EnablePublicAssistance=false,
+        EnableHousing=false,ToolWorkHoursPerWear=24,
+        OpenOrePerResident=8,FirewoodDaysPerHousehold=100
+    };
+    var world=new SettlementWorld(catalog,settings);
+    var person=world.Residents.Single(r=>r.Source.Id==id);
+    Expect(world.OpenResources.Count>0 &&
+        world.OpenResources.Sum(s=>s.Ore)>0,
+        "independent ore deposits are distinct simulated wilderness sites");
+    Expect(person.CommodityStock.GetValueOrDefault("pickaxe")==1,
+        "player loadout is an explicitly declared initial commodity endowment");
+    Expect(!world.RequestPersonalGather(id,"iron_sword") &&
+        !world.RequestPersonalCraft(id,"forge_personal_iron_sword"),
+        "personal actions require supported resource types and real ingredients");
+
+    void Finish()
+    {
+        world.AdvanceTo(world.Minute+2L*1440);
+        world.CheckInvariants();
+        CheckCommodityBalance(world.Report());
+        Expect(person.PersonalTask is null,
+            "queued personal action must eventually finish or fail without duplicating items");
+    }
+
+    var foodShop=world.Businesses.First(b=>b.Kind==BusinessKinds.FoodRetail);
+    Expect(world.RequestPersonalPurchase(id,foodShop.Id,"bread"),
+        "residents can purchase goods into personally held commodity stock");
+    Expect(!world.RequestPersonalPurchase(id,foodShop.Id,"bread"),
+        "cannot queue two overlapping personal transactions");
+    Finish();
+    Expect(world.Report().PersonalTrades==1,
+        "personal purchase settles as a traceable physical trade");
+
+    Expect(world.RequestPersonalGather(id,"iron_ore"),"own a pickaxe and find ore");
+    Finish();
+    Expect(person.CommodityStock.GetValueOrDefault("iron_ore")==2,
+        "ore goes into personal inventory rather than commercial mine stock");
+    var smelter=world.Businesses.Single(b=>b.Id=="sim:smelter");
+    Expect(world.RequestPersonalSale(id,smelter.Id,"iron_ore"),
+        "local smelter can buy personally extracted ore from a nonemployee");
+    Finish();
+    Expect(person.PersonalSaleIncome==1.8m,
+        "sale pays from smelter balance to seller rather than creating gold");
+
+    Expect(world.RequestPersonalGather(id,"iron_ore"),"mine more personal ore");
+    Finish();
+    Expect(world.RequestPersonalGather(id,"logs"),"fell personal timber");
+    Finish();
+    Expect(world.RequestPersonalCraft(id,"saw_logs"),"sawmill accepts personal logs");
+    Finish();
+    Expect(person.CommodityStock.GetValueOrDefault("lumber")>=2 &&
+        person.CommodityStock.GetValueOrDefault("firewood")>=3,
+        "processing preserves personal ownership of lumber and firewood: "+
+        string.Join(",",person.CommodityStock.Select(k=>k.Key+"="+k.Value))+
+        " crafts="+person.PersonalCrafts);
+    Expect(world.RequestPersonalCraft(id,"smelt_iron"),"smelt personal ore with own fuel");
+    Finish();
+    Expect(person.CommodityStock.GetValueOrDefault("iron_ingot")>=2,
+        "the smelter returns ingots to the person, not its own warehouse");
+    Expect(world.RequestPersonalCraft(id,"forge_personal_iron_sword"),
+        "workshop can forge a personal sword from personally held materials");
+    Finish();
+    Expect(person.CommodityStock.GetValueOrDefault("iron_sword")==1 &&
+        !world.Businesses.Any(b=>b.CommodityStock.ContainsKey("iron_sword")),
+        "finished iron sword belongs only to the person who made it");
+    Expect(!world.RequestPersonalCraft(id,"forge_personal_iron_sword"),
+        "cannot create a second sword after the required ingots are spent");
+    Expect(world.EquipPersonalWeapon(id,"iron_sword") &&
+        person.EquippedWeaponSku=="iron_sword" &&
+        world.UnequipPersonalWeapon(id) &&
+        person.EquippedWeaponSku is null,
+        "personally created weapon can be equipped and unequipped without cloning it");
+
+    var report=world.Report();
+    Expect(report.PersonalCraftBatches==3 && report.PersonalGatherHours==3 &&
+        report.PersonalTrades==2 && report.PersonalSaleIncome==1.8m,
+        "personal work, sales and crafting remain independently observable");
+    Expect(report.AllAccountsGold==report.InitialAllAccountsGold,
+        "all personal transactions conserve the closed economy's gold");
+}
+
+static void PersonalCancellationAndExhaustion()
+{
+    var catalog=CommodityFixture();
+    var settings=new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false,
+        EnableHousing=false,OpenOrePerResident=0,
+        OpenFishPerResidentPerDay=1
+    };
+    var world=new SettlementWorld(catalog,settings);
+    string id=catalog.Residents.OrderBy(r=>r.Id,StringComparer.Ordinal).First().Id;
+    var person=world.Residents.Single(p=>p.Source.Id==id);
+    Expect(world.OpenResources.All(s=>s.Ore==0) &&
+        !world.RequestPersonalGather(id,"iron_ore"),
+        "depleted ore deposits cannot grant personal ore");
+    Expect(world.RequestPersonalGather(id,"fish"),
+        "independent fishing can be requested without an employer");
+    for(long minute=1;minute<=1000 && person.Activity!=SettlementAction.PersonalGather;
+        minute+=5)
+        world.AdvanceTo(minute);
+    Expect(person.Activity==SettlementAction.PersonalGather &&
+        person.PersonalTask is not null,
+        "the fish gatherer must start a real timed activity");
+    long starting=world.Minute;
+    Expect(world.CancelPersonalTask(id),
+        "an in-progress personal action can be cancelled");
+    Expect(!world.RequestPersonalGather(id,"fish"),
+        "a cancelled but still in-flight action cannot be replaced to skip time");
+    world.AdvanceTo(starting+65);
+    Expect(person.PersonalGathered==0 && world.Report().PersonalGatherHours==0,
+        "cancelling a started action does not extract any stock");
+    Expect(world.RequestPersonalGather(id,"fish"),
+        "a new request becomes possible after the old action ends");
+    world.AdvanceTo(world.Minute+2L*1440);
+    world.CheckInvariants();
+    CheckCommodityBalance(world.Report());
+    Expect(person.PersonalGathered==1 && world.Report().PersonalGatherHours==1,
+        "only the later completed request extracts one fish");
 }
 
 static void BreadSeptimBenchmark()
