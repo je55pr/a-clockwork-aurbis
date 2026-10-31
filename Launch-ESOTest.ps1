@@ -3,7 +3,8 @@ param(
     [switch]$ForceBuild,
     [switch]$FirstPersonLab,
     [switch]$ModelLab,
-    [switch]$RigLab
+    [switch]$RigLab,
+    [switch]$LegacyExperimentalRigLab
 )
 
 $ErrorActionPreference = 'Stop'
@@ -144,7 +145,10 @@ try {
     $arguments = '--path "' + $projectRoot + '"'
     if ($FirstPersonLab) { $arguments += ' "res://scenes/first_person_lab.tscn"' }
     if ($ModelLab) { $arguments += ' "res://scenes/model_animation_lab.tscn"' }
-    if ($RigLab) { $arguments += ' "res://scenes/source_rig_lab.tscn"' }
+    # The default rig lab contains only native ESO poses. Explicit legacy
+    # mode preserves the earlier experimental prosthetic-face/gait tests.
+    if ($RigLab) { $arguments += ' "res://scenes/eso_native_animation_lab.tscn"' }
+    if ($LegacyExperimentalRigLab) { $arguments += ' "res://scenes/source_rig_lab.tscn"' }
     $process = Start-Process -FilePath $godotExe -ArgumentList $arguments -WorkingDirectory $projectRoot -PassThru
     Add-Content -LiteralPath $logFile -Value "Started Godot PID $($process.Id): $godotExe"
     exit 0

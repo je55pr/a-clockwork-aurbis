@@ -5,6 +5,12 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using EsoTest;
 
+if(args.Length>0 && args[0]=="--sample-native-pose")
+    return GrannyOriginalPoseSampler.Run(args.Skip(1).ToArray());
+
+if(args.Length>0 && args[0]=="--inspect-native-binding")
+    return NativeGrannyBindingProbe.Run(args.Skip(1).ToArray());
+
 if(args.Length>0 && args[0]=="--sample-animation")
     return GrannyClipSamples.Run(args.Skip(1).ToArray());
 

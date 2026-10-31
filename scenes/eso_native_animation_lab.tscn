@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://tests/Godot/EsoNativeAnimationLab.cs" id="1_native"]
+
+[node name="ESONativeAnimationLab" type="Node3D"]
+script = ExtResource("1_native")
