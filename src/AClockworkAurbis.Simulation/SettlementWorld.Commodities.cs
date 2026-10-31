@@ -600,6 +600,15 @@ public sealed partial class SettlementWorld
                 int available=Quantity(seller.Stock,sku);
                 BusinessState? carrier=UsesPaidCarriers?
                     ChoosePaidCarrier(seller,buyer):null;
+                ResidentState? courier=carrier is not null &&
+                    _settings.EnableNpcCourierJourneys
+                    ?ChooseCourierFor(carrier,seller):null;
+                if(carrier is not null &&
+                   _settings.EnableNpcCourierJourneys && courier is null)
+                {
+                    CourierStaffShortage();
+                    continue;
+                }
                 if(UsesPaidCarriers && carrier is null)
                 {
                     CarrierShortage(need);
@@ -610,7 +619,8 @@ public sealed partial class SettlementWorld
                 int minutes=PlaceTravelMinutes(seller.Place,buyer.Place);
                 int charge=checked(_settings.BaseFreightFee+
                     (int)Math.Ceiling(minutes/90d)*_settings.FreightFeePer90Minutes);
-                if(buyer.Gold<charge)continue;
+                if(buyer.Gold<charge ||
+                   courier is not null && carrier!.Gold+charge<1m)continue;
                 decimal availableGold=buyer.Gold-charge;
                 // Each unit price is quoted and settled in hundredths
                 // of a septim. No rounding up whole-septim payments.
@@ -661,10 +671,23 @@ public sealed partial class SettlementWorld
                 }
                 int id=_nextFreightId++;
                 long arrival=checked(Minute+duration);
+                decimal courierWage=courier is null?0m:1m;
+                if(courier is not null)
+                {
+                    carrier!.Gold-=courierWage;
+                    _courierEscrowGold+=courierWage;
+                    courier.CourierShipmentId=id;
+                    _courierAssignments++;
+                    Observe(courier,"courier_assigned",
+                        sku+" x"+units+" from "+seller.Name+" to "+buyer.Name);
+                }
                 _freight.Add(id,new FreightShipment(
-                    seller,buyer,sku,units,Minute,arrival,
-                    ToMilli(payment+charge),carrier));
-                _queue.Enqueue(-2-id,(arrival,_sequence++));
+                    seller,buyer,sku,units,Minute,
+                    courier is null?arrival:long.MaxValue,
+                    ToMilli(payment+charge),carrier,
+                    courier?.Source.Id,courierWage));
+                if(courier is null)
+                    _queue.Enqueue(-2-id,(arrival,_sequence++));
                 _shipmentsSent++;
                 need-=units;
             }

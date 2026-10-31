@@ -191,6 +191,9 @@ public sealed class ResidentState
     // Stable per-person inclination; 0 chooses the best scored option.
     public int RiskTolerance { get; internal set; }
     public long FoodChoiceCount { get; internal set; }
+    public int? CourierShipmentId { get; internal set; }
+    public long CourierDeliveries { get; internal set; }
+    public decimal CourierWageIncome { get; internal set; }
     internal string? PlannedMealShopId { get; set; }
     internal string? PlannedMealSku { get; set; }
     public decimal Gold { get; internal set; }
@@ -402,6 +405,9 @@ public sealed record SettlementSettings
     public int RentGoldReserve { get; init; } = 20;
     public int PortCargoUnitsPerWorkHour { get; init; } = 50;
     public bool EnablePaidCarriers { get; init; } = true;
+    // Courier travel shares the ordinary NPC clock, and freight cannot arrive
+    // before its assigned person completes pickup and destination journeys.
+    public bool EnableNpcCourierJourneys { get; init; } = true;
     public int HaulierCargoUnitsPerWorkHour { get; init; } = 50;
     public int MaxPortCargoCapacity { get; init; } = 2000;
     public int MaxHaulierCargoCapacity { get; init; } = 500;
@@ -469,6 +475,15 @@ public sealed record BreadMarketSnapshot(
     int BreadInStock,decimal PricePerLoaf,bool TwoForOneAvailable,
     long PurchasedLoaves,decimal LandedCostGold,
     long LoavesSold,decimal BreadRevenueGold);
+
+public sealed record CourierJourneySnapshot(
+    int ShipmentId,string CourierId,string CourierName,string CarrierId,
+    string FromId,string FromName,string ToId,string ToName,
+    string Commodity,int Quantity,decimal CourierWageGold,string Stage,
+    long AssignedMinute,long? PickupMinute,long? ExpectedDeliveryMinute,
+    long? DeliveredMinute,
+    double? FromMapX,double? FromMapY,
+    double? ToMapX,double? ToMapY);
 
 public sealed record FreightRouteSnapshot(
     string FromId, string From, string ToId, string To, string Commodity, long Units);
@@ -595,6 +610,12 @@ public sealed record SettlementReport
     public long PaidFreightShipments { get; init; }
     public long CarrierCapacityHours { get; init; }
     public long UnfulfilledFreightRequests { get; init; }
+    public long CourierAssignments { get; init; }
+    public long CourierDeliveries { get; init; }
+    public decimal CourierWages { get; init; }
+    public decimal CourierWagesInEscrow { get; init; }
+    public int ActiveCourierJourneys { get; init; }
+    public CourierJourneySnapshot[] CourierJourneys { get; init; } = [];
     public FreightRouteSnapshot[] FreightRoutes { get; init; } = [];
     public CommoditySnapshot[] CommodityDetails { get; init; } = [];
     public long RecipesCompleted { get; init; }

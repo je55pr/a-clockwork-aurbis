@@ -46,6 +46,7 @@ var tests=new (string Name,Action Run)[]
     ("Unfunded processors may offer real casual manufacturing shifts", CasualProcessorWork),
     ("Brewing, tavern leisure and clothing form conserved economic activities", BrewingClothingAndTaverns),
     ("Paid hauliers deliver only with real work and finite shipping capacity", PaidFreightCarriers),
+    ("Named couriers actually carry freight and settle wage escrow on delivery", NpcCourierJourneys),
     ("Autonomous fisher earns real income from catch and buyers", AutonomousFisher),
     ("Autonomous smith builds and equips a personally owned sword", AutonomousSmith),
     ("Concurrent personal gather requests reserve finite ore", AutonomousResourceReservation),
@@ -1996,6 +1997,11 @@ static void PaidFreightCarriers()
         "hauling requires real funded work and does not award free capacity");
     Expect(report.AllAccountsGold==report.InitialAllAccountsGold,
         "carrier fees circulate existing money without minting balances");
+    Expect(report.CourierAssignments>0 &&
+        report.CourierAssignments==report.ShipmentsSent &&
+        report.CourierDeliveries==report.ShipmentsDelivered &&
+        report.CourierWages==economy.Residents.Sum(r=>r.CourierWageIncome),
+        "every paid freight parcel has an actual resident who receives its delivery wage");
 
     var haulier=economy.Businesses.Single(b=>b.Id==yard);
     decimal firstMonthIncome=haulier.FreightRevenue;
@@ -2040,4 +2046,109 @@ static void PaidFreightCarriers()
     Expect(fallback.ShipmentsSent>0 && fallback.CarrierRevenue==0 &&
         fallback.FreightFees>0,
         "explicit carrier opt-out preserves legacy transport for comparisons");
+    var noCouriers=new SettlementWorld(catalog,settings with
+    {
+        EnableNpcCourierJourneys=false
+    });
+    noCouriers.AdvanceTo(12L*1440);
+    noCouriers.CheckInvariants();
+    var oldDriverless=noCouriers.Report();
+    Expect(oldDriverless.ShipmentsSent>0 &&
+        oldDriverless.CourierAssignments==0 &&
+        oldDriverless.CourierWages==0 &&
+        oldDriverless.CarrierRevenue>0,
+        "the old paid-carrier benchmark remains available without named courier journeys");
+}
+
+static void NpcCourierJourneys()
+{
+    var source=CommodityFixture();
+    var market=source.Places.First(p=>p.Id=="b:market");
+    const string depotId="sim:test:journey-haulier";
+    var depot=new PlaceDefinition(depotId,0,"Courier test yard",
+        "simulation_inferred_haulier",market.Settlement,market.Zone,
+        BusinessKinds.Haulier,"",market.MapX,market.MapY,
+        "simulation_at_source_anchor",market.District);
+    var catalog=source with
+    {
+        Places=source.Places.Append(depot).ToArray(),
+        Businesses=source.Businesses.Append(
+            new BusinessDefinition(depotId,BusinessKinds.Haulier,null,[],
+                "SIMULATION HYPOTHESIS for courier journey test")).ToArray()
+    };
+    var settings=new SettlementSettings
+    {
+        Seed=42,Economy=EconomyMode.CommodityProduction,
+        EnableEstablishedOpeningEconomy=true,
+        EnableExternalTrade=false
+    };
+    var world=new SettlementWorld(catalog,settings);
+    CourierJourneySnapshot? carrying=null;
+    SettlementReport? transit=null;
+    for(long minute=0;minute<=8L*1440;minute+=13)
+    {
+        world.AdvanceTo(minute);
+        if(!world.Residents.Any(r=>r.CourierShipmentId is not null))continue;
+        var current=world.Report();
+        carrying=current.CourierJourneys.FirstOrDefault(
+            j=>j.Stage=="Carrying");
+        if(carrying is null)continue;
+        transit=current;
+        break;
+    }
+    Expect(carrying is not null && transit is not null,
+        "an actual named courier begins carrying a physical shipment");
+    world.CheckInvariants();
+    Expect(transit!.ActiveCourierJourneys>0 &&
+        transit.CourierAssignments>transit.CourierDeliveries &&
+        transit.CourierWagesInEscrow>0 &&
+        transit.CourierWagesInEscrow==transit.ActiveCourierJourneys &&
+        carrying!.CourierWageGold==1m,
+        "unfinished courier duties retain physical goods and reserved wages");
+    var courier=world.Residents.Single(r=>r.Source.Id==carrying!.CourierId);
+    Expect(courier.CourierShipmentId==carrying!.ShipmentId &&
+        courier.Activity==SettlementAction.Travel &&
+        courier.DestinationPlaceId==carrying.ToId &&
+        carrying.PickupMinute>=carrying.AssignedMinute &&
+        carrying.ExpectedDeliveryMinute>carrying.PickupMinute,
+        "an assigned NPC actually travels from the supplier to the consignee");
+    Expect(transit.CommodityDetails.Any(c=>c.InTransit>0),
+        "in-flight cargo is not prematurely added to a business inventory");
+    var initialCompleted=transit.CourierDeliveries;
+    world.AdvanceTo(world.Minute+720);
+    world.CheckInvariants();
+    var completed=world.Report();
+    Expect(completed.CourierDeliveries>initialCompleted &&
+        completed.CourierWages>transit.CourierWages &&
+        completed.CourierJourneys.Any(j=>
+            j.ShipmentId==carrying.ShipmentId &&
+            j.Stage=="Delivered" &&
+            j.DeliveredMinute>j.PickupMinute),
+        "delivery finishes the real NPC journey before releasing its wage");
+    Expect(completed.AllAccountsGold==completed.InitialAllAccountsGold,
+        "delivery wage escrow and business payments remain conserved");
+
+    var replay=new SettlementWorld(catalog,settings);
+    for(long minute=0;minute<=transit.Minute;minute+=13)
+        replay.AdvanceTo(minute);
+    replay.AdvanceTo(world.Minute);
+    replay.CheckInvariants();
+    Expect(JsonSerializer.Serialize(completed)==
+        JsonSerializer.Serialize(replay.Report()),
+        "courier assignment, timings and payments are reproducible by seed");
+
+    var nonCouriers=catalog with
+    {
+        Residents=catalog.Residents.Select(r=>r with{Race="Dremora"})
+            .ToArray()
+    };
+    var noEligible=new SettlementWorld(nonCouriers,settings);
+    noEligible.AdvanceTo(12L*1440);
+    noEligible.CheckInvariants();
+    var unavailable=noEligible.Report();
+    Expect(unavailable.ShipmentsSent==0 &&
+        unavailable.CourierAssignments==0 &&
+        unavailable.UnfulfilledFreightRequests>0 &&
+        unavailable.CarrierRevenue==0,
+        "paid cargo capacity without an eligible person cannot teleport goods");
 }

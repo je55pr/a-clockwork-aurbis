@@ -4,6 +4,7 @@ public sealed partial class SettlementWorld
 {
     private void Decide(int index,ResidentState actor)
     {
+        if(TryAdvanceCourier(index,actor))return;
         int localMinute=(int)(Minute%DayMinutes);
         int hour=localMinute/60;
         bool night=hour>=22||hour<6;

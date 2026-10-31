@@ -6,12 +6,14 @@ try
 {
     string? catalogPath=null,trace=null;
     int days=3,seed=42,rentReserve=20;
+    long? targetMinute=null;
     int regularHours=2,casualWage=2,casualHours=4,wildForage=2,autonomyPercent=22;
     string? economicMode=null;
     bool traceFirst=false,details=false,allResidents=false;
     bool disableTrade=false,disableProduction=false,disableAid=false;
     bool establishedStart=false,disableRiskChoices=false,legacyEmployment=false;
-    bool disablePaidCarriers=false;
+    bool disablePaidCarriers=false,disableNpcCouriers=false;
+    string? courierPreviewPath=null;
     for(int i=0;i<args.Length;i++)
     {
         string Next() => i+1<args.Length ? args[++i] :
@@ -20,6 +22,7 @@ try
         {
             case "--catalog":catalogPath=Next();break;
             case "--days":days=int.Parse(Next());break;
+            case "--minute":targetMinute=long.Parse(Next());break;
             case "--seed":seed=int.Parse(Next());break;
             case "--rent-reserve":rentReserve=int.Parse(Next());break;
             case "--regular-hours":regularHours=int.Parse(Next());break;
@@ -39,23 +42,27 @@ try
             case "--no-risk-choices":disableRiskChoices=true;break;
             case "--legacy-employment":legacyEmployment=true;break;
             case "--no-paid-carriers":disablePaidCarriers=true;break;
+            case "--no-npc-couriers":disableNpcCouriers=true;break;
+            case "--courier-preview":courierPreviewPath=Next();break;
             case "--help":
                 Console.WriteLine(
                     "dotnet run -c Release --project tools/SettlementRunner -- "+
-                    "--catalog catalog.json [--days 3] [--seed 42] [--trace-first] "+
+                    "--catalog catalog.json [--days 3] [--minute N] [--seed 42] [--trace-first] "+
                     "[--economy prototype|production|commodities] [--no-foreign-trade] "+
                     "[--no-local-production] [--no-assistance] [--rent-reserve GOLD] "+
                     "[--regular-hours N] [--casual-wage GOLD] [--casual-hours N] "+
                     "[--wild-forage UNITS] [--autonomy-percent 0..100] "+
                     "[--established-start] [--no-risk-choices] [--legacy-employment] "+
-                    "[--no-paid-carriers] "+
+                    "[--no-paid-carriers] [--no-npc-couriers] "+
+                    "[--courier-preview OUTPUT.json] "+
                     "[--trace NPC_ID] [--details] [--resident-details]");
                 return 0;
             default:throw new ArgumentException("Unknown parameter "+args[i]);
         }
     }
-    if(catalogPath is null||days is <0 or >365)
-        throw new ArgumentException("--catalog FILE required; --days must be 0..365");
+    if(catalogPath is null||days is <0 or >365 ||
+        targetMinute is <0 or >525600)
+        throw new ArgumentException("--catalog FILE required; --days 0..365 and --minute 0..525600");
     var loading=Stopwatch.StartNew();
     var catalog=SettlementCatalog.Load(catalogPath);
     if(economicMode is not null &&
@@ -78,7 +85,8 @@ try
         EnableRiskAwareChoices=!disableRiskChoices,
         EnableBudgetedPublicEmployment=!legacyEmployment,
         EnableSustainableHiring=!legacyEmployment,
-        EnablePaidCarriers=!disablePaidCarriers});
+        EnablePaidCarriers=!disablePaidCarriers,
+        EnableNpcCourierJourneys=!disableNpcCouriers});
     loading.Stop();
     if(traceFirst && world.Residents.Count>0)trace=world.Residents[0].Source.Id;
     if(trace is not null)
@@ -96,16 +104,31 @@ try
         };
     }
     var timer=Stopwatch.StartNew();
-    world.AdvanceTo(days*1440L);
+    world.AdvanceTo(targetMinute ?? days*1440L);
     timer.Stop();
     world.CheckInvariants();
     var summary=world.Report();
+    if(courierPreviewPath is not null)
+    {
+        string location=Path.GetFullPath(courierPreviewPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(location)!);
+        File.WriteAllText(location,JsonSerializer.Serialize(new
+        {
+            SchemaVersion=1,SnapshotMinute=world.Minute,
+            Journeys=summary.CourierJourneys
+        },new JsonSerializerOptions
+        {
+            PropertyNamingPolicy=JsonNamingPolicy.CamelCase,
+            WriteIndented=true
+        }));
+    }
     var report=new
     {
         Mode="Source-backed headless settlement, no Godot or SQLite at runtime",
         Input=Path.GetFullPath(catalogPath),
         SourceData=catalog.Source,
-        SimulatedDays=days,
+        SimulatedDays=(int)(world.Minute/1440L),
+        SimulatedMinute=world.Minute,
         Economy=mode.ToString(),
         Scenario=disableProduction?"crop-failure":disableTrade?"no-foreign":disableAid?"no-assistance":"normal",
         Seed=seed,
@@ -119,6 +142,7 @@ try
         BudgetedPublicEmployment=!legacyEmployment,
         SustainableHiring=!legacyEmployment,
         PaidCarriers=!disablePaidCarriers,
+        NpcCourierJourneys=!disableNpcCouriers,
         summary.Settlement,
         summary.SourcePlaces,
         summary.SimulatedPlaces,
@@ -160,6 +184,12 @@ try
         summary.PaidFreightShipments,
         summary.CarrierCapacityHours,
         summary.UnfulfilledFreightRequests,
+        summary.CourierAssignments,
+        summary.CourierDeliveries,
+        summary.CourierWages,
+        summary.CourierWagesInEscrow,
+        summary.ActiveCourierJourneys,
+        CourierJourneys=details?summary.CourierJourneys:null,
         FreightRoutes=details?summary.FreightRoutes.Take(30).ToArray():null,
         summary.CommodityDetails,
         summary.RecipesCompleted,
@@ -301,6 +331,8 @@ try
             r.HomeId,r.HousingId,r.RentSpent,r.Evictions,r.Relocations,r.Rehousings,
             r.HomelessDays,r.Gold,r.Food,r.Goods,r.Satiation,r.Energy,
             r.RiskTolerance,r.FoodChoiceCount,
+            r.CourierShipmentId,r.CourierDeliveries,r.CourierWageIncome,
+            CourierDestination=r.CourierShipmentId is null?null:r.DestinationPlaceId,
             CommodityInventory=mode==EconomyMode.CommodityProduction?
                 r.CommodityStock:null,
             r.MealsEaten,r.Purchases,r.Journeys,r.WageIncome,
@@ -332,7 +364,9 @@ try
             (mode==EconomyMode.CommodityProduction?
                 "Commodity mode currently simulates CLOSED domestic trade only; "+
                 "crop mixes, processors, recipes and prices are hypothetical, "+
-                "and carriers are abstract freight services.":"")
+                "and road paths are approximated from source map anchors; "+
+                "named courier journeys represent simulation travel, not literal "+
+                "ESO roads or individual wagon physics.":"")
     };
     Console.WriteLine(JsonSerializer.Serialize(report,
         new JsonSerializerOptions{WriteIndented=true}));

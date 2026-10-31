@@ -9,7 +9,8 @@ public sealed partial class SettlementWorld
     }
 
     private decimal TotalGold() =>
-        checked(_businesses.Sum(b=>b.Gold)+_residents.Sum(r=>r.Gold)+_publicGold);
+        checked(_businesses.Sum(b=>b.Gold)+_residents.Sum(r=>r.Gold)+
+            _publicGold+_courierEscrowGold);
 
     private long TotalFood() =>
         Detailed ? CommodityRecipes.Meals.Sum(s=>
@@ -188,6 +189,12 @@ public sealed partial class SettlementWorld
             CarrierRevenue=_carrierRevenue,PaidFreightShipments=_paidFreightShipments,
             CarrierCapacityHours=_carrierCapacityHours,
             UnfulfilledFreightRequests=_unfulfilledFreightRequests,
+            CourierAssignments=_courierAssignments,
+            CourierDeliveries=_courierDeliveries,
+            CourierWages=_courierWages,
+            CourierWagesInEscrow=_courierEscrowGold,
+            ActiveCourierJourneys=_freight.Values.Count(s=>s.CourierId is not null),
+            CourierJourneys=GetCourierJourneySnapshots(),
             FreightRoutes=_deliveredByRoute.OrderByDescending(x=>x.Value)
                 .ThenBy(x=>x.Key.From,StringComparer.Ordinal)
                 .ThenBy(x=>x.Key.To,StringComparer.Ordinal)
@@ -293,6 +300,23 @@ public sealed partial class SettlementWorld
            _paidFreightUnitsDelivered!=
                 _businesses.Sum(b=>b.FreightUnitsTransported))
             throw new InvalidOperationException("Transport service ledger mismatch");
+        var assignedShipments=_freight.Where(x=>x.Value.CourierId is not null)
+            .ToArray();
+        if(_courierAssignments!=_courierDeliveries+assignedShipments.Length ||
+           _courierDeliveries!=_residents.Sum(r=>r.CourierDeliveries) ||
+           _courierWages!=_residents.Sum(r=>r.CourierWageIncome) ||
+           _courierEscrowGold!=assignedShipments.Sum(x=>x.Value.CourierWage) ||
+           _courierEscrowGold<0m ||
+           _courierAssignments>_paidFreightShipments ||
+           assignedShipments.Any(x=>
+               !_residentById.TryGetValue(x.Value.CourierId!,out var courier) ||
+               courier.CourierShipmentId!=x.Key) ||
+           _residents.Any(r=>r.CourierShipmentId is int shipmentId &&
+               (!_freight.TryGetValue(shipmentId,out var shipment) ||
+                shipment.CourierId!=r.Source.Id)) ||
+           assignedShipments.Select(x=>x.Value.CourierId)
+               .Distinct(StringComparer.Ordinal).Count()!=assignedShipments.Length)
+            throw new InvalidOperationException("Courier assignments or escrow do not reconcile");
         if(UsesPaidCarriers &&
            (_carrierRevenue!=_freightFees ||
             _paidFreightShipments!=_shipmentsSent))

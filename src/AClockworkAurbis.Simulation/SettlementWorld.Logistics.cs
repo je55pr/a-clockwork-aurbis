@@ -7,7 +7,9 @@ namespace AClockworkAurbis.Simulation;
 internal sealed record FreightShipment(
     BusinessState From, BusinessState To, string Commodity, int Quantity,
     long DepartMinute, long ArriveMinute,
-    long LandedValueMilli = 0,BusinessState? Carrier = null);
+    long LandedValueMilli = 0,BusinessState? Carrier = null,
+    string? CourierId = null,decimal CourierWage = 0m,
+    long? PickupMinute = null,long? ExpectedDeliveryMinute = null);
 
 public sealed partial class SettlementWorld
 {
@@ -109,6 +111,8 @@ public sealed partial class SettlementWorld
         int id = -2 - eventIndex;
         var shipment = _freight[id];
         _freight.Remove(id);
+        if(shipment.CourierId is not null)
+            CompleteCourierPayment(id,shipment);
         if(Detailed)
         {
             StockAdd(shipment.To.Stock,shipment.Commodity,shipment.Quantity);
