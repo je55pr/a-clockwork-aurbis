@@ -55,8 +55,11 @@ public sealed partial class SettlementWorld
 
     private void PurchaseForeignShortfalls()
     {
-        int totalFood = _businesses.Sum(b => b.Food);
-        int totalMaterials = _businesses.Sum(b => b.Materials);
+        // Already dispatched cargo still belongs to the island. Do not
+        // reorder from abroad just because local shipments have not arrived.
+        int totalFood = checked(_businesses.Sum(b => b.Food) + TransitCount("food"));
+        int totalMaterials = checked(_businesses.Sum(b => b.Materials) +
+            TransitCount("materials"));
         int foodWant = Math.Max(0, _residents.Count - totalFood);
         int materialsWant = Math.Max(0, _workshops.Length * 20 - totalMaterials);
         int dailyLimit = checked((_residents.Count + 9) / 10 *
