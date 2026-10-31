@@ -100,6 +100,13 @@ public sealed partial class SettlementWorld
             PersonHoursAtZeroSatiation=Math.Round(_residents.Sum(p=>p.MinutesAtZeroSatiation)/60d,2),
             PersonHoursBelow20Satiation=Math.Round(_residents.Sum(p=>p.MinutesBelow20Satiation)/60d,2),
             WorkersFurloughedCumulative=_furloughs,JobsReassigned=_rehired,
+            PublicPayrollGrants=_publicPayrollGrants,
+            FundedPublicWorkHours=_fundedPublicWorkHours,
+            ActivePublicEmployees=_residents.Count(r=>r.WorkId is not null &&
+                _byBusiness.TryGetValue(r.WorkId,out var employer) &&
+                PublicEmployer(employer)),
+            UnfundedPublicInstitutions=_businesses.Count(b=>PublicEmployer(b) &&
+                b.WorkerCount>0 && b.PublicHoursBudgetToday==0),
             HousingUnits=_housing.Count, HousingBeds=_housing.Sum(h=>h.Beds),
             HousingOccupied=_housing.Sum(h=>h.Occupied),
             HomelessResidents=Regional && _settings.EnableHousing ?
@@ -190,7 +197,9 @@ public sealed partial class SettlementWorld
                     b.CargoCapacity,b.CargoHandled,
                     Detailed?new SortedDictionary<string,int>(b.Stock,
                         StringComparer.Ordinal):null,
-                    b.CapitalLevel,b.CapitalInvestedMilli)).ToArray()
+                    b.CapitalLevel,b.CapitalInvestedMilli,
+                    b.PublicPayrollGrantsReceived,b.PublicHoursBudgetToday,
+                    b.CasualHoursWorked)).ToArray()
         };
     }
 

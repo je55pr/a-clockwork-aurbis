@@ -109,14 +109,21 @@ public sealed partial class SettlementWorld
                 Quantity(company.Stock,"game_meat")<cap,
             BusinessKinds.Fishery =>
                 company.LandYieldRemaining>0 && Quantity(company.Stock,"fish")<cap,
+            BusinessKinds.Bakery => CommodityRecipes.All.Any(r=>
+                r.Industry==BusinessKinds.Bakery && r.Id!="chef_game_pie" &&
+                RecipeAvailable(r,company.Stock,cap)),
+            BusinessKinds.Smeltery or BusinessKinds.Sawmill or
+                BusinessKinds.Tannery or BusinessKinds.Leatherworker or
+                BusinessKinds.Workshop => CommodityRecipes.For(company).Any(r=>
+                    RecipeAvailable(r,company.Stock,cap)),
             _=>false
         };
     }
 
     private bool CanTakeCasualShift(BusinessState firm)
     {
-        if(!Detailed || !OpenResourceJob(firm) || !CanCasualProduce(firm) ||
-            CasualRate<=0)return false;
+        if(!Detailed || !(OpenResourceJob(firm) || IsDetailedProcessor(firm)) ||
+            !CanCasualProduce(firm) || CasualRate<=0)return false;
         // Permanent staff have first claim on the day's planned work and
         // on the money needed to pay their minimum shifts.
         if(firm.PlannedHoursWorked<firm.PlannedHours &&
@@ -161,6 +168,7 @@ public sealed partial class SettlementWorld
         employer.Gold-=rate;
         employer.WagesPaid+=rate;
         employer.WorkHours++;
+        employer.CasualHoursWorked++;
         person.Gold+=rate;
         person.WageIncome+=rate;
         person.CasualWageIncome+=rate;

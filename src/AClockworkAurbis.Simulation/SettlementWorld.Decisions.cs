@@ -81,7 +81,9 @@ public sealed partial class SettlementWorld
         {
             if(Detailed && _byBusiness.TryGetValue(actor.WorkId,out var employer))
             {
-                if(employer.Gold<_settings.HourlyWage)
+                if(employer.Gold<_settings.HourlyWage &&
+                   !(_settings.EnableBudgetedPublicEmployment &&
+                     PublicEmployer(employer)))
                 {
                     FurloughForInsolvency(actor,employer);
                     Enqueue(index,60,SettlementAction.Idle);
@@ -99,9 +101,13 @@ public sealed partial class SettlementWorld
             else
             {
                 int untilShiftEnds=(actor.WorkStart+8)*60-localMinute;
-                if(Detailed && _byBusiness.TryGetValue(actor.WorkId,out var shop) &&
-                   shop.Kind is BusinessKinds.FoodRetail or BusinessKinds.GoodsRetail)
-                    shop.ServiceHoursReservedToday++;
+                if(Detailed && _byBusiness.TryGetValue(actor.WorkId,out var shop))
+                {
+                    if(shop.Kind is BusinessKinds.FoodRetail or BusinessKinds.GoodsRetail)
+                        shop.ServiceHoursReservedToday++;
+                    if(_settings.EnableBudgetedPublicEmployment && PublicEmployer(shop))
+                        shop.PublicHoursReservedToday++;
+                }
                 Enqueue(index,Math.Min(60,untilShiftEnds),SettlementAction.Work);
                 Observe(actor,"work",DisplayPlace(actor.WorkId));
             }

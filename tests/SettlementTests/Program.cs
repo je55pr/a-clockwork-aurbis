@@ -41,6 +41,9 @@ var tests=new (string Name,Action Run)[]
     ("Crop failure blocks harvesting but not existing personal trade", PersonalTradeDuringCropFailure),
     ("Deterministic risk tolerance explores plausible alternatives", RiskChoices),
     ("Established opening endowments are finite, diverse and conserved", EstablishedOpening),
+    ("Public payroll is allocated fairly without minting or phantom contracts", PublicPayrollBudget),
+    ("Permanent private hires require observed demand and cash runway", SustainablePrivateHiring),
+    ("Unfunded processors may offer real casual manufacturing shifts", CasualProcessorWork),
     ("Autonomous fisher earns real income from catch and buyers", AutonomousFisher),
     ("Autonomous smith builds and equips a personally owned sword", AutonomousSmith),
     ("Concurrent personal gather requests reserve finite ore", AutonomousResourceReservation),
@@ -1768,4 +1771,106 @@ static void EstablishedOpening()
     Expect(JsonSerializer.Serialize(established.Report())==
         JsonSerializer.Serialize(duplicate.Report()),
         "established economy stays deterministic across equivalent runs");
+}
+
+static void PublicPayrollBudget()
+{
+    var source=Fixture(2);
+    var chapel=new PlaceDefinition("b:chapel",0,"Test temple","Temple",
+        "Exampleton","Test zone","institution","fixture");
+    var catalog=source with
+    {
+        Places=source.Places.Append(chapel).ToArray(),
+        Businesses=source.Businesses.Append(
+            new BusinessDefinition(chapel.Id,BusinessKinds.Institution,
+                null,[],"synthetic public job")).ToArray(),
+        Residents=source.Residents.Select((r,i)=>r with
+        {
+            WorkPlaceId=i==0?"b:guild":chapel.Id,
+            WorkEvidence="explicit_fixture_contract"
+        }).ToArray()
+    };
+    var settings=new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableExternalTrade=false,EnableLocalProduction=false,
+        EnablePublicAssistance=false,EnableHousing=false,
+        StartingBusinessGold=0,InitialPublicGoldPerResident=8
+    };
+    var world=new SettlementWorld(catalog,settings);
+    world.AdvanceTo(1440L*2);
+    world.CheckInvariants();
+    var guild=world.Businesses.Single(b=>b.Id=="b:guild");
+    var temple=world.Businesses.Single(b=>b.Id==chapel.Id);
+    var report=world.Report();
+    Expect(guild.PublicPayrollGrantsReceived>0 &&
+        guild.PublicPayrollGrantsReceived==temple.PublicPayrollGrantsReceived,
+        "equal-sized institutions receive equal funding even when the treasury is scarce");
+    Expect(report.PublicPayrollGrants==
+        world.Businesses.Sum(b=>b.PublicPayrollGrantsReceived),
+        "every public grant corresponds to an actual departmental credit");
+    Expect(report.PublicGold>=0 && report.AllAccountsGold==report.InitialAllAccountsGold,
+        "budgeting cannot mint money, overdraft or borrow from outside accounts");
+    Expect(report.FundedPublicWorkHours>0,
+        "workers perform real paid public service shifts");
+    Expect(report.UnpaidHours==0 && report.WorkersFurloughedCumulative==0,
+        "temporary lack of cash does not instantly dismiss public employees");
+
+    var trulyUnfunded=new SettlementWorld(catalog,
+        settings with{InitialPublicGoldPerResident=0});
+    trulyUnfunded.AdvanceTo(30L*1440);
+    trulyUnfunded.CheckInvariants();
+    Expect(trulyUnfunded.Report().ActivePublicEmployees==0 &&
+        trulyUnfunded.Report().ResidentsFurloughed>=2,
+        "unfunded positions cannot masquerade as permanent after the grace period");
+}
+
+static void SustainablePrivateHiring()
+{
+    var catalog=Fixture(1);
+    var prudent=new SettlementWorld(catalog,new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableLocalProduction=false,EnableExternalTrade=false,
+        EnablePublicAssistance=false
+    });
+    var legacy=new SettlementWorld(catalog,new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableLocalProduction=false,EnableExternalTrade=false,
+        EnablePublicAssistance=false,EnableSustainableHiring=false
+    });
+    Expect(!prudent.CanOfferPermanentContract("b:forge") &&
+        legacy.CanOfferPermanentContract("b:forge"),
+        "starting cash by itself is not proof that a permanent role is sustainable");
+    prudent.AdvanceTo(15L*1440);
+    prudent.CheckInvariants();
+    Expect(!prudent.CanOfferPermanentContract("b:forge"),
+        "even two weeks of unproductive activity cannot fabricate a sales history");
+    Expect(!prudent.CanOfferPermanentContract("business:does-not-exist"),
+        "missing businesses cannot offer fictional jobs");
+}
+
+static void CasualProcessorWork()
+{
+    var world=new SettlementWorld(CommodityFixture(),new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableExternalTrade=false,
+        EnableEstablishedOpeningEconomy=true
+    });
+    world.AdvanceTo(90L*1440);
+    world.CheckInvariants();
+    var report=world.Report();
+    var processing=world.Businesses.Where(b=>b.Kind is
+        BusinessKinds.Bakery or BusinessKinds.Sawmill or
+        BusinessKinds.Smeltery or BusinessKinds.Tannery or
+        BusinessKinds.Leatherworker or BusinessKinds.Workshop).ToArray();
+    Expect(processing.Sum(b=>b.CasualHoursWorked)>0,
+        "manufacturers can hire paid casual labour when regular production hours are unavailable");
+    Expect(world.Businesses.Sum(b=>b.CasualHoursWorked)==report.CasualWorkHours &&
+        report.CasualWages==report.CasualWorkHours*2,
+        "temporary industrial shifts pay the lower rate from real employer balances");
+    Expect(report.AllAccountsGold==report.InitialAllAccountsGold,
+        "no temporary employment can create gold");
 }

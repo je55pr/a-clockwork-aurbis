@@ -158,6 +158,7 @@ public sealed partial class SettlementWorld
         {
             _marketWholesaleRevenue+=saleGold;
             _marketWholesaleCostsMilli+=originalCostMilli;
+            business.WholesaleCostOfGoodsMilli+=originalCostMilli;
         }
         else
         {

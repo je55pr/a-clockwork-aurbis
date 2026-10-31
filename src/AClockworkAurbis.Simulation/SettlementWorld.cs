@@ -82,7 +82,14 @@ public sealed partial class SettlementWorld
            _settings.AutonomousParticipationPercent is <0 or >100 ||
            _settings.AutonomousDailyActionLimit is <0 or >8 ||
            _settings.AutonomousMaxTravelMinutes is <1 or >1440 ||
-           _settings.AutonomousToolPurchaseGoldReserve is <0m or >1000000m)
+           _settings.AutonomousToolPurchaseGoldReserve is <0m or >1000000m ||
+           _settings.PublicPayrollHorizonDays is <1 or >90 ||
+           _settings.PublicMinimumPaidHoursPerWorker is <0 or >8 ||
+           _settings.PublicTargetPaidHoursPerWorker is <0 or >8 ||
+           _settings.PublicMinimumPaidHoursPerWorker>_settings.PublicTargetPaidHoursPerWorker ||
+           _settings.PublicUnfundedLeaveDays is <1 or >365 ||
+           _settings.PrivateHireRunwayDays is <1 or >90 ||
+           _settings.PrivateRehireCooldownDays is <0 or >365)
             throw new ArgumentOutOfRangeException(nameof(settings));
 
         _sourcePlaces=catalog.Places.ToDictionary(p=>p.Id,StringComparer.Ordinal);

@@ -146,6 +146,8 @@ public sealed partial class SettlementWorld
 
     private bool CanScheduleCommodityWork(ResidentState worker,BusinessState company)
     {
+        if(_settings.EnableBudgetedPublicEmployment && PublicEmployer(company))
+            return CanFundPublicShift(worker,company);
         if(PlansProduction(company) &&
            company.PlannedHoursWorked>=company.PlannedHours)return false;
         // Share the minimum contracted shifts among real employees before

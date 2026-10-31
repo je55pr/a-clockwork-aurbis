@@ -14,6 +14,10 @@ public sealed partial class SettlementWorld
             BusinessKinds.GoodsRetail)
             business.ServiceHoursReservedToday=Math.Max(0,
                 business.ServiceHoursReservedToday-1);
+        if(Detailed && _settings.EnableBudgetedPublicEmployment &&
+           PublicEmployer(business))
+            business.PublicHoursReservedToday=Math.Max(0,
+                business.PublicHoursReservedToday-1);
         if(hours<=0)return;
         if(Detailed && PlansProduction(business))
         {
@@ -44,6 +48,18 @@ public sealed partial class SettlementWorld
             if(hours==0)return;
             business.ServiceHoursWorkedToday+=hours;
         }
+        if(Detailed && _settings.EnableBudgetedPublicEmployment &&
+           PublicEmployer(business))
+        {
+            int allowance=Math.Min(
+                business.PublicHoursBudgetToday-business.PublicHoursWorkedToday,
+                _settings.PublicTargetPaidHoursPerWorker-actor.RegularHoursToday);
+            int paidHours=Math.Max(0,Math.Min(hours,allowance));
+            _idleProductionHoursAvoided+=hours-paidHours;
+            hours=paidHours;
+            if(hours<=0)return;
+            business.PublicHoursWorkedToday+=hours;
+        }
         business.WorkHours+=hours;
         long payment=checked((long)hours*_settings.HourlyWage);
         bool paid = business.Gold>=payment;
@@ -65,6 +81,12 @@ public sealed partial class SettlementWorld
         }
         if(paid && OpenResourceJob(business))
             actor.RegularHoursToday+=hours;
+        if(paid && Detailed && _settings.EnableBudgetedPublicEmployment &&
+           PublicEmployer(business))
+        {
+            actor.RegularHoursToday+=hours;
+            _fundedPublicWorkHours+=hours;
+        }
         if(CompleteRegionalWork(actor,business,paid?hours:0))return;
         // Even the simple prototype must not turn unpaid hours into goods.
         if(!paid)return;

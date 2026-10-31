@@ -273,6 +273,15 @@ public sealed class BusinessState
     public int PlannedHours { get; internal set; } = 8;
     internal int PlannedHoursWorked { get; set; }
     internal int LastPlannedDay { get; set; } = -1;
+    internal long LastFurloughDay { get; set; } = -100000;
+    internal decimal LastObservedSalesMargin { get; set; }
+    internal Queue<decimal> PrivateRecentMargin { get; } = new();
+    internal decimal PrivateRecentMarginTotal { get; set; }
+    internal int PublicHoursBudgetToday { get; set; }
+    internal int PublicHoursWorkedToday { get; set; }
+    internal int PublicHoursReservedToday { get; set; }
+    internal int ConsecutiveUnfundedPublicDays { get; set; }
+    public decimal PublicPayrollGrantsReceived { get; internal set; }
     public int CapitalLevel { get; internal set; } = 1;
     public long CapitalInvestedMilli { get; internal set; }
     internal int CapitalWorkCredit { get; set; }
@@ -285,6 +294,7 @@ public sealed class BusinessState
     public long RetailCostOfGoodsMilli { get; internal set; }
     internal long LastRetailCostOfGoodsMilliAtDay { get; set; }
     public decimal WholesaleRevenue { get; internal set; }
+    public long WholesaleCostOfGoodsMilli { get; internal set; }
     public decimal WholesaleSpending { get; internal set; }
     // Includes paid delivery charges. Used to quote bread relative to its
     // actual acquisition cost rather than an arbitrary universal price.
@@ -300,6 +310,7 @@ public sealed class BusinessState
     internal int ServiceHoursWorkedToday { get; set; }
     internal int ServiceHoursReservedToday { get; set; }
     public int WorkHours { get; internal set; }
+    public int CasualHoursWorked { get; internal set; }
     public int ItemsCrafted { get; internal set; }
     public int FoodProduced { get; internal set; }
     public int MaterialsExtracted { get; internal set; }
@@ -338,6 +349,14 @@ public sealed record SettlementSettings
     public decimal DetailedFoodTaxRate { get; init; } = 0.05m;
     public decimal DetailedGoodsTaxRate { get; init; } = 0.10m;
     public int DailyAssistanceLimit { get; init; } = 8;
+    public bool EnableBudgetedPublicEmployment { get; init; } = true;
+    public int PublicPayrollHorizonDays { get; init; } = 14;
+    public int PublicMinimumPaidHoursPerWorker { get; init; } = 1;
+    public int PublicTargetPaidHoursPerWorker { get; init; } = 2;
+    public int PublicUnfundedLeaveDays { get; init; } = 14;
+    public bool EnableSustainableHiring { get; init; } = true;
+    public int PrivateHireRunwayDays { get; init; } = 14;
+    public int PrivateRehireCooldownDays { get; init; } = 30;
     // Paid casual work never replaces priority permanent farm/mine shifts.
     public int RegularGuaranteedHoursPerDay { get; init; } = 2;
     public int CasualHourlyWage { get; init; } = 2;
@@ -404,7 +423,9 @@ public sealed record BusinessSnapshot(
     decimal DividendsPaid,
     int CargoCapacity = 0, long CargoHandled = 0,
     IReadOnlyDictionary<string,int>? CommodityInventory = null,
-    int CapitalLevel=1,long CapitalInvestedMilli=0);
+    int CapitalLevel=1,long CapitalInvestedMilli=0,
+    decimal PublicPayrollGrants=0m,int PublicHoursBudgetToday=0,
+    int CasualHoursWorked=0);
 
 public sealed record CapitalDecisionSnapshot(
     int Day,string BusinessId,string BusinessName,string Decision,
@@ -528,6 +549,10 @@ public sealed record SettlementReport
     public int ResidentsFurloughed { get; init; }
     public double PersonHoursAtZeroSatiation { get; init; }
     public double PersonHoursBelow20Satiation { get; init; }
+    public decimal PublicPayrollGrants { get; init; }
+    public long FundedPublicWorkHours { get; init; }
+    public int ActivePublicEmployees { get; init; }
+    public int UnfundedPublicInstitutions { get; init; }
     public long WorkersFurloughedCumulative { get; init; }
     public long JobsReassigned { get; init; }
     public int HousingUnits { get; init; }

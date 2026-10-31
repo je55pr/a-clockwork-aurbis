@@ -10,7 +10,7 @@ try
     string? economicMode=null;
     bool traceFirst=false,details=false,allResidents=false;
     bool disableTrade=false,disableProduction=false,disableAid=false;
-    bool establishedStart=false,disableRiskChoices=false;
+    bool establishedStart=false,disableRiskChoices=false,legacyEmployment=false;
     for(int i=0;i<args.Length;i++)
     {
         string Next() => i+1<args.Length ? args[++i] :
@@ -36,6 +36,7 @@ try
             case "--no-assistance":disableAid=true;break;
             case "--established-start":establishedStart=true;break;
             case "--no-risk-choices":disableRiskChoices=true;break;
+            case "--legacy-employment":legacyEmployment=true;break;
             case "--help":
                 Console.WriteLine(
                     "dotnet run -c Release --project tools/SettlementRunner -- "+
@@ -44,7 +45,7 @@ try
                     "[--no-local-production] [--no-assistance] [--rent-reserve GOLD] "+
                     "[--regular-hours N] [--casual-wage GOLD] [--casual-hours N] "+
                     "[--wild-forage UNITS] [--autonomy-percent 0..100] "+
-                    "[--established-start] [--no-risk-choices] "+
+                    "[--established-start] [--no-risk-choices] [--legacy-employment] "+
                     "[--trace NPC_ID] [--details] [--resident-details]");
                 return 0;
             default:throw new ArgumentException("Unknown parameter "+args[i]);
@@ -71,7 +72,9 @@ try
         WildForagePerResidentPerDay=wildForage,
         AutonomousParticipationPercent=autonomyPercent,
         EnableEstablishedOpeningEconomy=establishedStart,
-        EnableRiskAwareChoices=!disableRiskChoices});
+        EnableRiskAwareChoices=!disableRiskChoices,
+        EnableBudgetedPublicEmployment=!legacyEmployment,
+        EnableSustainableHiring=!legacyEmployment});
     loading.Stop();
     if(traceFirst && world.Residents.Count>0)trace=world.Residents[0].Source.Id;
     if(trace is not null)
@@ -109,6 +112,8 @@ try
         AutonomousParticipationPercent=autonomyPercent,
         EstablishedOpeningEconomy=establishedStart,
         RiskAwareChoices=!disableRiskChoices,
+        BudgetedPublicEmployment=!legacyEmployment,
+        SustainableHiring=!legacyEmployment,
         summary.Settlement,
         summary.SourcePlaces,
         summary.SimulatedPlaces,
@@ -126,6 +131,10 @@ try
         summary.PersonHoursBelow20Satiation,
         summary.WorkersFurloughedCumulative,
         summary.JobsReassigned,
+        summary.PublicPayrollGrants,
+        summary.FundedPublicWorkHours,
+        summary.ActivePublicEmployees,
+        summary.UnfundedPublicInstitutions,
         summary.HousingUnits,
         summary.HousingBeds,
         summary.HousingOccupied,
