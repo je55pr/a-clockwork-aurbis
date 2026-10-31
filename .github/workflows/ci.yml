@@ -16,11 +16,11 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - name: Set up .NET
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           dotnet-version: "8.0.x"
       - name: Verify redistributable source only
@@ -45,3 +45,32 @@ jobs:
         run: dotnet build tools/ModelNameIndexer/ModelNameIndexer.csproj --configuration Debug --nologo
       - name: Verify indexer help without game data
         run: dotnet run --no-build --project tools/ModelNameIndexer/ModelNameIndexer.csproj -- --help
+
+  simulation:
+    name: Independent headless simulation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Set up standalone .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: "8.0.x"
+      - name: Build engine without Godot
+        run: dotnet build src/AClockworkAurbis.Simulation/AClockworkAurbis.Simulation.csproj --configuration Release --nologo
+      - name: Run simulation invariants and deterministic tests
+        run: dotnet run --project tests/SimulationTests/SimulationTests.csproj --configuration Release
+      - name: Exercise 10000 agents across three days
+        run: dotnet run --project tools/SimulationRunner/SimulationRunner.csproj --configuration Release -- --people 10000 --days 3 --json
+      - name: Test independently simulated businesses, stock, wages and named places
+        run: dotnet run --project tests/SettlementTests/SettlementTests.csproj --configuration Release
+      - name: Build source-backed settlement runner without game assets
+        run: dotnet build tools/SettlementRunner/SettlementRunner.csproj --configuration Release --nologo
+      - name: Set up Node for offline source adapter fixture
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+      - name: Test source catalog extraction without ESO database
+        run: node --test tools/SettlementCatalog/export.test.js

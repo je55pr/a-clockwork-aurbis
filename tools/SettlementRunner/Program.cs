@@ -1,0 +1,304 @@
+using System.Diagnostics;
+using System.Text.Json;
+using AClockworkAurbis.Simulation;
+
+try
+{
+    string? catalogPath=null,trace=null;
+    int days=3,seed=42,rentReserve=20;
+    int regularHours=2,casualWage=2,casualHours=4,wildForage=2;
+    string? economicMode=null;
+    bool traceFirst=false,details=false,allResidents=false;
+    bool disableTrade=false,disableProduction=false,disableAid=false;
+    for(int i=0;i<args.Length;i++)
+    {
+        string Next() => i+1<args.Length ? args[++i] :
+            throw new ArgumentException("Missing value after "+args[i]);
+        switch(args[i])
+        {
+            case "--catalog":catalogPath=Next();break;
+            case "--days":days=int.Parse(Next());break;
+            case "--seed":seed=int.Parse(Next());break;
+            case "--rent-reserve":rentReserve=int.Parse(Next());break;
+            case "--regular-hours":regularHours=int.Parse(Next());break;
+            case "--casual-wage":casualWage=int.Parse(Next());break;
+            case "--casual-hours":casualHours=int.Parse(Next());break;
+            case "--wild-forage":wildForage=int.Parse(Next());break;
+            case "--trace":trace=Next();break;
+            case "--trace-first":traceFirst=true;break;
+            case "--details":details=true;break;
+            case "--resident-details":allResidents=true;break;
+            case "--economy":economicMode=Next();break;
+            case "--no-foreign-trade":disableTrade=true;break;
+            case "--no-local-production":disableProduction=true;break;
+            case "--no-assistance":disableAid=true;break;
+            case "--help":
+                Console.WriteLine(
+                    "dotnet run -c Release --project tools/SettlementRunner -- "+
+                    "--catalog catalog.json [--days 3] [--seed 42] [--trace-first] "+
+                    "[--economy prototype|production|commodities] [--no-foreign-trade] "+
+                    "[--no-local-production] [--no-assistance] [--rent-reserve GOLD] "+
+                    "[--regular-hours N] [--casual-wage GOLD] [--casual-hours N] "+
+                    "[--wild-forage UNITS] [--trace NPC_ID] [--details] [--resident-details]");
+                return 0;
+            default:throw new ArgumentException("Unknown parameter "+args[i]);
+        }
+    }
+    if(catalogPath is null||days is <0 or >365)
+        throw new ArgumentException("--catalog FILE required; --days must be 0..365");
+    var loading=Stopwatch.StartNew();
+    var catalog=SettlementCatalog.Load(catalogPath);
+    if(economicMode is not null &&
+       economicMode is not ("production" or "prototype" or "commodities"))
+        throw new ArgumentException("--economy must be production, prototype or commodities");
+    EconomyMode mode=economicMode=="commodities" ||
+        economicMode is null && catalog.Scope=="whole_zone"
+        ? EconomyMode.CommodityProduction :
+        economicMode=="production" ? EconomyMode.RegionalProduction :
+        EconomyMode.Prototype;
+    var world=new SettlementWorld(catalog,new SettlementSettings
+    {Seed=seed,Economy=mode,EnableExternalTrade=!disableTrade,
+        EnableLocalProduction=!disableProduction,EnablePublicAssistance=!disableAid,
+        RentGoldReserve=rentReserve,
+        RegularGuaranteedHoursPerDay=regularHours,
+        CasualHourlyWage=casualWage,MaxCasualHoursPerDay=casualHours,
+        WildForagePerResidentPerDay=wildForage});
+    loading.Stop();
+    if(traceFirst && world.Residents.Count>0)trace=world.Residents[0].Source.Id;
+    if(trace is not null)
+    {
+        if(!world.Residents.Any(r=>r.Source.Id==trace))
+            throw new ArgumentException("Unknown NPC trace ID "+trace);
+        string selected=trace;
+        world.Observer=eventInfo=>
+        {
+            if(eventInfo.NpcId!=selected)return;
+            Console.Error.WriteLine(
+                $"D{eventInfo.Minute/1440+1} "+
+                $"{eventInfo.Minute%1440/60:D2}:{eventInfo.Minute%60:D2} "+
+                $"{eventInfo.Action,-9} {eventInfo.Detail}");
+        };
+    }
+    var timer=Stopwatch.StartNew();
+    world.AdvanceTo(days*1440L);
+    timer.Stop();
+    world.CheckInvariants();
+    var summary=world.Report();
+    var report=new
+    {
+        Mode="Source-backed headless settlement, no Godot or SQLite at runtime",
+        Input=Path.GetFullPath(catalogPath),
+        SourceData=catalog.Source,
+        SimulatedDays=days,
+        Economy=mode.ToString(),
+        Scenario=disableProduction?"crop-failure":disableTrade?"no-foreign":disableAid?"no-assistance":"normal",
+        Seed=seed,
+        RentGoldReserve=rentReserve,
+        RegularGuaranteedHoursPerDay=regularHours,
+        CasualHourlyWage=casualWage,MaxCasualHoursPerDay=casualHours,
+        WildForagePerResidentPerDay=wildForage,
+        summary.Settlement,
+        summary.SourcePlaces,
+        summary.SimulatedPlaces,
+        summary.SimulatedBusinesses,
+        summary.Businesses,
+        summary.Residents,
+        summary.SourceHomeAssignments,
+        summary.SourceStoreAssignments,
+        summary.InferredWorkAssignments,
+        summary.SyntheticHomeCount,
+        summary.UnemployedResidents,
+        summary.SimulatedContracts,
+        summary.ResidentsFurloughed,
+        summary.PersonHoursAtZeroSatiation,
+        summary.PersonHoursBelow20Satiation,
+        summary.WorkersFurloughedCumulative,
+        summary.JobsReassigned,
+        summary.HousingUnits,
+        summary.HousingBeds,
+        summary.HousingOccupied,
+        summary.HomelessResidents,
+        summary.RentCollected,
+        summary.TotalEvictions,
+        summary.TotalRelocations,
+        summary.TotalRehousings,
+        summary.ShipmentsSent,
+        summary.ShipmentsDelivered,
+        summary.FreightUnitsDelivered,
+        summary.ShipmentsInTransit,
+        summary.FoodInTransit,
+        summary.MaterialsInTransit,
+        summary.GoodsInTransit,
+        summary.FreightFees,
+        FreightRoutes=details?summary.FreightRoutes.Take(30).ToArray():null,
+        summary.CommodityDetails,
+        summary.RecipesCompleted,
+        summary.ToolsWornOut,
+        summary.FirewoodBurned,
+        summary.FreightDelayedForGear,
+        summary.IdleProductionHoursAvoided,
+        summary.ScarcityPricePremiumGold,
+        summary.SurplusPriceDiscountGold,
+        summary.MarketTrades,
+        summary.MarketWholesaleRevenue,
+        summary.MarketWholesaleCostMilli,
+        summary.MarketRetailRevenue,
+        summary.MarketRetailCostMilli,
+        summary.UnfilledCommodityOrderUnits,
+        summary.BusinessPlansMade,
+        summary.BusinessPlansRevised,
+        summary.LossMakingPlans,
+        BusinessPlans=details?summary.BusinessPlans:null,
+        summary.CapitalProjectsStarted,
+        summary.CapitalProjectsCompleted,
+        summary.CapitalUpgradesWorn,
+        summary.CapitalMaintenanceUnits,
+        summary.CapitalMaterialsConsumed,
+        summary.ConstructionLabourPayments,
+        CapitalProjects=details?summary.CapitalProjects:null,
+        CapitalDecisions=details?summary.CapitalDecisions:null,
+        MarketQuotes=details?summary.MarketQuotes:null,
+        summary.HomeCookingBatches,
+        summary.HomeCookedMeals,
+        summary.ChefCookedMeals,
+        summary.GroceryKitsSold,
+        summary.OneSeptimBreadSold,
+        summary.BreadUnitsSold,
+        summary.BreadSalesRevenue,
+        summary.DiscountedBreadUnits,
+        summary.OneSeptimBreadMarkets,
+        BreadMarkets=details?summary.BreadMarkets:null,
+        summary.SourceChefsEmployed,
+        summary.SimulatedGuards,
+        summary.SimulatedServants,
+        summary.SimulatedCleaners,
+        summary.ResidentsWithLowSatiation,
+        summary.ResidentsWithZeroSatiation,
+        summary.ResidentsWithoutFood,
+        summary.ResidentsWithoutGold,
+        summary.Events,
+        summary.Wages,
+        summary.Dividends,
+        summary.UnpaidHours,
+        summary.RetailFoodSales,
+        summary.RetailGoodsSales,
+        summary.Meals,
+        summary.Travel,
+        summary.TravelMinutes,
+        summary.LongJourneys,
+        summary.ResidentsWithMapAnchor,
+        summary.PlacesWithSourceMarker,
+        summary.PlacesWithEstimatedMarker,
+        summary.CraftedGoods,
+        summary.GoodsUsed,
+        summary.FoodProducedLocally,
+        summary.FoodHarvestedForSubsistence,
+        summary.WildForageSites,
+        summary.CasualWorkHours,
+        summary.CasualWages,
+        summary.CasualWorkers,
+        summary.OpenResourceSites,summary.PersonalGatherHours,
+        summary.PersonalCraftBatches,summary.PersonalTrades,
+        summary.PersonalSaleIncome,
+        summary.RawMaterialsExtracted,
+        summary.FoodExported,
+        summary.MaterialsExported,
+        summary.GoodsExported,
+        summary.GoldPaidAbroad,
+        summary.GoldReceivedFromAbroad,
+        summary.AssistanceGoldPaid,
+        summary.AssistedResidents,
+        summary.RevenueTaxed,
+        summary.CooperativeDistributions,
+        summary.PublicGold,
+        summary.ExternalGold,
+        summary.InitialAllAccountsGold,
+        summary.AllAccountsGold,
+        summary.ExternalFood,
+        summary.ExternalMaterials,
+        summary.FoodProducers,
+        summary.ResourceProducers,
+        summary.FoodImported,
+        summary.MaterialsImported,
+        summary.InitialGold,
+        summary.TotalGold,
+        summary.FoodRemaining,
+        summary.MaterialsRemaining,
+        summary.GoodsRemaining,
+        LoadingMs=Math.Round(loading.Elapsed.TotalMilliseconds,2),
+        SimulationMs=Math.Round(timer.Elapsed.TotalMilliseconds,2),
+        GoldConserved=mode==EconomyMode.Prototype?
+            summary.TotalGold==summary.InitialGold :
+            summary.AllAccountsGold==summary.InitialAllAccountsGold,
+        CommodityLedgerValid=summary.CommodityDetails.All(s=>
+            s.Initial+s.Extracted+s.Crafted==
+            s.StockOnHand+s.InTransit+s.UsedAsIngredient+s.Consumed),
+        FoodLedgerValid=mode==EconomyMode.CommodityProduction?
+            summary.CommodityDetails.All(s=>s.Initial+s.Extracted+s.Crafted==
+                s.StockOnHand+s.InTransit+s.UsedAsIngredient+s.Consumed):
+            summary.FoodRemaining+summary.Meals+
+            (mode==EconomyMode.Prototype?0:summary.FoodExported)==
+            summary.InitialFood+summary.FoodImported+
+            (mode==EconomyMode.Prototype?0:summary.FoodProducedLocally),
+        MaterialLedgerValid=mode==EconomyMode.CommodityProduction?
+            summary.CommodityDetails.All(s=>s.Initial+s.Extracted+s.Crafted==
+                s.StockOnHand+s.InTransit+s.UsedAsIngredient+s.Consumed):
+            summary.MaterialsRemaining+summary.GoodsRemaining+summary.GoodsUsed+
+            (mode==EconomyMode.Prototype?0:summary.MaterialsExported+summary.GoodsExported)==
+            summary.InitialMaterials+summary.InitialGoods+summary.MaterialsImported+
+            (mode==EconomyMode.Prototype?0:summary.RawMaterialsExtracted),
+        BusinessesDetail=details?summary.BusinessDetails:
+            summary.BusinessDetails.Where(x=>x.RetailSales>0||x.WorkHours>0||
+                x.ItemsCrafted>0).Take(12).ToArray(),
+        OpenResources=details?world.OpenResources:null,
+        ResidentDetails=allResidents?world.Residents.Select(r=>new {
+            Id=r.Source.Id,Name=r.Source.Name,Race=r.Source.Race,
+            SourceProfession=r.Source.Profession,
+            SourceHomeId=r.Source.HomePlaceId,SourceWorkId=r.Source.WorkPlaceId,
+            r.EmploymentEvidence,
+            r.SimulatedServiceRole,r.ServiceRoleEvidence,
+            r.HomeCookingBatches,r.HomeMealsCooked,r.GroceryKitsPurchased,
+            CurrentWorkId=r.WorkId,SimulatedWorkId=r.AssignedWorkPlaceId,
+            CurrentWorkplace=world.Businesses.FirstOrDefault(b=>b.Id==r.WorkId)?.Name,
+            LastLocation=r.CurrentPlaceId,
+            r.HomeId,r.HousingId,r.RentSpent,r.Evictions,r.Relocations,r.Rehousings,
+            r.HomelessDays,r.Gold,r.Food,r.Goods,r.Satiation,r.Energy,
+            CommodityInventory=mode==EconomyMode.CommodityProduction?
+                r.CommodityStock:null,
+            r.MealsEaten,r.Purchases,r.Journeys,r.WageIncome,
+            r.CasualWageIncome,r.CasualHoursToday,r.RegularHoursToday,
+            r.PersonalTask,r.EquippedWeaponSku,r.PersonalGathered,
+            r.PersonalCrafts,r.PersonalSaleIncome,
+            r.DividendIncome,r.CooperativeIncome,r.AssistanceGold,
+            r.SubsistenceFoodHarvested,r.UnpaidHours,r.WorkMinutes,
+            r.SleepMinutes,r.JourneyMinutes,r.OnUnpaidLeave,r.InsolvencyJobChanges
+        }).ToArray():null,
+        ExampleResidents=world.Residents.Where(r=>r.WorkId!=null)
+            .Take(5).Select(r=>new {
+                r.Source.Name,
+                SourceRole=r.Source.Profession,
+                r.Source.WorkEvidence,
+                r.EmploymentEvidence,
+                Home=r.Source.HomePlaceId,
+                Workplace=world.Businesses.FirstOrDefault(b=>b.Id==r.WorkId)?.Name,
+                r.Gold,r.Food,r.Goods,r.Satiation,r.Energy,r.MealsEaten,r.Purchases,
+                r.WageIncome,r.CasualWageIncome,r.DividendIncome,r.CooperativeIncome,r.AssistanceGold,
+                r.SubsistenceFoodHarvested,r.WorkMinutes
+            }).ToArray(),
+        Assumptions="Source identities and map markers are preserved. Contracts, co-ops, "+
+            "production yields, prices, welfare, foreign trade, needs and travel "+
+            "are simulation assumptions. Vendor association does not establish ownership. "+
+            (mode==EconomyMode.CommodityProduction?
+                "Commodity mode currently simulates CLOSED domestic trade only; "+
+                "crop mixes, processors, recipes and prices are hypothetical, "+
+                "and carriers are abstract freight services.":"")
+    };
+    Console.WriteLine(JsonSerializer.Serialize(report,
+        new JsonSerializerOptions{WriteIndented=true}));
+    return 0;
+}
+catch(Exception e)
+{
+    Console.Error.WriteLine("SETTLEMENT ERROR: "+e);
+    return 1;
+}
