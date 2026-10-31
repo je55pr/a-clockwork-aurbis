@@ -8,12 +8,17 @@ using Godot;
 namespace EsoTest;
 
 /// <summary>
-/// Experimental human-sized stand-ins, NOT decoded ESO character meshes or
-/// authoritative character coordinates. Local visual density only.
+/// Source-backed NPC profiles with provisional town-map placements. The
+/// first-person renderer replaces supported humanlike races with genuine ESO
+/// body-part meshes; unsupported races retain provisional stand-ins.
 /// </summary>
 public partial class PopulationPlaceholderLayer : Node3D
 {
     private SourcePropLayer _props=null!;
+    private EsoArchive _archive=null!;
+    private OodleDecoder _decoder=null!;
+    private bool _sourceHumanoids;
+    public void EnableSourceHumanoids(bool enabled) => _sourceHumanoids=enabled;
     private PopulationTerrainSampler _surface=null!;
     private readonly List<PopulationSpawnPlanner.Candidate> _town=new();
     private readonly HashSet<string> _dockNpcIds=new();
@@ -21,12 +26,15 @@ public partial class PopulationPlaceholderLayer : Node3D
     private NpcHoverInspector? _hoverInspector;
     private Func<bool>? _hoverAllowed;
     public void SetHoverGate(Func<bool> allowed) => _hoverAllowed=allowed;
+    public void SetFirstPersonAim(bool enabled) => _hoverInspector?.SetFirstPersonAim(enabled);
+    private bool _firstPersonAim;
+    public void ConfigureFirstPersonAim(bool enabled) { _firstPersonAim=enabled; SetFirstPersonAim(enabled); }
     private readonly List<Vector2> _dockLandings=new();
     private Node3D? _models;
     private readonly List<PopulationSpawnPlanner.Placement> _visibleSpawns=new();
     private float _density=1f;
     private bool _shown=true;
-    private int _placed,_requested;
+    private int _placed,_requested,_renderedHumanoids;
     public int PlacedCount=>_placed;
     public int SourceNpcCount=>_town.Count;
     public Vector3? SuggestedCameraEye {get;private set;}
@@ -41,6 +49,8 @@ public partial class PopulationPlaceholderLayer : Node3D
         SourcePropLayer props,float lowestHeight,int tileX,int tileZ)
     {
         _props=props;
+        _archive=archive;
+        _decoder=decoder;
         _surface=new PopulationTerrainSampler(archive,decoder,bundle,lowestHeight,
             tileX,tileZ,props.HarbourWaterCandidate);
         string file=ProjectSettings.GlobalizePath("res://.research/auridon-population.json");
@@ -82,6 +92,7 @@ public partial class PopulationPlaceholderLayer : Node3D
         _hoverInspector=new NpcHoverInspector {Name="NpcCursorInspector"};
         _hoverInspector.Setup(_props.Raycaster,
             ()=>_shown&&(_hoverAllowed?.Invoke()??true));
+        _hoverInspector.SetFirstPersonAim(_firstPersonAim);
         AddChild(_hoverInspector);
         Rebuild();
     }
@@ -245,7 +256,7 @@ public partial class PopulationPlaceholderLayer : Node3D
     }
 
     private void Notify()=>Changed?.Invoke(
-        $"NPC stand-ins: {_placed}/{_requested} | source town NPCs: {_town.Count} | "+
+        $"NPCs: {_placed}/{_requested} | original ESO humanoids: {_renderedHumanoids} | source town NPCs: {_town.Count} | "+
         $"density: {_density:0.##}x | "+(_props.HasPreparedGeometry?"vertical source-mesh raycasts verified":"waiting for source meshes")+
         " | positions approximate [N toggle, J density]");
 
@@ -338,11 +349,49 @@ public partial class PopulationPlaceholderLayer : Node3D
     {
         _visibleSpawns.Clear();
         _visibleSpawns.AddRange(points);
+        _renderedHumanoids=0;
         if(_models!=null){_models.QueueFree();_models=null;}
         var root=new Node3D{Name="ApproximateNPCStandIns",Visible=_shown};
         AddChild(root);_models=root;
         _hoverInspector?.SetPopulation(points.Select(p=>
             p with {Position=ToGlobal(p.Position)}).ToArray(),_sourcePeople);
+        var placeholders=new Node3D{Name="FallbackMannequins"};
+        root.AddChild(placeholders);
+        BuildFallback(placeholders,points);
+        if (!_sourceHumanoids || points.Count==0) return;
+        var characters=new EsoHumanoidVisualLayer{Name="OriginalESOHumanoidParts"};
+        try
+        {
+            characters.Setup(_archive,_decoder,points,_sourcePeople);
+            characters.Completed+=()=>
+            {
+                if (_models!=root || !GodotObject.IsInstanceValid(placeholders)) return;
+                if (!characters.HasOriginalBodies) return;
+                placeholders.QueueFree();
+                _renderedHumanoids=characters.OriginalBodyCount;
+                var missing=points.Where(p=>!characters.HasRenderedPerson(p.Id)).ToArray();
+                if (missing.Length>0)
+                {
+                    var remainder=new Node3D{Name="UnsupportedRaceStandIns"};
+                    root.AddChild(remainder);
+                    BuildFallback(remainder,missing);
+                }
+                GD.Print($"NPC SOURCE VISUAL SWAP {characters.OriginalBodyCount} original " +
+                    $"humanoids, {missing.Length} unsupported or unresolved mannequins");
+                Notify();
+            };
+            root.AddChild(characters);
+        }
+        catch(Exception e)
+        {
+            characters.Free();
+            GD.PushWarning("ESO humanoid part preview unavailable: "+e.Message);
+        }
+    }
+
+    private static void BuildFallback(Node3D root,
+        IReadOnlyList<PopulationSpawnPlanner.Placement> points)
+    {
         var body=new CylinderMesh {TopRadius=0.27f,BottomRadius=0.31f,
             Height=0.88f,RadialSegments=7};
         var head=new SphereMesh {Radius=0.21f,Height=0.42f,RadialSegments=8,Rings=4};

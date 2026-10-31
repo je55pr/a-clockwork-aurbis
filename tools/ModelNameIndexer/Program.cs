@@ -17,7 +17,10 @@ if(args.Contains("--help")||args.Length==0)
         --oodle-dll ".research/ooz.dll" \
         --output ".research/model-names.tsv" --limit 500
     Options: --limit N (attempts per run, default 500); --archive-min N;
-             --archive-max N; --retry (retry failed matching records).
+             --archive-max N; --retry (retry failed matching records);
+             --unlinked-only (search IDs NOT in placed-world model catalogue).
+    --unlinked-only automatically uses .research/unlinked-model-names.tsv
+    unless --output explicitly selects another separate file.
     Reruns skip cached source-matching records and pick up where they left off.
     Derived names only; original installed archives are never modified.
     """);
@@ -33,7 +36,12 @@ int Number(string key,int fallback) =>
 string manifest=Opt("--manifest","C:/ESO/The Elder Scrolls Online/depot/eso.mnf");
 string granny=Opt("--granny-dll",Environment.GetEnvironmentVariable("ESO_GRANNY_DLL")??"");
 string oodle=Opt("--oodle-dll",".research/ooz.dll");
-string output=Path.GetFullPath(Opt("--output",".research/model-names.tsv"));
+bool unlinkedOnly=args.Contains("--unlinked-only");
+string output=Path.GetFullPath(Opt("--output",unlinkedOnly?
+    ".research/unlinked-model-names.tsv":".research/model-names.tsv"));
+if(unlinkedOnly && string.Equals(output,Path.GetFullPath(".research/model-names.tsv"),
+    StringComparison.OrdinalIgnoreCase))
+    throw new ArgumentException("Unlinked model scans must use a separate output, not the placed-world index.");
 int limit=Math.Clamp(Number("--limit",500),1,100000);
 int minArchive=Number("--archive-min",0),maxArchive=Number("--archive-max",int.MaxValue);
 bool retry=args.Contains("--retry");
@@ -73,7 +81,8 @@ for(int i=0;i<archive.Count && attempted<limit;i++)
     var original=archive.GetRecord(i);
     if(original.ArchiveIndex<minArchive||original.ArchiveIndex>maxArchive||
         archive.GetIdIndexFields(i).Flags!=0||
-        !linkedIds.Contains(original.FileId)||!handled.Add(original.FileId))
+        (unlinkedOnly ? linkedIds.Contains(original.FileId) : !linkedIds.Contains(original.FileId)) ||
+        !handled.Add(original.FileId))
         continue;
     if(prior.TryGetValue(original.FileId,out var old) &&
        EsoModelNameIndex.MatchesSource(old,original.ArchiveIndex,original.Offset,
