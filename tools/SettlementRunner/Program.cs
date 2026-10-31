@@ -11,6 +11,7 @@ try
     bool traceFirst=false,details=false,allResidents=false;
     bool disableTrade=false,disableProduction=false,disableAid=false;
     bool establishedStart=false,disableRiskChoices=false,legacyEmployment=false;
+    bool disablePaidCarriers=false;
     for(int i=0;i<args.Length;i++)
     {
         string Next() => i+1<args.Length ? args[++i] :
@@ -37,6 +38,7 @@ try
             case "--established-start":establishedStart=true;break;
             case "--no-risk-choices":disableRiskChoices=true;break;
             case "--legacy-employment":legacyEmployment=true;break;
+            case "--no-paid-carriers":disablePaidCarriers=true;break;
             case "--help":
                 Console.WriteLine(
                     "dotnet run -c Release --project tools/SettlementRunner -- "+
@@ -46,6 +48,7 @@ try
                     "[--regular-hours N] [--casual-wage GOLD] [--casual-hours N] "+
                     "[--wild-forage UNITS] [--autonomy-percent 0..100] "+
                     "[--established-start] [--no-risk-choices] [--legacy-employment] "+
+                    "[--no-paid-carriers] "+
                     "[--trace NPC_ID] [--details] [--resident-details]");
                 return 0;
             default:throw new ArgumentException("Unknown parameter "+args[i]);
@@ -74,7 +77,8 @@ try
         EnableEstablishedOpeningEconomy=establishedStart,
         EnableRiskAwareChoices=!disableRiskChoices,
         EnableBudgetedPublicEmployment=!legacyEmployment,
-        EnableSustainableHiring=!legacyEmployment});
+        EnableSustainableHiring=!legacyEmployment,
+        EnablePaidCarriers=!disablePaidCarriers});
     loading.Stop();
     if(traceFirst && world.Residents.Count>0)trace=world.Residents[0].Source.Id;
     if(trace is not null)
@@ -114,6 +118,7 @@ try
         RiskAwareChoices=!disableRiskChoices,
         BudgetedPublicEmployment=!legacyEmployment,
         SustainableHiring=!legacyEmployment,
+        PaidCarriers=!disablePaidCarriers,
         summary.Settlement,
         summary.SourcePlaces,
         summary.SimulatedPlaces,
@@ -151,6 +156,10 @@ try
         summary.MaterialsInTransit,
         summary.GoodsInTransit,
         summary.FreightFees,
+        summary.CarrierRevenue,
+        summary.PaidFreightShipments,
+        summary.CarrierCapacityHours,
+        summary.UnfulfilledFreightRequests,
         FreightRoutes=details?summary.FreightRoutes.Take(30).ToArray():null,
         summary.CommodityDetails,
         summary.RecipesCompleted,

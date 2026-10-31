@@ -63,6 +63,8 @@ public sealed partial class SettlementWorld
            _settings.DailyImportCapPerTenResidents<0 ||
            _settings.DailySharedRent<0 || _settings.RentGoldReserve<0 ||
            _settings.PortCargoUnitsPerWorkHour<0 ||
+           _settings.HaulierCargoUnitsPerWorkHour<0 ||
+           _settings.MaxHaulierCargoCapacity<0 ||
            _settings.MaxPortCargoCapacity<0 ||
            _settings.MaxFreightLoad<1 || _settings.BaseFreightFee<0 ||
            _settings.ToolWorkHoursPerWear<1 || _settings.FirewoodDaysPerHousehold<1 ||

@@ -148,6 +148,7 @@ public sealed partial class SettlementWorld
             BusinessKinds.FoodRetail => 3,
             BusinessKinds.GoodsRetail => 3,
             BusinessKinds.ImportHub => 3,
+            BusinessKinds.Haulier => 4,
             BusinessKinds.Institution => 2,
             BusinessKinds.GuardPost or BusinessKinds.CleaningService or
                 BusinessKinds.DomesticService => 3,
@@ -335,7 +336,7 @@ public sealed partial class SettlementWorld
                     _cooperativeDistributions += perWorker;
                 }
             }
-            else if (business.Kind is BusinessKinds.ImportHub or
+            else if (business.Kind is BusinessKinds.Haulier or BusinessKinds.ImportHub or
                 BusinessKinds.GoodsRetail or BusinessKinds.FoodRetail ||
                 IsDetailedProcessor(business))
             {

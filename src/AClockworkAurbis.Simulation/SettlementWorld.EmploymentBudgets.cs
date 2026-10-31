@@ -107,7 +107,8 @@ public sealed partial class SettlementWorld
         {
             // Margin after the recorded inventory acquisition/production
             // cost. Gross turnover does not establish ability to add staff.
-            decimal total=firm.RetailRevenue+firm.WholesaleRevenue-
+            decimal total=firm.RetailRevenue+firm.WholesaleRevenue+
+                firm.FreightRevenue-
                 (firm.RetailCostOfGoodsMilli+firm.WholesaleCostOfGoodsMilli)/1000m;
             decimal increment=total-firm.LastObservedSalesMargin;
             firm.LastObservedSalesMargin=total;
@@ -157,7 +158,8 @@ public sealed partial class SettlementWorld
         // shift; retail costs exclude staff, while manufactured COGS already
         // includes wages paid during production.
         int workforce=firm.Kind is BusinessKinds.FoodRetail or
-            BusinessKinds.GoodsRetail or BusinessKinds.ImportHub?count+1:1;
+            BusinessKinds.GoodsRetail or BusinessKinds.ImportHub or
+            BusinessKinds.Haulier?count+1:1;
         decimal requiredMargin=checked((decimal)observedDays*
             workforce*guaranteed*wage);
         return firm.PrivateRecentMarginTotal>=requiredMargin;

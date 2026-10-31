@@ -105,6 +105,8 @@ public sealed partial class SettlementWorld
                 {
                     if(shop.Kind is BusinessKinds.FoodRetail or BusinessKinds.GoodsRetail)
                         shop.ServiceHoursReservedToday++;
+                    if(Detailed && shop.Kind is BusinessKinds.ImportHub or BusinessKinds.Haulier)
+                        shop.CargoHoursReservedToday++;
                     if(_settings.EnableBudgetedPublicEmployment && PublicEmployer(shop))
                         shop.PublicHoursReservedToday++;
                 }
@@ -117,7 +119,9 @@ public sealed partial class SettlementWorld
         // Casual paid extraction is available without a permanent contract.
         // Full-time shifts above always take priority. NPCs seek extra work
         // when low on cash; the site still needs resources and payroll.
-        if(Detailed && hour>=10 && hour<18 && actor.Gold<12 &&
+        if(Detailed && hour>=10 && hour<18 &&
+           (actor.Gold<12 || actor.WorkId is null && actor.Gold<50 &&
+               RecentCarrierDemand()) &&
            actor.Energy>=20 && TryCasualShift(index,actor))return;
 
         // Autonomously chosen personal jobs cannot displace a guaranteed

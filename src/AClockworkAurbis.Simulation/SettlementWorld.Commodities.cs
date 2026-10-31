@@ -199,11 +199,9 @@ public sealed partial class SettlementWorld
                     r.Ingredients.All(x=>Quantity(company.Stock,x.Key)>=x.Value) &&
                     r.Products.All(x=>Quantity(company.Stock,x.Key)+x.Value<=
                         _settings.MaxCommodityStockPerSite));
+            case BusinessKinds.Haulier:
             case BusinessKinds.ImportHub:
-                // Paid handlers create finite cargo-handling capacity rather
-                // than remaining indefinitely employed but unable to work.
-                return company.CargoCapacity<_settings.MaxPortCargoCapacity &&
-                    _settings.PortCargoUnitsPerWorkHour>0;
+                return CanScheduleCargoWork(company);
             case BusinessKinds.FoodRetail or BusinessKinds.GoodsRetail:
                 return company.ServiceHoursWorkedToday+
                         company.ServiceHoursReservedToday<company.ServiceHoursBudget ||
@@ -354,11 +352,18 @@ public sealed partial class SettlementWorld
                 for(int n=0;n<extra && CraftBatch(0);n++) { }
                 break;
             }
+            case BusinessKinds.Haulier:
             case BusinessKinds.ImportHub:
             {
-                int available=Math.Max(0,_settings.MaxPortCargoCapacity-company.CargoCapacity);
+                bool haulier=company.Kind==BusinessKinds.Haulier;
+                int capacity=PlannedCargoCapacity(company);
+                int rate=haulier?_settings.HaulierCargoUnitsPerWorkHour:
+                    _settings.PortCargoUnitsPerWorkHour;
+                int available=Math.Max(0,capacity-company.CargoCapacity);
                 int handled=(int)Math.Min(available,
-                    (long)hours*_settings.PortCargoUnitsPerWorkHour);
+                    (long)hours*rate);
+                if(UsesPaidCarriers && handled>0)
+                    _carrierCapacityHours+=hours;
                 company.CargoCapacity+=handled;
                 break;
             }
@@ -369,6 +374,7 @@ public sealed partial class SettlementWorld
     private void RunCommodityDay()
     {
         int day=checked((int)(Minute/DayMinutes));
+        UpdateCarrierCargoDemandDay();
         RegrowWildFood();
         RegrowOpenResources();
         foreach(var person in _residents)
@@ -592,6 +598,13 @@ public sealed partial class SettlementWorld
             {
                 if(need==0)break;
                 int available=Quantity(seller.Stock,sku);
+                BusinessState? carrier=UsesPaidCarriers?
+                    ChoosePaidCarrier(seller,buyer):null;
+                if(UsesPaidCarriers && carrier is null)
+                {
+                    CarrierShortage(need);
+                    continue;
+                }
                 decimal unitPrice=ToSeptims(
                     QuoteCommodityWholesalePriceMilli(seller,sku));
                 int minutes=PlaceTravelMinutes(seller.Place,buyer.Place);
@@ -605,13 +618,14 @@ public sealed partial class SettlementWorld
                     decimal.Floor(availableGold/unitPrice));
                 int units=Math.Min(need,Math.Min(available,
                     Math.Min(_settings.MaxFreightLoad,affordable)));
+                if(carrier is not null)
+                    units=Math.Min(units,carrier.CargoCapacity);
                 if(units==0)continue;
 
                 decimal payment=checked(units*unitPrice);
                 buyer.Gold-=payment+charge;
                 seller.Gold+=payment;
-                _publicGold+=charge;
-                _freightFees+=charge;
+                SettleFreightFee(charge,units,carrier);
                 buyer.WholesaleSpending+=payment;
                 seller.WholesaleRevenue+=payment;
                 if(sku=="bread")
@@ -649,7 +663,7 @@ public sealed partial class SettlementWorld
                 long arrival=checked(Minute+duration);
                 _freight.Add(id,new FreightShipment(
                     seller,buyer,sku,units,Minute,arrival,
-                    ToMilli(payment+charge)));
+                    ToMilli(payment+charge),carrier));
                 _queue.Enqueue(-2-id,(arrival,_sequence++));
                 _shipmentsSent++;
                 need-=units;

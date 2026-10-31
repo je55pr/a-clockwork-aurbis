@@ -94,6 +94,7 @@ public static class BusinessKinds
     public const string GoodsRetail = "goods_retail";
     public const string Workshop = "workshop";
     public const string ImportHub = "import_hub";
+    public const string Haulier = "haulier";
     public const string Institution = "institution";
     public const string Smeltery = "smeltery";
     public const string Sawmill = "sawmill";
@@ -110,7 +111,7 @@ public static class BusinessKinds
     public static readonly IReadOnlySet<string> Valid =
         new HashSet<string>(StringComparer.Ordinal)
         { FoodRetail, FoodProducer, ResourceProducer, GoodsRetail, Workshop,
-          ImportHub, Institution, Smeltery, Sawmill, Tannery,
+          ImportHub, Haulier, Institution, Smeltery, Sawmill, Tannery,
           Bakery, Brewery, Tailor, Hunter, Fishery, Leatherworker,
           GuardPost, CleaningService, DomesticService };
 }
@@ -324,6 +325,13 @@ public sealed class BusinessState
     public int WorkerCount { get; internal set; }
     public int CargoCapacity { get; internal set; }
     public long CargoHandled { get; internal set; }
+    internal int CargoHoursReservedToday { get; set; }
+    internal long LastCargoHandledAtDay { get; set; }
+    internal Queue<int> RecentCargoHandled { get; } = new();
+    internal int RecentCargoHandledTotal { get; set; }
+    public decimal FreightRevenue { get; internal set; }
+    public long FreightShipments { get; internal set; }
+    public long FreightUnitsTransported { get; internal set; }
 }
 
 public sealed record SettlementSettings
@@ -393,7 +401,10 @@ public sealed record SettlementSettings
     // evicted for lack of gold; beds and household stock remain physical.
     public int RentGoldReserve { get; init; } = 20;
     public int PortCargoUnitsPerWorkHour { get; init; } = 50;
+    public bool EnablePaidCarriers { get; init; } = true;
+    public int HaulierCargoUnitsPerWorkHour { get; init; } = 50;
     public int MaxPortCargoCapacity { get; init; } = 2000;
+    public int MaxHaulierCargoCapacity { get; init; } = 500;
     public int MaxFreightLoad { get; init; } = 40;
     public int ToolWorkHoursPerWear { get; init; } = 24;
     public int FirewoodDaysPerHousehold { get; init; } = 5;
@@ -429,7 +440,8 @@ public sealed record BusinessSnapshot(
     IReadOnlyDictionary<string,int>? CommodityInventory = null,
     int CapitalLevel=1,long CapitalInvestedMilli=0,
     decimal PublicPayrollGrants=0m,int PublicHoursBudgetToday=0,
-    int CasualHoursWorked=0);
+    int CasualHoursWorked=0,decimal FreightRevenue=0m,
+    long FreightShipments=0,long FreightUnitsTransported=0);
 
 public sealed record CapitalDecisionSnapshot(
     int Day,string BusinessId,string BusinessName,string Decision,
@@ -579,6 +591,10 @@ public sealed record SettlementReport
     public int MaterialsInTransit { get; init; }
     public int GoodsInTransit { get; init; }
     public decimal FreightFees { get; init; }
+    public decimal CarrierRevenue { get; init; }
+    public long PaidFreightShipments { get; init; }
+    public long CarrierCapacityHours { get; init; }
+    public long UnfulfilledFreightRequests { get; init; }
     public FreightRouteSnapshot[] FreightRoutes { get; init; } = [];
     public CommoditySnapshot[] CommodityDetails { get; init; } = [];
     public long RecipesCompleted { get; init; }

@@ -109,6 +109,7 @@ public sealed partial class SettlementWorld
                 Quantity(company.Stock,"game_meat")<cap,
             BusinessKinds.Fishery =>
                 company.LandYieldRemaining>0 && Quantity(company.Stock,"fish")<cap,
+            BusinessKinds.Haulier => CanScheduleCargoWork(company),
             BusinessKinds.Brewery or BusinessKinds.Tailor =>
                 CommodityRecipes.For(company).Any(r=>
                     RecipeAvailable(r,company.Stock,cap)),
@@ -125,7 +126,8 @@ public sealed partial class SettlementWorld
 
     private bool CanTakeCasualShift(BusinessState firm)
     {
-        if(!Detailed || !(OpenResourceJob(firm) || IsDetailedProcessor(firm)) ||
+        if(!Detailed || !(OpenResourceJob(firm) || IsDetailedProcessor(firm) ||
+            firm.Kind==BusinessKinds.Haulier) ||
             !CanCasualProduce(firm) || CasualRate<=0)return false;
         // Permanent staff have first claim on the day's planned work and
         // on the money needed to pay their minimum shifts.
@@ -145,7 +147,9 @@ public sealed partial class SettlementWorld
         return _businesses.Where(CanTakeCasualShift)
             .Select(b=>(Business:b,Minutes:JourneyDuration(person,b.Id)))
             .Where(x=>x.Minutes<=130)
-            .OrderBy(x=>x.Minutes)
+            .OrderBy(x=>x.Business.Kind==BusinessKinds.Haulier &&
+                RecentCarrierDemand()?0:1)
+            .ThenBy(x=>x.Minutes)
             .ThenBy(x=>StableRandom.Hash(person.Source.Id+x.Business.Id,
                 _settings.Seed))
             .Select(x=>x.Business).FirstOrDefault();

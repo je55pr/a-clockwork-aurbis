@@ -14,6 +14,9 @@ public sealed partial class SettlementWorld
             BusinessKinds.GoodsRetail)
             business.ServiceHoursReservedToday=Math.Max(0,
                 business.ServiceHoursReservedToday-1);
+        if(Detailed && business.Kind is BusinessKinds.ImportHub or BusinessKinds.Haulier)
+            business.CargoHoursReservedToday=Math.Max(0,
+                business.CargoHoursReservedToday-1);
         if(Detailed && _settings.EnableBudgetedPublicEmployment &&
            PublicEmployer(business))
             business.PublicHoursReservedToday=Math.Max(0,

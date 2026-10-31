@@ -45,6 +45,7 @@ var tests=new (string Name,Action Run)[]
     ("Permanent private hires require observed demand and cash runway", SustainablePrivateHiring),
     ("Unfunded processors may offer real casual manufacturing shifts", CasualProcessorWork),
     ("Brewing, tavern leisure and clothing form conserved economic activities", BrewingClothingAndTaverns),
+    ("Paid hauliers deliver only with real work and finite shipping capacity", PaidFreightCarriers),
     ("Autonomous fisher earns real income from catch and buyers", AutonomousFisher),
     ("Autonomous smith builds and equips a personally owned sword", AutonomousSmith),
     ("Concurrent personal gather requests reserve finite ore", AutonomousResourceReservation),
@@ -1946,4 +1947,97 @@ static void BrewingClothingAndTaverns()
     Expect(Item(disabled.Report(),"ale").Crafted==0 &&
         Item(disabled.Report(),"clothing").Crafted==0,
         "when real production is disabled neither industry creates goods");
+}
+
+static void PaidFreightCarriers()
+{
+    var original=CommodityFixture();
+    var market=original.Places.First(p=>p.Id=="b:market");
+    const string yard="sim:test:haulier";
+    var depot=new PlaceDefinition(yard,0,"Test haulage yard",
+        "simulation_inferred_haulier",market.Settlement,market.Zone,
+        BusinessKinds.Haulier,"",market.MapX,market.MapY,
+        "simulation_at_source_anchor",market.District);
+    var catalog=original with
+    {
+        Places=original.Places.Append(depot).ToArray(),
+        Businesses=original.Businesses.Append(
+            new BusinessDefinition(yard,BusinessKinds.Haulier,null,[],
+                "SIMULATION HYPOTHESIS for freight test")).ToArray(),
+        Residents=original.Residents.Select((r,i)=>i==0
+            ?r with{WorkPlaceId=yard,WorkEvidence="synthetic_fixture_job"}:r)
+            .ToArray()
+    };
+    var settings=new SettlementSettings
+    {
+        Seed=42,Economy=EconomyMode.CommodityProduction,
+        EnableEstablishedOpeningEconomy=true,
+        EnableExternalTrade=false
+    };
+    var economy=new SettlementWorld(catalog,settings);
+    economy.AdvanceTo(30L*1440);
+    economy.CheckInvariants();
+    var report=economy.Report();
+    CheckCommodityBalance(report);
+    Expect(report.PaidFreightShipments>0 &&
+        report.PaidFreightShipments==report.ShipmentsSent,
+        "all commodity shipments use paid carriers when haulage sites exist");
+    Expect(report.CarrierRevenue==report.FreightFees &&
+        report.CarrierRevenue==
+            economy.Businesses.Sum(b=>b.FreightRevenue),
+        "every freight fee is credited exactly once to an actual carrier");
+    Expect(economy.Businesses.Where(b=>b.Kind is
+        BusinessKinds.Haulier or BusinessKinds.ImportHub)
+        .Sum(b=>b.FreightUnitsTransported)==report.FreightUnitsDelivered,
+        "delivered quantities reconcile against carrier completed loads");
+    Expect(report.CarrierCapacityHours>0 &&
+        economy.Businesses.Where(b=>b.Kind==BusinessKinds.Haulier)
+            .Sum(b=>b.WagesPaid)>0,
+        "hauling requires real funded work and does not award free capacity");
+    Expect(report.AllAccountsGold==report.InitialAllAccountsGold,
+        "carrier fees circulate existing money without minting balances");
+
+    var haulier=economy.Businesses.Single(b=>b.Id==yard);
+    decimal firstMonthIncome=haulier.FreightRevenue;
+    int firstMonthHours=haulier.WorkHours;
+    economy.AdvanceTo(120L*1440);
+    economy.CheckInvariants();
+    Expect(haulier.FreightRevenue>firstMonthIncome &&
+        haulier.WorkHours>firstMonthHours,
+        "continuing freight demand sustains local delivery employment after start-up");
+
+    var noWorkers=new SettlementWorld(catalog,settings with
+    {
+        EnableLocalProduction=false,
+        PortCargoUnitsPerWorkHour=0,
+        HaulierCargoUnitsPerWorkHour=0
+    });
+    noWorkers.AdvanceTo(12L*1440);
+    noWorkers.CheckInvariants();
+    var blocked=noWorkers.Report();
+    Expect(blocked.ShipmentsSent==0 && blocked.CarrierRevenue==0 &&
+        blocked.UnfulfilledFreightRequests>0,
+        "without paid carrier capacity, freight cannot teleport for a public fee");
+
+    var oldEconomy=new SettlementWorld(original,settings with
+    {
+        EnableLocalProduction=false
+    });
+    oldEconomy.AdvanceTo(12L*1440);
+    oldEconomy.CheckInvariants();
+    var legacy=oldEconomy.Report();
+    Expect(legacy.ShipmentsSent>0 && legacy.CarrierRevenue==0 &&
+        legacy.FreightFees>0,
+        "settlements without hauliers retain explicitly legacy common carriers");
+
+    var optedOut=new SettlementWorld(catalog,settings with
+    {
+        EnablePaidCarriers=false,EnableLocalProduction=false
+    });
+    optedOut.AdvanceTo(12L*1440);
+    optedOut.CheckInvariants();
+    var fallback=optedOut.Report();
+    Expect(fallback.ShipmentsSent>0 && fallback.CarrierRevenue==0 &&
+        fallback.FreightFees>0,
+        "explicit carrier opt-out preserves legacy transport for comparisons");
 }

@@ -185,6 +185,9 @@ public sealed partial class SettlementWorld
             ShipmentsInTransit=_freight.Count,FreightUnitsDelivered=_freightUnitsDelivered,
             FoodInTransit=TransitCount("food"),MaterialsInTransit=TransitCount("materials"),
             GoodsInTransit=TransitCount("goods"),FreightFees=_freightFees,
+            CarrierRevenue=_carrierRevenue,PaidFreightShipments=_paidFreightShipments,
+            CarrierCapacityHours=_carrierCapacityHours,
+            UnfulfilledFreightRequests=_unfulfilledFreightRequests,
             FreightRoutes=_deliveredByRoute.OrderByDescending(x=>x.Value)
                 .ThenBy(x=>x.Key.From,StringComparer.Ordinal)
                 .ThenBy(x=>x.Key.To,StringComparer.Ordinal)
@@ -204,7 +207,8 @@ public sealed partial class SettlementWorld
                         StringComparer.Ordinal):null,
                     b.CapitalLevel,b.CapitalInvestedMilli,
                     b.PublicPayrollGrantsReceived,b.PublicHoursBudgetToday,
-                    b.CasualHoursWorked)).ToArray()
+                    b.CasualHoursWorked,b.FreightRevenue,b.FreightShipments,
+                    b.FreightUnitsTransported)).ToArray()
         };
     }
 
@@ -284,9 +288,26 @@ public sealed partial class SettlementWorld
         if (_freight.Any(s => s.Value.Quantity <= 0 || s.Value.ArriveMinute <= Minute) ||
             _shipmentsSent != _shipmentsDelivered + _freight.Count)
             throw new InvalidOperationException("Regional freight schedule invalid");
+        if(_paidFreightShipments!=_businesses.Sum(b=>b.FreightShipments) ||
+           _carrierRevenue!=_businesses.Sum(b=>b.FreightRevenue) ||
+           _paidFreightUnitsDelivered!=
+                _businesses.Sum(b=>b.FreightUnitsTransported))
+            throw new InvalidOperationException("Transport service ledger mismatch");
+        if(UsesPaidCarriers &&
+           (_carrierRevenue!=_freightFees ||
+            _paidFreightShipments!=_shipmentsSent))
+            throw new InvalidOperationException("Paid freight bypassed carrier accounts");
         foreach(var b in _businesses)
         {
-            if(b.Gold<0||b.Food<0||b.Materials<0||b.Goods<0||b.MineralReserve<0||b.LandYieldRemaining<0)
+            if(b.Gold<0||b.Food<0||b.Materials<0||b.Goods<0||
+               b.MineralReserve<0||b.LandYieldRemaining<0||
+               b.CargoCapacity<0||b.CargoHoursReservedToday<0||
+               b.FreightRevenue<0||b.FreightShipments<0||
+               b.FreightUnitsTransported<0||
+               b.Kind==BusinessKinds.Haulier &&
+                   b.CargoCapacity>_settings.MaxHaulierCargoCapacity||
+               b.Kind==BusinessKinds.ImportHub &&
+                   b.CargoCapacity>_settings.MaxPortCargoCapacity)
                 throw new InvalidOperationException("Invalid business account/stock: "+b.Id);
         }
     }

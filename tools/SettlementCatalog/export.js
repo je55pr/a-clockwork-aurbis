@@ -245,6 +245,11 @@ try{
      ['Vulkhel Guard','tailor','Clothier near Vulkhel Guard',null],
      ['Skywatch','tailor','Clothier near Skywatch',null],
      ['Firsthold','tailor','Clothier near Firsthold',null],
+     // Cargo capacity requires paid shift work and earns real freight revenue.
+     ['Vulkhel Guard','haulier','Haulage yard near Vulkhel Guard',null],
+     ['Skywatch','haulier','Haulage yard near Skywatch',null],
+     ['Firsthold','haulier','Haulage yard near Firsthold',null],
+     ['Phaer','haulier','Haulage yard near Phaer',null],
      ['Vulkhel Guard','food_producer','Simulated flax plots near Vulkhel Guard','flax'],
      ['Skywatch','food_producer','Simulated flax plots near Skywatch','flax'],
      ['Vulkhel Guard','bakery','Bakery near Vulkhel Guard',null],
