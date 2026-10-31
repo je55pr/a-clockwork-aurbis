@@ -11,6 +11,15 @@ public sealed partial class SettlementWorld
         int hours=actor.WorkRemainderMinutes/60;
         actor.WorkRemainderMinutes%=60;
         if(hours<=0)return;
+        if(Detailed && PlansProduction(business))
+        {
+            int allowed=Math.Max(0,business.PlannedHours-business.PlannedHoursWorked);
+            int excess=Math.Max(0,hours-allowed);
+            hours=Math.Min(hours,allowed);
+            _idleProductionHoursAvoided+=excess;
+            business.PlannedHoursWorked+=hours;
+            if(hours==0)return;
+        }
         if(Detailed && business.Kind is BusinessKinds.FoodRetail or
             BusinessKinds.GoodsRetail)
         {

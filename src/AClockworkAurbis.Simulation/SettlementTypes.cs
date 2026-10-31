@@ -232,6 +232,15 @@ public sealed class BusinessState
         new(StringComparer.Ordinal);
     internal Dictionary<string,long> SoldBySku { get; } =
         new(StringComparer.Ordinal);
+    internal Dictionary<string,long> LastPlannedSales { get; } =
+        new(StringComparer.Ordinal);
+    internal Dictionary<string,decimal> RecentDemand { get; } =
+        new(StringComparer.Ordinal);
+    public string? PlannedProduct { get; internal set; }
+    public decimal PlannedMargin { get; internal set; }
+    public int PlannedHours { get; internal set; } = 8;
+    internal int PlannedHoursWorked { get; set; }
+    internal int LastPlannedDay { get; set; } = -1;
     public int ToolWearHours { get; internal set; }
     public decimal WagesPaid { get; internal set; }
     public decimal RetailRevenue { get; internal set; }
@@ -326,6 +335,10 @@ public sealed record BusinessSnapshot(
     decimal DividendsPaid,
     int CargoCapacity = 0, long CargoHandled = 0,
     IReadOnlyDictionary<string,int>? CommodityInventory = null);
+
+public sealed record BusinessPlanSnapshot(
+    string BusinessId,string BusinessName,int Day,string? Product,
+    int BudgetedHours,decimal EstimatedBatchMargin,string Reason);
 
 public sealed record MarketQuoteSnapshot(
     string BusinessId,string BusinessName,string BusinessKind,
@@ -449,6 +462,10 @@ public sealed record SettlementReport
     public long MarketRetailCostMilli { get; init; }
     public long UnfilledCommodityOrderUnits { get; init; }
     public long MarketTrades { get; init; }
+    public long BusinessPlansMade { get; init; }
+    public long BusinessPlansRevised { get; init; }
+    public long LossMakingPlans { get; init; }
+    public BusinessPlanSnapshot[] BusinessPlans { get; init; } = [];
     public MarketQuoteSnapshot[] MarketQuotes { get; init; } = [];
     public decimal ScarcityPricePremiumGold { get; init; }
     public decimal SurplusPriceDiscountGold { get; init; }

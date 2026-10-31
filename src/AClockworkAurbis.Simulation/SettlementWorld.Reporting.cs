@@ -100,6 +100,10 @@ public sealed partial class SettlementWorld
             MarketRetailCostMilli=_marketRetailCostsMilli,
             UnfilledCommodityOrderUnits=_unfilledOrders,
             MarketTrades=_marketTradeCount,
+            BusinessPlansMade=_plansMade,
+            BusinessPlansRevised=_plansRevised,
+            LossMakingPlans=_unprofitablePlans,
+            BusinessPlans=Detailed?BusinessPlans().ToArray():[],
             MarketQuotes=Detailed?_businesses
                 .OrderBy(b=>b.Id,StringComparer.Ordinal)
                 .SelectMany(b=>b.Stock.OrderBy(s=>s.Key,StringComparer.Ordinal)

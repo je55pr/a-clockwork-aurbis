@@ -199,9 +199,9 @@ public sealed partial class SettlementWorld
             var available=CookableProfessionalRecipes(worker)
                 .Where(r=>RecipeAvailable(r,workplace.Stock,
                     _settings.MaxCommodityStockPerSite,numerator,2))
-                .OrderBy(r=>r.Products.Sum(p=>Quantity(workplace.Stock,p.Key)))
-                .ThenBy(r=>StableRandom.Hash(r.Id,
-                    unchecked(_settings.Seed+(int)(Minute/DayMinutes))))
+                .OrderByDescending(r=>r.Id==workplace.PlannedProduct)
+                .ThenByDescending(r=>ExpectedRecipeMargin(workplace,r,numerator,2))
+                .ThenBy(r=>r.Id,StringComparer.Ordinal)
                 .ToArray();
             if(available.Length==0)break;
             var recipe=available[0];

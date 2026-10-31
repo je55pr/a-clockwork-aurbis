@@ -134,6 +134,8 @@ public sealed partial class SettlementWorld
 
     private bool CanScheduleCommodityWork(ResidentState worker,BusinessState company)
     {
+        if(PlansProduction(company) &&
+           company.PlannedHoursWorked>=company.PlannedHours)return false;
         if(!_settings.EnableLocalProduction &&
            company.Kind is not (BusinessKinds.FoodRetail or
                BusinessKinds.GoodsRetail or BusinessKinds.Institution or
@@ -186,11 +188,11 @@ public sealed partial class SettlementWorld
                 var crops=CropMix(company);
                 for(int n=0;n<hours && company.LandYieldRemaining>0;n++)
                 {
-                    int start=(company.WorkHours-hours+n)%crops.Length;
-                    string? crop=Enumerable.Range(0,crops.Length)
-                        .Select(offset=>crops[(start+offset)%crops.Length])
-                        .FirstOrDefault(c=>Quantity(company.Stock,c)<
-                            _settings.MaxCommodityStockPerSite);
+                    string? crop=company.PlannedProduct is string preferred &&
+                        crops.Contains(preferred,StringComparer.Ordinal) &&
+                        Quantity(company.Stock,preferred)<
+                            _settings.MaxCommodityStockPerSite
+                        ?preferred:PreferredCrop(company);
                     if(crop is null)break;
                     int capacity=_settings.MaxCommodityStockPerSite-
                         Quantity(company.Stock,crop);
@@ -270,15 +272,11 @@ public sealed partial class SettlementWorld
                 for(int n=0;n<hours;n++)
                 {
                     var available=CommodityRecipes.For(company)
-                        .Where(r=>r.Ingredients.All(input=>
-                            Quantity(company.Stock,input.Key)>=input.Value) &&
-                            r.Products.All(output=>
-                                Quantity(company.Stock,output.Key)+output.Value<=
-                                _settings.MaxCommodityStockPerSite))
-                        .OrderBy(r=>r.Products.Sum(p=>
-                            Quantity(company.Stock,p.Key)))
-                        .ThenBy(r=>StableRandom.Hash(r.Id,
-                            unchecked(_settings.Seed+(int)(Minute/DayMinutes))))
+                        .Where(r=>RecipeAvailable(r,company.Stock,
+                            _settings.MaxCommodityStockPerSite))
+                        .OrderByDescending(r=>r.Id==company.PlannedProduct)
+                        .ThenByDescending(r=>ExpectedRecipeMargin(company,r))
+                        .ThenBy(r=>r.Id,StringComparer.Ordinal)
                         .ToArray();
                     if(available.Length==0)break;
                     var recipe=available[0];
@@ -371,6 +369,7 @@ public sealed partial class SettlementWorld
                 _goodsUsed++;
             }
 
+        PlanMarketDay();
         CommodityWholesaleDay();
     }
 
@@ -468,7 +467,8 @@ public sealed partial class SettlementWorld
         // line; it competes ahead of retailers filling optional inventories.
         // All ties rotate deterministically by day and seed.
         var orders=_businesses.SelectMany(b=>CommodityOrders(b)
-            .Select(o=>(Buyer:b,Sku:o.Sku,Target:o.Target)))
+            .Select(o=>(Buyer:b,Sku:o.Sku,
+                Target:MarketTarget(b,o.Sku,o.Target))))
             .OrderBy(o=>CommodityOrderPriority(o.Buyer,o.Sku))
             .ThenBy(o=>StableRandom.Hash(o.Buyer.Id+o.Sku,
                 unchecked(_settings.Seed+day))).ToArray();
@@ -556,7 +556,12 @@ public sealed partial class SettlementWorld
                 _shipmentsSent++;
                 need-=units;
             }
-            if(need>0)_unfilledOrders+=need;
+            if(need>0)
+            {
+                _unfilledOrders+=need;
+                _unfilledMarketOrders[sku]=checked(
+                    _unfilledMarketOrders.GetValueOrDefault(sku)+need);
+            }
         }
     }
 

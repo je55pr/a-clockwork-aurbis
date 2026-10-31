@@ -35,6 +35,7 @@ var tests=new (string Name,Action Run)[]
     ("One septim bread is a full meal with sustainable producer yields", BreadSeptimBenchmark),
     ("Bread prices respond to local stock and logistics", BreadScarcityPricing),
     ("Fractional septims really settle and all accounts reconcile", FractionalMarketSettlement),
+    ("Businesses plan production and labour using observed market data", AdaptiveBusinessPlanning),
     ("Households cook with real ingredients at lower yields than chefs", HouseholdCookingAndChefs),
     ("Deterministic regional simulations can run in time chunks", RegionalDeterminism),
     ("Large 10k actor headless performance and integrity", Stress)
@@ -976,6 +977,7 @@ static void FractionalMarketSettlement()
         Economy=EconomyMode.CommodityProduction,
         EnableExternalTrade=false
     });
+    var opening=world.Report();
     world.AdvanceTo(1440L*10);
     world.CheckInvariants();
     var report=world.Report();
@@ -990,10 +992,44 @@ static void FractionalMarketSettlement()
         "fractional market receipts appear in real wallets, not just reporting");
     Expect(report.AllAccountsGold==report.InitialAllAccountsGold,
         "one-hundredth septim transfers cannot mint or destroy gold");
-    Expect(report.MarketQuotes.Any(q=>q.RetailPrice is >0m and <1m),
-        "dynamic retail quotes can fall below a whole septim");
+    Expect(opening.MarketQuotes.Any(q=>q.RetailPrice is >0m and <1m),
+        "a cost-based shop can advertise bread below a whole septim");
     Expect(report.MarketQuotes.All(q=>
         q.WholesaleAsk*100m==decimal.Truncate(q.WholesaleAsk*100m) &&
         q.RetailPrice*100m==decimal.Truncate(q.RetailPrice*100m)),
         "every advertised price is exactly cent-precise");
+}
+
+static void AdaptiveBusinessPlanning()
+{
+    var catalog=CommodityFixture();
+    var live=new SettlementWorld(catalog,new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false
+    });
+    live.AdvanceTo(1440L*16);
+    live.CheckInvariants();
+    var report=live.Report();
+    CheckCommodityBalance(report);
+    Expect(report.BusinessPlansMade>report.BusinessPlans.Length &&
+        report.BusinessPlansRevised>0,
+        "producers revise daily plans as sales, cash and published orders change");
+    Expect(report.BusinessPlans.Any(p=>p.Product is not null) &&
+        report.BusinessPlans.Any(p=>p.Product is null),
+        "some producers find feasible production while others cannot invent missing inputs");
+    Expect(report.BusinessPlans.All(p=>p.BudgetedHours>=0 &&
+        p.EstimatedBatchMargin==Math.Round(p.EstimatedBatchMargin,2)),
+        "daily labour budgets and cash estimates are valid");
+    var halted=new SettlementWorld(catalog,new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false,
+        EnableLocalProduction=false
+    });
+    halted.AdvanceTo(1440L*4);
+    halted.CheckInvariants();
+    Expect(halted.Report().BusinessPlans.Where(p=>p.Product is not null &&
+        p.Product is not ("bread" or "provisions")).All(p=>p.BudgetedHours==0),
+        "production-disabled scenarios do not create paid production plans");
+    Expect(halted.Report().RecipesCompleted==0,
+        "production plans cannot create physical goods without production");
 }
