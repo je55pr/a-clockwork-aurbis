@@ -34,6 +34,7 @@ public partial class NpcHoverInspector : CanvasLayer
     private bool _pinned;
     private bool _showArticle;
     private bool _enabled = true;
+    private bool _firstPersonAim;
     private bool _testHold;
     private NpcHoverDetails.Card _card;
     private Vector2 _lastCursor;
@@ -185,6 +186,14 @@ public partial class NpcHoverInspector : CanvasLayer
         Clear();
     }
 
+    // The first-person camera aims through the centre of the viewport while
+    // the operating-system cursor is captured and cannot hover a mannequin.
+    public void SetFirstPersonAim(bool enabled)
+    {
+        _firstPersonAim = enabled;
+        if (!enabled) Clear();
+    }
+
     public void SetEnabled(bool enabled)
     {
         _enabled = enabled;
@@ -200,8 +209,9 @@ public partial class NpcHoverInspector : CanvasLayer
             return;
         }
 
-        // The cursor is not a stable screen point during right-mouse free look.
-        if (Input.MouseMode != Input.MouseModeEnum.Visible)
+        // Captured first-person mouse input aims along the camera's centre ray.
+        // The ordinary free-camera inspector continues to follow the cursor.
+        if (!_firstPersonAim && Input.MouseMode != Input.MouseModeEnum.Visible)
         {
             Clear();
             return;
@@ -215,8 +225,8 @@ public partial class NpcHoverInspector : CanvasLayer
             return;
         }
 
-        Vector2 mouse = GetViewport().GetMousePosition();
         Vector2 size = GetViewport().GetVisibleRect().Size;
+        Vector2 mouse = _firstPersonAim ? size * 0.5f : GetViewport().GetMousePosition();
         if (mouse.X < 0 || mouse.Y < 0 || mouse.X >= size.X || mouse.Y >= size.Y)
         {
             Clear();
@@ -299,6 +309,18 @@ public partial class NpcHoverInspector : CanvasLayer
                     "No individual NPC source record was collected for it.\n" +
                     $"Preview district: {placement.Place}",
                     null, null);
+            if(_firstPersonAim && EsoHumanoidVisualLayer.CanUseHumanoidBody(placement.Race))
+            {
+                _people.TryGetValue(placement.Id,out var profile);
+                int kit=EsoHumanoidWardrobe.Choose(placement.Id,profile);
+                int hair=(PopulationSpawnPlanner.StableHash(placement.Id+":hair-model")/127)%4;
+                int armourStyle=EsoHumanoidWardrobe.ArmourStyle(placement.Id);
+                string detail=kit==2 && armourStyle<EsoHumanoidWardrobe.AccessoryStyles.Length
+                    ? EsoHumanoidWardrobe.AccessoryStyles[armourStyle]+" source helmet/shoulders"
+                    : "hairstyle "+(hair+1);
+                _card=_card with { Body=$"VISUAL TEST ONLY: {EsoHumanoidWardrobe.KitNames[kit]} / {detail}. " +
+                    "This is not documented ESO gear or appearance.\n\n"+_card.Body };
+            }
             _cache[placement.Id] = _card;
         }
 
@@ -306,7 +328,9 @@ public partial class NpcHoverInspector : CanvasLayer
         _subtitle.Text = _card.Subtitle;
         _content.Text = _card.Body;
         _scroller.ScrollVertical = 0;
-        _hint.Text = "Click the NPC to pin, then scroll for all collected details.";
+        _hint.Text = _firstPersonAim
+            ? "Look away to dismiss. Esc releases the cursor; click to recapture."
+            : "Click the NPC to pin, then scroll for all collected details.";
         SetInteractive(false);
         _panel.Visible = true;
         PositionNearCursor(cursor);
@@ -374,7 +398,7 @@ public partial class NpcHoverInspector : CanvasLayer
             return;
         }
 
-        if (@event is not InputEventMouseButton button ||
+        if (_firstPersonAim || @event is not InputEventMouseButton button ||
             button.ButtonIndex != MouseButton.Left || !button.Pressed)
             return;
 

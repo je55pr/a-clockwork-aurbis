@@ -1,4 +1,6 @@
 .godot/
+# Godot generates these for every C# file during an editor scan.
+*.cs.uid
 bin/
 obj/
 .research/

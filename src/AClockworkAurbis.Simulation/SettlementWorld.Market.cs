@@ -68,7 +68,8 @@ public sealed partial class SettlementWorld
     }
 
     private void CraftMarketRecipe(BusinessState firm,CommodityRecipe recipe,
-        int multiplierNumerator,int multiplierDenominator,int paidHours)
+        int multiplierNumerator,int multiplierDenominator,int paidHours,
+        int? paidWagePerHour=null)
     {
         long ingredients=0;
         foreach(var (sku,amount) in recipe.Ingredients)
@@ -76,7 +77,8 @@ public sealed partial class SettlementWorld
             ingredients=checked(ingredients+WithdrawInventoryValue(firm,sku,amount));
             UseIngredient(firm.Stock,sku,amount);
         }
-        long totalCost=checked(ingredients+(long)paidHours*_settings.HourlyWage*Milli);
+        long totalCost=checked(ingredients+
+            (long)paidHours*(paidWagePerHour??_settings.HourlyWage)*Milli);
         int outputUnits=recipe.Products.Sum(x=>checked(
             x.Value*multiplierNumerator/multiplierDenominator));
         long remaining=totalCost;
@@ -158,6 +160,7 @@ public sealed partial class SettlementWorld
         {
             _marketWholesaleRevenue+=saleGold;
             _marketWholesaleCostsMilli+=originalCostMilli;
+            business.WholesaleCostOfGoodsMilli+=originalCostMilli;
         }
         else
         {

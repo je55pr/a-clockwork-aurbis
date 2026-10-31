@@ -82,9 +82,31 @@ public sealed class SourceGeometryRaycaster
             if (count <= 18) return node;
             Vector3 span = max - min;
             int axis = span.X > span.Y && span.X > span.Z ? 0 : span.Y > span.Z ? 1 : 2;
-            Array.Sort(Ordered, first, count, Comparer<int>.Create((a, b) =>
-                Component(Faces[a].Centroid, axis).CompareTo(Component(Faces[b].Centroid, axis))));
-            int n = count / 2;
+            // A full sort at every BVH level requires O(n log^2 n) work
+            // across the million-plus triangles in the town scenery.
+            // Spatial midpoint partitioning is O(n) at each level while
+            // preserving every triangle, with a median fallback if nearly
+            // all centroids fall on one side (avoids pathological depth).
+            float mid = Component(min,axis)+Component(span,axis)*0.5f;
+            int left=first,right=first+count-1;
+            while(left<=right)
+            {
+                if(Component(Faces[Ordered[left]].Centroid,axis)<mid)
+                    left++;
+                else
+                {
+                    (Ordered[left],Ordered[right])=(Ordered[right],Ordered[left]);
+                    right--;
+                }
+            }
+            int n=left-first;
+            if(n<=count/8 || n>=count-count/8)
+            {
+                Array.Sort(Ordered,first,count,Comparer<int>.Create((a,b)=>
+                    Component(Faces[a].Centroid,axis).CompareTo(
+                        Component(Faces[b].Centroid,axis))));
+                n=count/2;
+            }
             node.Left = Build(first, n);
             node.Right = Build(first + n, count - n);
             return node;

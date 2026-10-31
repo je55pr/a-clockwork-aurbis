@@ -1,0 +1,37 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/first_person_controller.gd" id="1_player"]
+
+[sub_resource type="CapsuleShape3D" id="Capsule_player"]
+radius = 0.34
+height = 1.75
+
+[node name="FirstPersonPlayer" type="CharacterBody3D"]
+script = ExtResource("1_player")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+position = Vector3(0, 0.875, 0)
+shape = SubResource("Capsule_player")
+
+[node name="Head" type="Node3D" parent="."]
+position = Vector3(0, 1.57, 0)
+
+[node name="Camera3D" type="Camera3D" parent="Head"]
+current = true
+near = 0.03
+far = 50000.0
+
+[node name="Hud" type="CanvasLayer" parent="."]
+
+[node name="Crosshair" type="Label" parent="Hud"]
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -9.0
+offset_top = -16.0
+offset_right = 10.0
+offset_bottom = 16.0
+mouse_filter = 2
+theme_override_font_sizes/font_size = 24
+text = "+"

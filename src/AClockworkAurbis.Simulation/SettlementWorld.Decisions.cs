@@ -4,6 +4,7 @@ public sealed partial class SettlementWorld
 {
     private void Decide(int index,ResidentState actor)
     {
+        if(TryAdvanceCourier(index,actor))return;
         int localMinute=(int)(Minute%DayMinutes);
         int hour=localMinute/60;
         bool night=hour>=22||hour<6;
@@ -69,7 +70,10 @@ public sealed partial class SettlementWorld
 
         // Explicitly requested work for personal ownership takes precedence
         // over employment; the request is still subject to travel and time.
-        if(Detailed && SchedulePersonalTask(index,actor))return;
+        if(Detailed &&
+           (!_personalTasks.TryGetValue(actor.Source.Id,out var personalTask) ||
+            !personalTask.Autonomous) &&
+           SchedulePersonalTask(index,actor))return;
 
         if(actor.WorkId is not null &&
            localMinute>=actor.WorkStart*60&&
@@ -78,7 +82,9 @@ public sealed partial class SettlementWorld
         {
             if(Detailed && _byBusiness.TryGetValue(actor.WorkId,out var employer))
             {
-                if(employer.Gold<_settings.HourlyWage)
+                if(employer.Gold<_settings.HourlyWage &&
+                   !(_settings.EnableBudgetedPublicEmployment &&
+                     PublicEmployer(employer)))
                 {
                     FurloughForInsolvency(actor,employer);
                     Enqueue(index,60,SettlementAction.Idle);
@@ -96,9 +102,15 @@ public sealed partial class SettlementWorld
             else
             {
                 int untilShiftEnds=(actor.WorkStart+8)*60-localMinute;
-                if(Detailed && _byBusiness.TryGetValue(actor.WorkId,out var shop) &&
-                   shop.Kind is BusinessKinds.FoodRetail or BusinessKinds.GoodsRetail)
-                    shop.ServiceHoursReservedToday++;
+                if(Detailed && _byBusiness.TryGetValue(actor.WorkId,out var shop))
+                {
+                    if(shop.Kind is BusinessKinds.FoodRetail or BusinessKinds.GoodsRetail)
+                        shop.ServiceHoursReservedToday++;
+                    if(Detailed && shop.Kind is BusinessKinds.ImportHub or BusinessKinds.Haulier)
+                        shop.CargoHoursReservedToday++;
+                    if(_settings.EnableBudgetedPublicEmployment && PublicEmployer(shop))
+                        shop.PublicHoursReservedToday++;
+                }
                 Enqueue(index,Math.Min(60,untilShiftEnds),SettlementAction.Work);
                 Observe(actor,"work",DisplayPlace(actor.WorkId));
             }
@@ -108,8 +120,15 @@ public sealed partial class SettlementWorld
         // Casual paid extraction is available without a permanent contract.
         // Full-time shifts above always take priority. NPCs seek extra work
         // when low on cash; the site still needs resources and payroll.
-        if(Detailed && hour>=10 && hour<18 && actor.Gold<12 &&
+        if(Detailed && hour>=10 && hour<18 &&
+           (actor.Gold<12 || actor.WorkId is null && actor.Gold<50 &&
+               RecentCarrierDemand()) &&
            actor.Energy>=20 && TryCasualShift(index,actor))return;
+
+        // Autonomously chosen personal jobs cannot displace a guaranteed
+        // employment shift; explicit player-directed actions still can.
+        if(Detailed && SchedulePersonalTask(index,actor))return;
+        if(Detailed && TryAutonomousAction(index,actor))return;
 
         // Household tool/general-goods purchases are deliberately modest.
         // We do not assert which specific TES items residents need yet.
@@ -129,6 +148,9 @@ public sealed partial class SettlementWorld
             }
         }
 
+        if(Detailed && hour>=17 && hour<21 &&
+           TryVisitTavern(index,actor))return;
+
         if(actor.CurrentPlaceId!=actor.HomeId &&
            (hour>=18||actor.Energy<28||actor.WorkId is null))
         {
@@ -145,6 +167,8 @@ public sealed partial class SettlementWorld
 
     private BusinessState? ChooseShop(ResidentState actor,bool food)
     {
+        if(food && Detailed && _settings.EnableRiskAwareChoices)
+            return ChooseRiskAwareMealShop(actor);
         BusinessState? best=null;
         decimal lowest=decimal.MaxValue;
         // Chef staffing changes over time; don't cache which shops can
@@ -165,7 +189,8 @@ public sealed partial class SettlementWorld
                     continue;
             }
             else if(shop.Kind is not (BusinessKinds.GoodsRetail or BusinessKinds.Workshop
-                    or BusinessKinds.Sawmill or BusinessKinds.Leatherworker) ||
+                    or BusinessKinds.Sawmill or BusinessKinds.Leatherworker or
+                    BusinessKinds.Tailor) ||
                     (Detailed?NeededSupplyAtShop(actor,shop) is not string sku ||
                         HouseholdGoodsQuote(shop,sku)>actor.Gold:
                         shop.Goods<1))continue;

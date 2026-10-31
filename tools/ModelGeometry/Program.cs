@@ -5,6 +5,21 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using EsoTest;
 
+if(args.Length>0 && args[0]=="--sample-animation")
+    return GrannyClipSamples.Run(args.Skip(1).ToArray());
+
+if(args.Length>0 && args[0]=="--scan-animation-names")
+    return AnimationCatalogue.Run(args.Skip(1).ToArray());
+
+if(args.Length>0 && args[0]=="--index-anft")
+    return AnftFileTable.Run(args.Skip(1).ToArray());
+
+if(args.Length>0 && args[0]=="--index-zosft")
+    return ZosftFileTable.Run(args.Skip(1).ToArray());
+
+if(args.Length>0 && args[0] is "--inspect-animation" or "--inspect-rig")
+    return AnimationSurvey.Run(args.Skip(1).ToArray(),args[0]=="--inspect-rig");
+
 if(args.Length<2||args.Contains("--help"))
 {
  Console.WriteLine("Usage: ModelGeometry <granny-dll> <hex-resource-id> [output-file] [manifest] [oodle-dll]");

@@ -64,8 +64,9 @@ public static class AuridonPreview
             }
         }
         mapRoot.AddChild(new AuridonPopulationOverlay {Name="PopulationMapDots"});
+        mapRoot.AddChild(new AuridonCourierOverlay {Name="CourierJourneyReplay"});
         detail.Text += $" ({loaded}/4 tiles loaded)";
-        var annotation=new Label {Text="Gold = named source-place anchor. Positions approximate, not NPC coordinates."};
+        var annotation=new Label {Text="Gold = source-place anchor; teal = simulated courier routes. Straight lines are not ESO roads."};
         annotation.AddThemeFontSizeOverride("font_size",11);
         container.AddChild(annotation);
         return container;

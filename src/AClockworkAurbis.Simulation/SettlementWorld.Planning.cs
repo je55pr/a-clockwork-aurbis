@@ -20,6 +20,7 @@ public sealed partial class SettlementWorld
         business.Kind is BusinessKinds.FoodProducer or
             BusinessKinds.ResourceProducer or BusinessKinds.Hunter or
             BusinessKinds.Fishery or BusinessKinds.Bakery or
+            BusinessKinds.Brewery or BusinessKinds.Tailor or
             BusinessKinds.Smeltery or BusinessKinds.Sawmill or
             BusinessKinds.Tannery or BusinessKinds.Workshop or
             BusinessKinds.Leatherworker;
@@ -301,6 +302,12 @@ public sealed partial class SettlementWorld
 
     private int MarketTarget(BusinessState firm,string sku,int baseline)
     {
+        // A tailor makes its own cloth before sewing garments. If we only
+        // order ingredients of today's highest-margin recipe (sewing), flax
+        // purchases stop and the entire production chain eventually freezes.
+        // Retain a bounded supply of both upstream and final ingredients.
+        if(firm.Kind==BusinessKinds.Tailor && sku is "flax" or "leather")
+            return Math.Min(18,_settings.MaxCommodityStockPerSite);
         if(firm.Kind is BusinessKinds.FoodRetail or BusinessKinds.GoodsRetail)
             return PlannedTarget(firm,sku,baseline);
 

@@ -39,6 +39,18 @@ var tests=new (string Name,Action Run)[]
     ("Cancelled personal actions cannot duplicate or shortcut gathering", PersonalCancellationAndExhaustion),
     ("Commodity-market tax rates are configurable and cannot mint gold", ConfigurableDetailedTaxes),
     ("Crop failure blocks harvesting but not existing personal trade", PersonalTradeDuringCropFailure),
+    ("Deterministic risk tolerance explores plausible alternatives", RiskChoices),
+    ("Established opening endowments are finite, diverse and conserved", EstablishedOpening),
+    ("Public payroll is allocated fairly without minting or phantom contracts", PublicPayrollBudget),
+    ("Permanent private hires require observed demand and cash runway", SustainablePrivateHiring),
+    ("Unfunded processors may offer real casual manufacturing shifts", CasualProcessorWork),
+    ("Casual manufacturing uses paid wage cost and worker-specific preflight", CasualManufacturingCosts),
+    ("Brewing, tavern leisure and clothing form conserved economic activities", BrewingClothingAndTaverns),
+    ("Paid hauliers deliver only with real work and finite shipping capacity", PaidFreightCarriers),
+    ("Named couriers actually carry freight and settle wage escrow on delivery", NpcCourierJourneys),
+    ("Autonomous fisher earns real income from catch and buyers", AutonomousFisher),
+    ("Autonomous smith builds and equips a personally owned sword", AutonomousSmith),
+    ("Concurrent personal gather requests reserve finite ore", AutonomousResourceReservation),
     ("One septim bread is a full meal with sustainable producer yields", BreadSeptimBenchmark),
     ("Bread prices respond to local stock and logistics", BreadScarcityPricing),
     ("Fractional septims really settle and all accounts reconcile", FractionalMarketSettlement),
@@ -1087,7 +1099,8 @@ static void PersonalOwnershipAndSword()
         Economy=EconomyMode.CommodityProduction,
         EnableExternalTrade=false,EnablePublicAssistance=false,
         EnableHousing=false,ToolWorkHoursPerWear=24,
-        OpenOrePerResident=8,FirewoodDaysPerHousehold=100
+        OpenOrePerResident=8,FirewoodDaysPerHousehold=100,
+        AutonomousParticipationPercent=0
     };
     var world=new SettlementWorld(catalog,settings);
     var person=world.Residents.Single(r=>r.Source.Id==id);
@@ -1177,7 +1190,8 @@ static void PersonalCancellationAndExhaustion()
     {
         Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false,
         EnableHousing=false,OpenOrePerResident=0,
-        OpenFishPerResidentPerDay=1
+        OpenFishPerResidentPerDay=1,
+        AutonomousParticipationPercent=0
     };
     var world=new SettlementWorld(catalog,settings);
     var person=world.Residents.Single(p=>p.Source.Id==id);
@@ -1255,6 +1269,130 @@ static void PersonalTradeDuringCropFailure()
     CheckCommodityBalance(report);
     Expect(report.PersonalTrades==1 && report.AllAccountsGold==report.InitialAllAccountsGold,
         "actual purchase settles despite production closure with balanced accounts");
+}
+
+static SettlementCatalog AutonomousFixture(string profession,bool tools)
+{
+    var source=CommodityFixture();
+    var who=source.Residents.OrderBy(r=>r.Id,StringComparer.Ordinal).First();
+    var items=new Dictionary<string,int> {["provisions"]=60};
+    if(tools){items["pickaxe"]=1;items["felling_axe"]=1;}
+    return source with
+    {
+        Places=source.Places.Select(p=>p with
+        { MapX=10000,MapY=10000,District="Exampleton" }).ToArray(),
+        Residents=[who with
+        {
+            Profession=profession,WorkPlaceId=null,WorkEvidence="none",
+            HomePlaceId="home:1",HomeEvidence="test_explicit",
+            AnchorPlaceId="home:1",AnchorEvidence="test",
+            SimulatedStartingItems=items
+        }]
+    };
+}
+
+static SettlementSettings AutonomousFixtureSettings(int participation=100) => new()
+{
+    Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false,
+    EnablePublicAssistance=false,EnableHousing=false,
+    AutonomousParticipationPercent=participation,
+    AutonomousDailyActionLimit=3,AutonomousMaxTravelMinutes=200,
+    ToolWorkHoursPerWear=100,FirewoodDaysPerHousehold=100,
+    OpenOrePerResident=8
+};
+
+static void AutonomousFisher()
+{
+    var cat=AutonomousFixture("Fisher",tools:false);
+    var world=new SettlementWorld(cat,AutonomousFixtureSettings());
+    var decisions=new List<SimObservation>();
+    world.Observer=o=>{if(o.Action.StartsWith("autonomous_",StringComparison.Ordinal) ||
+        o.Action is "personal_gather" or "personal_sell")decisions.Add(o);};
+    world.AdvanceTo(21L*1440);
+    world.CheckInvariants();
+    var r=world.Report();
+    CheckCommodityBalance(r);
+    var fisher=world.Residents.Single();
+    Expect(fisher.AutonomousGoal=="fish" && fisher.AutonomousChoices>=2 &&
+        fisher.PersonalGathered>0 && fisher.PersonalSaleIncome>0,
+        "an unemployed fisher should gather, keep, then sell real fish stock: "+
+        string.Join(" | ",decisions.Take(14).Select(x=>x.Action+":"+x.Detail)));
+    Expect(r.AutonomousCompleted>0 && r.AutonomousParticipants==1 &&
+        r.AutonomousActivities.Sum(a=>a.Chosen)==r.AutonomousChoices &&
+        r.AutonomousActivities.Sum(a=>a.Completed)==r.AutonomousCompleted &&
+        r.AutonomousCompleted+r.AutonomousFailed<=r.AutonomousChoices &&
+        r.AllAccountsGold==r.InitialAllAccountsGold,
+        "decision outcomes and cash transfers must reconcile");
+    Expect(decisions.Any(x=>x.Action=="autonomous_decision" &&
+        x.Detail.Contains("buyer has funded demand",StringComparison.Ordinal)),
+        "fishing sale decision explains its funded buyer");
+
+    var off=new SettlementWorld(cat,AutonomousFixtureSettings(0));
+    off.AdvanceTo(21L*1440);
+    off.CheckInvariants();
+    CheckCommodityBalance(off.Report());
+    Expect(off.Report().AutonomousChoices==0 && off.Report().AutonomousParticipants==0,
+        "setting participation to zero fully disables independent AI choices");
+    var replay=new SettlementWorld(cat,AutonomousFixtureSettings());
+    replay.AdvanceTo(21L*1440);
+    replay.CheckInvariants();
+    Expect(replay.Report().AutonomousChoices==r.AutonomousChoices &&
+        replay.Report().AutonomousCompleted==r.AutonomousCompleted &&
+        replay.Report().PersonalSaleIncome==r.PersonalSaleIncome,
+        "personal planning must reproduce exact outcomes for identical seeds");
+}
+
+static void AutonomousSmith()
+{
+    var cat=AutonomousFixture("Swordsmith",tools:true);
+    var world=new SettlementWorld(cat,AutonomousFixtureSettings());
+    var decisions=new List<SimObservation>();
+    world.Observer=o=>{if(o.Action.StartsWith("autonomous_",StringComparison.Ordinal) ||
+        o.Action=="personal_craft")decisions.Add(o);};
+    world.AdvanceTo(35L*1440);
+    world.CheckInvariants();
+    CheckCommodityBalance(world.Report());
+    var actor=world.Residents.Single();
+    Expect(actor.EquippedWeaponSku=="iron_sword" &&
+        actor.CommodityStock.GetValueOrDefault("iron_sword")==1 &&
+        actor.PersonalCrafts>=3,
+        "swordsmith should gather two resources, saw, smelt, forge and equip: "+
+        string.Join(" | ",decisions.Take(24).Select(x=>x.Action+":"+x.Detail)));
+    Expect(decisions.Any(x=>x.Action=="autonomous_goal" &&
+        x.Detail.Contains("equipped personally forged iron sword")),
+        "the planner explains completion of the personal weapon goal");
+    Expect(world.Report().AllAccountsGold==world.Report().InitialAllAccountsGold,
+        "personal sword forging must conserve all gold");
+}
+
+static void AutonomousResourceReservation()
+{
+    var first=AutonomousFixture("Miner",tools:true);
+    var original=first.Residents.Single();
+    var second=original with {Id="npc:second:mining",Name="Second miner"};
+    var catalog=first with {Residents=[original,second]};
+    // A dedicated scenario with one ore per resident and no free stock.
+    var world=new SettlementWorld(catalog,new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableHousing=false,
+        EnableExternalTrade=false,EnablePublicAssistance=false,
+        AutonomousParticipationPercent=0,OpenOrePerResident=1,
+        FirewoodDaysPerHousehold=100,ToolWorkHoursPerWear=100
+    });
+    Expect(world.OpenResources.Sum(s=>s.Ore)==2,
+        "two residents have a single finite two-ore local commons");
+    Expect(world.RequestPersonalGather(original.Id,"iron_ore"),
+        "first miner reserves their expected two-ore harvest");
+    Expect(!world.RequestPersonalGather(second.Id,"iron_ore"),
+        "a second miner cannot reserve the same finite deposit");
+    world.AdvanceTo(2L*1440);
+    world.CheckInvariants();
+    var r=world.Report();
+    CheckCommodityBalance(r);
+    Expect(world.Residents.Single(x=>x.Source.Id==original.Id)
+               .CommodityStock.GetValueOrDefault("iron_ore")==2 &&
+        r.PersonalGatherHours==1 && world.OpenResources.Sum(s=>s.Ore)==0,
+        "one timed gather consumes the reserved ore exactly once");
 }
 
 static void BreadSeptimBenchmark()
@@ -1555,4 +1693,521 @@ static void FundedCapitalConstruction()
     closed.CheckInvariants();
     Expect(closed.Report().CapitalProjectsStarted==0,
         "shutting off local production cannot secretly construct equipment");
+}
+
+static void RiskChoices()
+{
+    var options=new[]
+    {
+        new NpcChoiceOption<string>("safe",0),
+        new NpcChoiceOption<string>("interesting",25),
+        new NpcChoiceOption<string>("unusual",55)
+    };
+    int medium=0,high=0;
+    for(int i=0;i<1000;i++)
+    {
+        Expect(NpcChoicePolicy.Choose(options,0,"npc:risk",42,i)=="safe",
+            "zero risk always chooses the cheapest feasible alternative");
+        var middle=NpcChoicePolicy.Choose(options,35,"npc:risk",42,i);
+        var adventurous=NpcChoicePolicy.Choose(options,90,"npc:risk",42,i);
+        if(middle!="safe")medium++;
+        if(adventurous!="safe")high++;
+        Expect(adventurous==NpcChoicePolicy.Choose(options,90,"npc:risk",42,i),
+            "the same NPC and decision index always produce the same choice");
+    }
+    Expect(medium>0 && high>medium+80,
+        "risk tolerance increases less-optimal experimentation without becoming random chaos");
+    bool invalid=false;
+    try
+    {
+        NpcChoicePolicy.Choose(new[] {new NpcChoiceOption<string>("bad",double.NaN)},
+            100,"npc:risk",42,0);
+    }
+    catch(ArgumentException){invalid=true;}
+    Expect(invalid,"invalid option utility is rejected");
+}
+static void EstablishedOpening()
+{
+    var catalog=CommodityFixture();
+    var bareSettings=new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false
+    };
+    var bare=new SettlementWorld(catalog,bareSettings);
+    var establishedSettings=bareSettings with{EnableEstablishedOpeningEconomy=true};
+    var established=new SettlementWorld(catalog,establishedSettings);
+    var duplicate=new SettlementWorld(catalog,establishedSettings);
+    Expect(established.Residents.Sum(r=>r.Food)>bare.Residents.Sum(r=>r.Food),
+        "established residents begin with stored meals rather than empty cupboards");
+    Expect(established.Businesses.Sum(b=>b.CommodityStock.Values.Sum())>
+        bare.Businesses.Sum(b=>b.CommodityStock.Values.Sum()),
+        "established firms receive declared opening inventory");
+    Expect(established.Businesses.Any(b=>b.Kind==BusinessKinds.GoodsRetail &&
+        b.CommodityStock.GetValueOrDefault("iron_tools")>0),
+        "retailers begin with a practical range of products");
+    Expect(established.Residents.Select(r=>r.RiskTolerance)
+        .SequenceEqual(duplicate.Residents.Select(r=>r.RiskTolerance)),
+        "identities carry reproducible risk scores");
+    Expect(established.Residents.All(r=>r.RiskTolerance is >=0 and <=100),
+        "risk values remain bounded");
+    established.CheckInvariants();
+    duplicate.CheckInvariants();
+    Expect(established.Report().CommodityDetails.All(x=>x.Initial==x.StockOnHand),
+        "opening inventory is recorded before simulation as an initial endowment");
+    Expect(established.Report().InitialAllAccountsGold==
+        bare.Report().InitialAllAccountsGold,
+        "starter stock cannot mint monetary balances");
+    var stockedId=catalog.Residents[0].Id;
+    var withPersonalEndowment=catalog with
+    {
+        Residents=catalog.Residents.Select(r=>r.Id==stockedId
+            ?r with{SimulatedStartingItems=new Dictionary<string,int>{{"bread",100}}}
+            :r).ToArray()
+    };
+    var capped=new SettlementWorld(withPersonalEndowment,establishedSettings);
+    Expect(capped.Residents.Single(r=>r.Source.Id==stockedId)
+        .CommodityStock.GetValueOrDefault("bread")==100,
+        "opening endowments respect explicit personal inventory limits");
+    capped.CheckInvariants();
+    established.AdvanceTo(20L*1440);
+    duplicate.AdvanceTo(20L*1440);
+    established.CheckInvariants();
+    Expect(JsonSerializer.Serialize(established.Report())==
+        JsonSerializer.Serialize(duplicate.Report()),
+        "established economy stays deterministic across equivalent runs");
+}
+
+static void PublicPayrollBudget()
+{
+    var source=Fixture(2);
+    var chapel=new PlaceDefinition("b:chapel",0,"Test temple","Temple",
+        "Exampleton","Test zone","institution","fixture");
+    var catalog=source with
+    {
+        Places=source.Places.Append(chapel).ToArray(),
+        Businesses=source.Businesses.Append(
+            new BusinessDefinition(chapel.Id,BusinessKinds.Institution,
+                null,[],"synthetic public job")).ToArray(),
+        Residents=source.Residents.Select((r,i)=>r with
+        {
+            WorkPlaceId=i==0?"b:guild":chapel.Id,
+            WorkEvidence="explicit_fixture_contract"
+        }).ToArray()
+    };
+    var settings=new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableExternalTrade=false,EnableLocalProduction=false,
+        EnablePublicAssistance=false,EnableHousing=false,
+        StartingBusinessGold=0,InitialPublicGoldPerResident=8
+    };
+    var world=new SettlementWorld(catalog,settings);
+    world.AdvanceTo(1440L*2);
+    world.CheckInvariants();
+    var guild=world.Businesses.Single(b=>b.Id=="b:guild");
+    var temple=world.Businesses.Single(b=>b.Id==chapel.Id);
+    var report=world.Report();
+    Expect(guild.PublicPayrollGrantsReceived>0 &&
+        guild.PublicPayrollGrantsReceived==temple.PublicPayrollGrantsReceived,
+        "equal-sized institutions receive equal funding even when the treasury is scarce");
+    Expect(report.PublicPayrollGrants==
+        world.Businesses.Sum(b=>b.PublicPayrollGrantsReceived),
+        "every public grant corresponds to an actual departmental credit");
+    Expect(report.PublicGold>=0 && report.AllAccountsGold==report.InitialAllAccountsGold,
+        "budgeting cannot mint money, overdraft or borrow from outside accounts");
+    Expect(report.FundedPublicWorkHours>0,
+        "workers perform real paid public service shifts");
+    Expect(report.UnpaidHours==0 && report.WorkersFurloughedCumulative==0,
+        "temporary lack of cash does not instantly dismiss public employees");
+
+    var trulyUnfunded=new SettlementWorld(catalog,
+        settings with{InitialPublicGoldPerResident=0});
+    trulyUnfunded.AdvanceTo(30L*1440);
+    trulyUnfunded.CheckInvariants();
+    Expect(trulyUnfunded.Report().ActivePublicEmployees==0 &&
+        trulyUnfunded.Report().ResidentsFurloughed>=2,
+        "unfunded positions cannot masquerade as permanent after the grace period");
+
+    var lowCash=settings with
+    {
+        InitialPublicGoldPerResident=0,StartingBusinessGold=40,
+        EnableBudgetedPublicEmployment=false
+    };
+    var oldPublic=new SettlementWorld(catalog,lowCash);
+    var newPublic=new SettlementWorld(catalog,lowCash with
+    {
+        EnableBudgetedPublicEmployment=true
+    });
+    Expect(oldPublic.CanOfferPermanentContract(chapel.Id) &&
+        !newPublic.CanOfferPermanentContract(chapel.Id),
+        "disabling budgeted payroll restores the old public hiring threshold");
+}
+
+static void SustainablePrivateHiring()
+{
+    var catalog=Fixture(1);
+    var prudent=new SettlementWorld(catalog,new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableLocalProduction=false,EnableExternalTrade=false,
+        EnablePublicAssistance=false
+    });
+    var legacy=new SettlementWorld(catalog,new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableLocalProduction=false,EnableExternalTrade=false,
+        EnablePublicAssistance=false,EnableSustainableHiring=false
+    });
+    Expect(!prudent.CanOfferPermanentContract("b:forge") &&
+        legacy.CanOfferPermanentContract("b:forge"),
+        "starting cash by itself is not proof that a permanent role is sustainable");
+    prudent.AdvanceTo(15L*1440);
+    prudent.CheckInvariants();
+    Expect(!prudent.CanOfferPermanentContract("b:forge"),
+        "even two weeks of unproductive activity cannot fabricate a sales history");
+    Expect(!prudent.CanOfferPermanentContract("business:does-not-exist"),
+        "missing businesses cannot offer fictional jobs");
+}
+
+static void CasualProcessorWork()
+{
+    var world=new SettlementWorld(CommodityFixture(),new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableExternalTrade=false,
+        EnableEstablishedOpeningEconomy=true
+    });
+    world.AdvanceTo(90L*1440);
+    world.CheckInvariants();
+    var report=world.Report();
+    var processing=world.Businesses.Where(b=>b.Kind is
+        BusinessKinds.Bakery or BusinessKinds.Sawmill or
+        BusinessKinds.Smeltery or BusinessKinds.Tannery or
+        BusinessKinds.Leatherworker or BusinessKinds.Workshop).ToArray();
+    Expect(processing.Sum(b=>b.CasualHoursWorked)>0,
+        "manufacturers can hire paid casual labour when regular production hours are unavailable");
+    Expect(world.Businesses.Sum(b=>b.CasualHoursWorked)==report.CasualWorkHours &&
+        report.CasualWages==report.CasualWorkHours*2,
+        "temporary industrial shifts pay the lower rate from real employer balances");
+    Expect(report.AllAccountsGold==report.InitialAllAccountsGold,
+        "no temporary employment can create gold");
+}
+
+static void BrewingClothingAndTaverns()
+{
+    var source=CommodityFixture();
+    var places=source.Places.ToList();
+    var businesses=source.Businesses.ToList();
+    var anchor=places.First(p=>p.Id=="b:market");
+    void Add(string id,string kind,string? crop=null)
+    {
+        places.Add(new PlaceDefinition(id,0,"Simulated "+kind,kind,
+            anchor.Settlement,anchor.Zone,kind,"",anchor.MapX,anchor.MapY,
+            "simulation_at_source_anchor",anchor.District));
+        businesses.Add(new BusinessDefinition(id,kind,null,[],
+            "SIMULATION HYPOTHESIS for activity fixture",crop));
+    }
+    Add("sim:test:brewer",BusinessKinds.Brewery);
+    Add("sim:test:tailor",BusinessKinds.Tailor);
+    Add("sim:test:flax",BusinessKinds.FoodProducer,"flax");
+    var catalog=source with
+    {
+        Places=places.ToArray(),
+        Businesses=businesses.ToArray()
+    };
+    var settings=new SettlementSettings
+    {
+        Seed=42,Economy=EconomyMode.CommodityProduction,
+        EnableExternalTrade=false,EnableEstablishedOpeningEconomy=true
+    };
+    var world=new SettlementWorld(catalog,settings);
+    world.AdvanceTo(65L*1440);
+    world.CheckInvariants();
+    var report=world.Report();
+    CheckCommodityBalance(report);
+    Expect(Item(report,"ale").Crafted>0 && report.TavernVisits>0 &&
+        Item(report,"ale").Consumed==report.TavernVisits,
+        "real brewing and patron visits consume purchased physical drinks");
+    Expect(world.Businesses.Single(b=>b.Id=="sim:test:brewer").WagesPaid>0,
+        "brewing creates funded employment, not free stock");
+    Expect(Item(report,"flax").Extracted>0 &&
+        Item(report,"cloth").Crafted>0 &&
+        Item(report,"clothing").Crafted>0,
+        "flax is grown, woven into cloth and tailored into clothing");
+    Expect(world.Businesses.Single(b=>b.Id=="sim:test:tailor").WagesPaid>0,
+        "tailoring requires paid working hours");
+    Expect(report.ClothingWornOut>0 &&
+        Item(report,"clothing").Consumed>=report.ClothingWornOut,
+        "residents buy and eventually wear out physical clothing");
+    Expect(world.Residents.Any(r=>r.TavernVisits>0),
+        "tavern patrons exist independently of any named brewer profession");
+    Expect(report.TavernGoldSpent>0 &&
+        report.AllAccountsGold==report.InitialAllAccountsGold,
+        "leisure spending and trade move finite money between accounts");
+
+    world.AdvanceTo(160L*1440);
+    world.CheckInvariants();
+    var later=world.Report();
+    Expect(Item(later,"clothing").Crafted>Item(report,"clothing").Crafted &&
+        later.ClothingWornOut>report.ClothingWornOut,
+        "the textile chain remains active after its opening stock is worn out");
+    Expect(later.TavernVisits>report.TavernVisits,
+        "tavern visits remain a recurring activity rather than opening-stock sales");
+
+    var disabled=new SettlementWorld(catalog,settings with
+    {
+        EnableLocalProduction=false
+    });
+    disabled.AdvanceTo(14L*1440);
+    disabled.CheckInvariants();
+    Expect(Item(disabled.Report(),"ale").Crafted==0 &&
+        Item(disabled.Report(),"clothing").Crafted==0,
+        "when real production is disabled neither industry creates goods");
+}
+
+static void PaidFreightCarriers()
+{
+    var original=CommodityFixture();
+    var market=original.Places.First(p=>p.Id=="b:market");
+    const string yard="sim:test:haulier";
+    var depot=new PlaceDefinition(yard,0,"Test haulage yard",
+        "simulation_inferred_haulier",market.Settlement,market.Zone,
+        BusinessKinds.Haulier,"",market.MapX,market.MapY,
+        "simulation_at_source_anchor",market.District);
+    var catalog=original with
+    {
+        Places=original.Places.Append(depot).ToArray(),
+        Businesses=original.Businesses.Append(
+            new BusinessDefinition(yard,BusinessKinds.Haulier,null,[],
+                "SIMULATION HYPOTHESIS for freight test")).ToArray(),
+        Residents=original.Residents.Select((r,i)=>i==0
+            ?r with{WorkPlaceId=yard,WorkEvidence="synthetic_fixture_job"}:r)
+            .ToArray()
+    };
+    var settings=new SettlementSettings
+    {
+        Seed=42,Economy=EconomyMode.CommodityProduction,
+        EnableEstablishedOpeningEconomy=true,
+        EnableExternalTrade=false
+    };
+    var economy=new SettlementWorld(catalog,settings);
+    economy.AdvanceTo(30L*1440);
+    economy.CheckInvariants();
+    var report=economy.Report();
+    CheckCommodityBalance(report);
+    Expect(report.PaidFreightShipments>0 &&
+        report.PaidFreightShipments==report.ShipmentsSent,
+        "all commodity shipments use paid carriers when haulage sites exist");
+    Expect(report.CarrierRevenue==report.FreightFees &&
+        report.CarrierRevenue==
+            economy.Businesses.Sum(b=>b.FreightRevenue),
+        "every freight fee is credited exactly once to an actual carrier");
+    Expect(economy.Businesses.Where(b=>b.Kind is
+        BusinessKinds.Haulier or BusinessKinds.ImportHub)
+        .Sum(b=>b.FreightUnitsTransported)==report.FreightUnitsDelivered,
+        "delivered quantities reconcile against carrier completed loads");
+    Expect(report.CarrierCapacityHours>0 &&
+        economy.Businesses.Where(b=>b.Kind==BusinessKinds.Haulier)
+            .Sum(b=>b.WagesPaid)>0,
+        "hauling requires real funded work and does not award free capacity");
+    Expect(report.AllAccountsGold==report.InitialAllAccountsGold,
+        "carrier fees circulate existing money without minting balances");
+    Expect(report.CourierAssignments>0 &&
+        report.CourierAssignments==report.ShipmentsSent &&
+        report.CourierDeliveries==report.ShipmentsDelivered &&
+        report.CourierWages==economy.Residents.Sum(r=>r.CourierWageIncome),
+        "every paid freight parcel has an actual resident who receives its delivery wage");
+
+    var haulier=economy.Businesses.Single(b=>b.Id==yard);
+    decimal firstMonthIncome=haulier.FreightRevenue;
+    int firstMonthHours=haulier.WorkHours;
+    economy.AdvanceTo(120L*1440);
+    economy.CheckInvariants();
+    Expect(haulier.FreightRevenue>firstMonthIncome &&
+        haulier.WorkHours>firstMonthHours,
+        "continuing freight demand sustains local delivery employment after start-up");
+
+    var noWorkers=new SettlementWorld(catalog,settings with
+    {
+        EnableLocalProduction=false,
+        PortCargoUnitsPerWorkHour=0,
+        HaulierCargoUnitsPerWorkHour=0
+    });
+    noWorkers.AdvanceTo(12L*1440);
+    noWorkers.CheckInvariants();
+    var blocked=noWorkers.Report();
+    Expect(blocked.ShipmentsSent==0 && blocked.CarrierRevenue==0 &&
+        blocked.UnfulfilledFreightRequests>0,
+        "without paid carrier capacity, freight cannot teleport for a public fee");
+
+    var oldEconomy=new SettlementWorld(original,settings with
+    {
+        EnableLocalProduction=false
+    });
+    oldEconomy.AdvanceTo(12L*1440);
+    oldEconomy.CheckInvariants();
+    var legacy=oldEconomy.Report();
+    Expect(legacy.ShipmentsSent>0 && legacy.CarrierRevenue==0 &&
+        legacy.FreightFees>0,
+        "settlements without hauliers retain explicitly legacy common carriers");
+
+    var optedOut=new SettlementWorld(catalog,settings with
+    {
+        EnablePaidCarriers=false,EnableLocalProduction=false
+    });
+    optedOut.AdvanceTo(12L*1440);
+    optedOut.CheckInvariants();
+    var fallback=optedOut.Report();
+    Expect(fallback.ShipmentsSent>0 && fallback.CarrierRevenue==0 &&
+        fallback.FreightFees>0,
+        "explicit carrier opt-out preserves legacy transport for comparisons");
+    var noCouriers=new SettlementWorld(catalog,settings with
+    {
+        EnableNpcCourierJourneys=false
+    });
+    noCouriers.AdvanceTo(12L*1440);
+    noCouriers.CheckInvariants();
+    var oldDriverless=noCouriers.Report();
+    Expect(oldDriverless.ShipmentsSent>0 &&
+        oldDriverless.CourierAssignments==0 &&
+        oldDriverless.CourierWages==0 &&
+        oldDriverless.CarrierRevenue>0,
+        "the old paid-carrier benchmark remains available without named courier journeys");
+}
+
+static void NpcCourierJourneys()
+{
+    var source=CommodityFixture();
+    var market=source.Places.First(p=>p.Id=="b:market");
+    const string depotId="sim:test:journey-haulier";
+    var depot=new PlaceDefinition(depotId,0,"Courier test yard",
+        "simulation_inferred_haulier",market.Settlement,market.Zone,
+        BusinessKinds.Haulier,"",market.MapX,market.MapY,
+        "simulation_at_source_anchor",market.District);
+    var catalog=source with
+    {
+        Places=source.Places.Append(depot).ToArray(),
+        Businesses=source.Businesses.Append(
+            new BusinessDefinition(depotId,BusinessKinds.Haulier,null,[],
+                "SIMULATION HYPOTHESIS for courier journey test")).ToArray()
+    };
+    var settings=new SettlementSettings
+    {
+        Seed=42,Economy=EconomyMode.CommodityProduction,
+        EnableEstablishedOpeningEconomy=true,
+        EnableExternalTrade=false
+    };
+    var world=new SettlementWorld(catalog,settings);
+    CourierJourneySnapshot? carrying=null;
+    SettlementReport? transit=null;
+    for(long minute=0;minute<=8L*1440;minute+=13)
+    {
+        world.AdvanceTo(minute);
+        if(!world.Residents.Any(r=>r.CourierShipmentId is not null))continue;
+        var current=world.Report();
+        carrying=current.CourierJourneys.FirstOrDefault(
+            j=>j.Stage=="Carrying");
+        if(carrying is null)continue;
+        transit=current;
+        break;
+    }
+    Expect(carrying is not null && transit is not null,
+        "an actual named courier begins carrying a physical shipment");
+    world.CheckInvariants();
+    Expect(transit!.ActiveCourierJourneys>0 &&
+        transit.CourierAssignments>transit.CourierDeliveries &&
+        transit.CourierWagesInEscrow>0 &&
+        transit.CourierWagesInEscrow==transit.ActiveCourierJourneys &&
+        carrying!.CourierWageGold==1m,
+        "unfinished courier duties retain physical goods and reserved wages");
+    var courier=world.Residents.Single(r=>r.Source.Id==carrying!.CourierId);
+    Expect(courier.CourierShipmentId==carrying!.ShipmentId &&
+        courier.Activity==SettlementAction.Travel &&
+        courier.DestinationPlaceId==carrying.ToId &&
+        carrying.PickupMinute>=carrying.AssignedMinute &&
+        carrying.ExpectedDeliveryMinute>carrying.PickupMinute,
+        "an assigned NPC actually travels from the supplier to the consignee");
+    Expect(transit.CommodityDetails.Any(c=>c.InTransit>0),
+        "in-flight cargo is not prematurely added to a business inventory");
+    var initialCompleted=transit.CourierDeliveries;
+    world.AdvanceTo(world.Minute+720);
+    world.CheckInvariants();
+    var completed=world.Report();
+    Expect(completed.CourierDeliveries>initialCompleted &&
+        completed.CourierWages>transit.CourierWages &&
+        completed.CourierJourneys.Any(j=>
+            j.ShipmentId==carrying.ShipmentId &&
+            j.Stage=="Delivered" &&
+            j.DeliveredMinute>j.PickupMinute),
+        "delivery finishes the real NPC journey before releasing its wage");
+    Expect(completed.AllAccountsGold==completed.InitialAllAccountsGold,
+        "delivery wage escrow and business payments remain conserved");
+
+    var replay=new SettlementWorld(catalog,settings);
+    for(long minute=0;minute<=transit.Minute;minute+=13)
+        replay.AdvanceTo(minute);
+    replay.AdvanceTo(world.Minute);
+    replay.CheckInvariants();
+    Expect(JsonSerializer.Serialize(completed)==
+        JsonSerializer.Serialize(replay.Report()),
+        "courier assignment, timings and payments are reproducible by seed");
+
+    var nonCouriers=catalog with
+    {
+        Residents=catalog.Residents.Select(r=>r with{Race="Dremora"})
+            .ToArray()
+    };
+    var noEligible=new SettlementWorld(nonCouriers,settings);
+    noEligible.AdvanceTo(12L*1440);
+    noEligible.CheckInvariants();
+    var unavailable=noEligible.Report();
+    Expect(unavailable.ShipmentsSent==0 &&
+        unavailable.CourierAssignments==0 &&
+        unavailable.UnfulfilledFreightRequests>0 &&
+        unavailable.CarrierRevenue==0,
+        "paid cargo capacity without an eligible person cannot teleport goods");
+}
+
+static void CasualManufacturingCosts()
+{
+    var fixture=CommodityFixture();
+    var settings=new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableExternalTrade=false,AutonomousParticipationPercent=0
+    };
+    var world=new SettlementWorld(fixture,settings);
+    var sawmill=world.Businesses.Single(b=>b.Id=="sim:sawmill");
+    var originalValue=sawmill.InventoryValueMilli.Values.Sum();
+    var resident=world.Residents.First();
+    Expect(world.CompleteCommodityWork(resident,sawmill,1,2),
+        "a funded casual manufacturing hour can create a real physical product");
+    Expect(sawmill.ItemsCrafted>0 &&
+        sawmill.InventoryValueMilli.Values.Sum()==originalValue+2000L,
+        "inventory cost basis uses the actually paid two-gold wage, not the standard rate");
+
+    var chefSource=fixture with
+    {
+        Residents=fixture.Residents.Select((r,i)=>i==0
+            ?r with {Profession="Chef"}:r).ToArray()
+    };
+    var chefWorld=new SettlementWorld(chefSource,settings);
+    var bakery=chefWorld.Businesses.Single(b=>b.Id=="sim:bakery");
+    bakery.Stock.Clear();
+    bakery.Stock["wheat"]=2;
+    bakery.Stock["firewood"]=1;
+    bakery.Stock["bread"]=132;
+    bakery.Gold=1000;
+    bakery.PlannedHours=0;
+    var chef=chefWorld.Residents.Single(r=>r.Source.Id==chefSource.Residents[0].Id);
+    var ordinary=chefWorld.Residents.First(r=>r.Source.Profession!="Chef");
+    Expect(!chefWorld.CanTakeCasualShift(bakery,chef) &&
+        chefWorld.CanTakeCasualShift(bakery,ordinary),
+        "an enhanced-output chef cannot be paid to cook 42 bread into just 28 free slots");
+
+    var ledger=new SettlementWorld(fixture,settings);
+    ledger.AdvanceTo(12L*1440);
+    ledger.CheckInvariants();
+    Expect(ledger.Report().AllAccountsGold==ledger.Report().InitialAllAccountsGold,
+        "casual production still preserves actual monetary balances");
 }

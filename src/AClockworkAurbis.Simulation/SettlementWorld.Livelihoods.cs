@@ -109,14 +109,28 @@ public sealed partial class SettlementWorld
                 Quantity(company.Stock,"game_meat")<cap,
             BusinessKinds.Fishery =>
                 company.LandYieldRemaining>0 && Quantity(company.Stock,"fish")<cap,
+            BusinessKinds.Haulier => CanScheduleCargoWork(company),
+            BusinessKinds.Brewery or BusinessKinds.Tailor =>
+                CommodityRecipes.For(company).Any(r=>
+                    RecipeAvailable(r,company.Stock,cap)),
+            BusinessKinds.Bakery => CommodityRecipes.All.Any(r=>
+                r.Industry==BusinessKinds.Bakery && r.Id!="chef_game_pie" &&
+                RecipeAvailable(r,company.Stock,cap)),
+            BusinessKinds.Smeltery or BusinessKinds.Sawmill or
+                BusinessKinds.Tannery or BusinessKinds.Leatherworker or
+                BusinessKinds.Workshop => CommodityRecipes.For(company).Any(r=>
+                    RecipeAvailable(r,company.Stock,cap)),
             _=>false
         };
     }
 
-    private bool CanTakeCasualShift(BusinessState firm)
+    internal bool CanTakeCasualShift(BusinessState firm,ResidentState worker)
     {
-        if(!Detailed || !OpenResourceJob(firm) || !CanCasualProduce(firm) ||
-            CasualRate<=0)return false;
+        if(!Detailed || !(OpenResourceJob(firm) || IsDetailedProcessor(firm) ||
+            firm.Kind==BusinessKinds.Haulier) ||
+            !CanCasualProduce(firm) || CasualRate<=0 ||
+            firm.Kind==BusinessKinds.Bakery &&
+                !ProfessionalCookCanWork(worker,firm))return false;
         // Permanent staff have first claim on the day's planned work and
         // on the money needed to pay their minimum shifts.
         if(firm.PlannedHoursWorked<firm.PlannedHours &&
@@ -132,10 +146,12 @@ public sealed partial class SettlementWorld
     {
         if(!Detailed || !_settings.EnableLocalProduction ||
             person.CasualHoursToday>=_settings.MaxCasualHoursPerDay)return null;
-        return _businesses.Where(CanTakeCasualShift)
+        return _businesses.Where(b=>CanTakeCasualShift(b,person))
             .Select(b=>(Business:b,Minutes:JourneyDuration(person,b.Id)))
             .Where(x=>x.Minutes<=130)
-            .OrderBy(x=>x.Minutes)
+            .OrderBy(x=>x.Business.Kind==BusinessKinds.Haulier &&
+                RecentCarrierDemand()?0:1)
+            .ThenBy(x=>x.Minutes)
             .ThenBy(x=>StableRandom.Hash(person.Source.Id+x.Business.Id,
                 _settings.Seed))
             .Select(x=>x.Business).FirstOrDefault();
@@ -154,13 +170,14 @@ public sealed partial class SettlementWorld
     {
         if(!_byBusiness.TryGetValue(person.CurrentPlaceId,out var employer) ||
             person.CasualHoursToday>=_settings.MaxCasualHoursPerDay ||
-            !CanTakeCasualShift(employer))return;
+            !CanTakeCasualShift(employer,person))return;
         int rate=CasualRate;
         // Preflight availability and money immediately before executing.
         // A resource already depleted by another worker pays no shift.
         employer.Gold-=rate;
         employer.WagesPaid+=rate;
         employer.WorkHours++;
+        employer.CasualHoursWorked++;
         person.Gold+=rate;
         person.WageIncome+=rate;
         person.CasualWageIncome+=rate;

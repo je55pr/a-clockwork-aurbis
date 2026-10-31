@@ -9,7 +9,8 @@ public sealed partial class SettlementWorld
     }
 
     private decimal TotalGold() =>
-        checked(_businesses.Sum(b=>b.Gold)+_residents.Sum(r=>r.Gold)+_publicGold);
+        checked(_businesses.Sum(b=>b.Gold)+_residents.Sum(r=>r.Gold)+
+            _publicGold+_courierEscrowGold);
 
     private long TotalFood() =>
         Detailed ? CommodityRecipes.Meals.Sum(s=>
@@ -70,6 +71,15 @@ public sealed partial class SettlementWorld
             PersonalCraftBatches=_personalCraftBatches,
             PersonalTrades=_personalTrades,PersonalSaleIncome=_personalSaleIncome,
             OpenResourceSites=_openResourceSites.Count,
+            AutonomousParticipants=_autonomousParticipants.Count,
+            AutonomousChoices=_autonomousChoices,
+            AutonomousCompleted=_autonomousCompleted,
+            AutonomousFailed=_autonomousFailed,
+            AutonomousActivities=Enum.GetValues<PersonalTaskKind>()
+                .Select(kind=>new AutonomousActivitySnapshot(
+                    kind.ToString(),_autonomousChosenKinds[(int)kind],
+                    _autonomousCompletedKinds[(int)kind],
+                    _autonomousFailedKinds[(int)kind])).ToArray(),
             RawMaterialsExtracted=_localMaterials,
             FoodExported=_foodExports,GoodsExported=_goodsExports,
             MaterialsExported=_materialsExports,
@@ -79,6 +89,9 @@ public sealed partial class SettlementWorld
             AssistanceGoldPaid=_aidPaid,AssistedResidents=_aidRecipients.Count,
             RevenueTaxed=_taxRevenue,
             RetailSalesTaxRevenue=_retailSalesTaxRevenue,
+            TavernVisits=_tavernVisits,TavernGoldSpent=_tavernGoldSpent,
+            ClothingWornOut=_clothingWornOut,
+            ClothingPurchased=_clothingPurchased,
             CooperativeDistributions=_cooperativeDistributions,
             PublicGold=_publicGold,ExternalGold=_outsideGold,
             InitialAllAccountsGold=Regional?_initialAllGold:_initialGold,
@@ -91,6 +104,13 @@ public sealed partial class SettlementWorld
             PersonHoursAtZeroSatiation=Math.Round(_residents.Sum(p=>p.MinutesAtZeroSatiation)/60d,2),
             PersonHoursBelow20Satiation=Math.Round(_residents.Sum(p=>p.MinutesBelow20Satiation)/60d,2),
             WorkersFurloughedCumulative=_furloughs,JobsReassigned=_rehired,
+            PublicPayrollGrants=_publicPayrollGrants,
+            FundedPublicWorkHours=_fundedPublicWorkHours,
+            ActivePublicEmployees=_residents.Count(r=>r.WorkId is not null &&
+                _byBusiness.TryGetValue(r.WorkId,out var employer) &&
+                PublicEmployer(employer)),
+            UnfundedPublicInstitutions=_businesses.Count(b=>PublicEmployer(b) &&
+                b.WorkerCount>0 && b.PublicHoursBudgetToday==0),
             HousingUnits=_housing.Count, HousingBeds=_housing.Sum(h=>h.Beds),
             HousingOccupied=_housing.Sum(h=>h.Occupied),
             HomelessResidents=Regional && _settings.EnableHousing ?
@@ -125,14 +145,16 @@ public sealed partial class SettlementWorld
                 .SelectMany(b=>b.Stock.OrderBy(s=>s.Key,StringComparer.Ordinal)
                     .Where(s=>CanSellCommodity(b,s.Key) ||
                         IsKitchenBusiness(b) && CommodityRecipes.Edible(s.Key) ||
+                        b.Kind==BusinessKinds.FoodRetail && s.Key=="ale" ||
                         b.Kind==BusinessKinds.GoodsRetail &&
                             CommodityRecipes.HouseholdGoods.Contains(s.Key))
                     .Select(s=>new MarketQuoteSnapshot(b.Id,b.Name,b.Kind,
                         s.Key,s.Value,UnitCostMilli(b,s.Key),
                         CanSellCommodity(b,s.Key)?ToSeptims(MarketAskMilli(b,s.Key)):0m,
                         CommodityRecipes.Edible(s.Key) ||
+                            b.Kind==BusinessKinds.FoodRetail && s.Key=="ale" ||
                             CommodityRecipes.HouseholdGoods.Contains(s.Key) &&
-                            b.Kind==BusinessKinds.GoodsRetail ?
+                            b.Kind is (BusinessKinds.GoodsRetail or BusinessKinds.Tailor) ?
                             MarketRetailQuote(b,s.Key):0))).ToArray():[],
             ScarcityPricePremiumGold=_scarcityPremiumGold,
             SurplusPriceDiscountGold=_surplusDiscountGold,
@@ -164,6 +186,15 @@ public sealed partial class SettlementWorld
             ShipmentsInTransit=_freight.Count,FreightUnitsDelivered=_freightUnitsDelivered,
             FoodInTransit=TransitCount("food"),MaterialsInTransit=TransitCount("materials"),
             GoodsInTransit=TransitCount("goods"),FreightFees=_freightFees,
+            CarrierRevenue=_carrierRevenue,PaidFreightShipments=_paidFreightShipments,
+            CarrierCapacityHours=_carrierCapacityHours,
+            UnfulfilledFreightRequests=_unfulfilledFreightRequests,
+            CourierAssignments=_courierAssignments,
+            CourierDeliveries=_courierDeliveries,
+            CourierWages=_courierWages,
+            CourierWagesInEscrow=_courierEscrowGold,
+            ActiveCourierJourneys=_freight.Values.Count(s=>s.CourierId is not null),
+            CourierJourneys=GetCourierJourneySnapshots(),
             FreightRoutes=_deliveredByRoute.OrderByDescending(x=>x.Value)
                 .ThenBy(x=>x.Key.From,StringComparer.Ordinal)
                 .ThenBy(x=>x.Key.To,StringComparer.Ordinal)
@@ -181,7 +212,10 @@ public sealed partial class SettlementWorld
                     b.CargoCapacity,b.CargoHandled,
                     Detailed?new SortedDictionary<string,int>(b.Stock,
                         StringComparer.Ordinal):null,
-                    b.CapitalLevel,b.CapitalInvestedMilli)).ToArray()
+                    b.CapitalLevel,b.CapitalInvestedMilli,
+                    b.PublicPayrollGrantsReceived,b.PublicHoursBudgetToday,
+                    b.CasualHoursWorked,b.FreightRevenue,b.FreightShipments,
+                    b.FreightUnitsTransported)).ToArray()
         };
     }
 
@@ -222,7 +256,17 @@ public sealed partial class SettlementWorld
            _casualWages>_wages || _casualHours<0)
             throw new InvalidOperationException("Casual payroll does not reconcile");
         if(_personalSaleIncome!=_residents.Sum(r=>r.PersonalSaleIncome) ||
-           _personalCraftBatches!=_residents.Sum(r=>r.PersonalCrafts))
+           _personalCraftBatches!=_residents.Sum(r=>r.PersonalCrafts) ||
+           _autonomousChoices!=_residents.Sum(r=>r.AutonomousChoices) ||
+           _autonomousCompleted!=_residents.Sum(r=>r.AutonomousCompleted) ||
+           _autonomousFailed!=_residents.Sum(r=>r.AutonomousFailed) ||
+           _autonomousCompleted+_autonomousFailed>_autonomousChoices ||
+           _autonomousChosenKinds.Sum()!=_autonomousChoices ||
+           _autonomousCompletedKinds.Sum()!=_autonomousCompleted ||
+           _autonomousFailedKinds.Sum()!=_autonomousFailed ||
+           _autonomousParticipants.Count!=_residents.Count(r=>r.AutonomousChoices>0) ||
+           _autonomousChoices!=_autonomousCompleted+_autonomousFailed+
+               _personalTasks.Values.Count(t=>t.Autonomous))
             throw new InvalidOperationException("Personal economy ledger mismatch");
         if(_openResourceSites.Values.Any(s=>s.Ore<0 || s.Logs<0 ||
             s.Fish<0 || s.Game<0))
@@ -251,9 +295,43 @@ public sealed partial class SettlementWorld
         if (_freight.Any(s => s.Value.Quantity <= 0 || s.Value.ArriveMinute <= Minute) ||
             _shipmentsSent != _shipmentsDelivered + _freight.Count)
             throw new InvalidOperationException("Regional freight schedule invalid");
+        if(_paidFreightShipments!=_businesses.Sum(b=>b.FreightShipments) ||
+           _carrierRevenue!=_businesses.Sum(b=>b.FreightRevenue) ||
+           _paidFreightUnitsDelivered!=
+                _businesses.Sum(b=>b.FreightUnitsTransported))
+            throw new InvalidOperationException("Transport service ledger mismatch");
+        var assignedShipments=_freight.Where(x=>x.Value.CourierId is not null)
+            .ToArray();
+        if(_courierAssignments!=_courierDeliveries+assignedShipments.Length ||
+           _courierDeliveries!=_residents.Sum(r=>r.CourierDeliveries) ||
+           _courierWages!=_residents.Sum(r=>r.CourierWageIncome) ||
+           _courierEscrowGold!=assignedShipments.Sum(x=>x.Value.CourierWage) ||
+           _courierEscrowGold<0m ||
+           _courierAssignments>_paidFreightShipments ||
+           assignedShipments.Any(x=>
+               !_residentById.TryGetValue(x.Value.CourierId!,out var courier) ||
+               courier.CourierShipmentId!=x.Key) ||
+           _residents.Any(r=>r.CourierShipmentId is int shipmentId &&
+               (!_freight.TryGetValue(shipmentId,out var shipment) ||
+                shipment.CourierId!=r.Source.Id)) ||
+           assignedShipments.Select(x=>x.Value.CourierId)
+               .Distinct(StringComparer.Ordinal).Count()!=assignedShipments.Length)
+            throw new InvalidOperationException("Courier assignments or escrow do not reconcile");
+        if(UsesPaidCarriers &&
+           (_carrierRevenue!=_freightFees ||
+            _paidFreightShipments!=_shipmentsSent))
+            throw new InvalidOperationException("Paid freight bypassed carrier accounts");
         foreach(var b in _businesses)
         {
-            if(b.Gold<0||b.Food<0||b.Materials<0||b.Goods<0||b.MineralReserve<0||b.LandYieldRemaining<0)
+            if(b.Gold<0||b.Food<0||b.Materials<0||b.Goods<0||
+               b.MineralReserve<0||b.LandYieldRemaining<0||
+               b.CargoCapacity<0||b.CargoHoursReservedToday<0||
+               b.FreightRevenue<0||b.FreightShipments<0||
+               b.FreightUnitsTransported<0||
+               b.Kind==BusinessKinds.Haulier &&
+                   b.CargoCapacity>_settings.MaxHaulierCargoCapacity||
+               b.Kind==BusinessKinds.ImportHub &&
+                   b.CargoCapacity>_settings.MaxPortCargoCapacity)
                 throw new InvalidOperationException("Invalid business account/stock: "+b.Id);
         }
     }
