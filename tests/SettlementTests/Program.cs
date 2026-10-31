@@ -1007,6 +1007,15 @@ static void AdaptiveBusinessPlanning()
     {
         Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false
     });
+    live.AdvanceTo(1440L);
+    var opening=live.Report();
+    Expect(opening.BusinessPlans.Where(p=>p.BusinessName is
+        "Green fields" or "Simulated community allotment")
+        .All(p=>p.BudgetedHours>=8),
+        "opening farms provision known residents before sales history exists");
+    Expect(opening.BusinessPlans.Where(p=>p.BusinessName=="Bakery")
+        .All(p=>p.Product!="chef_game_pie"),
+        "speculative high-margin chef-only food cannot bypass skill limits");
     live.AdvanceTo(1440L*16);
     live.CheckInvariants();
     var report=live.Report();

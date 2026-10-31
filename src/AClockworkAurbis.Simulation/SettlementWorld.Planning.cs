@@ -46,8 +46,29 @@ public sealed partial class SettlementWorld
             int stocked=Quantity(firm.Stock,product.Key);
             int interested=Math.Max(2,DemandFor(firm,product.Key)+
                 Math.Max(0,24-stocked)/4);
-            // A producer cannot sell an entire batch at the quoted price
-            // merely because the quoted price is high.
+            if(CommodityRecipes.Edible(product.Key) &&
+               product.Key is not ("bread" or "foraged_greens" or "provisions"))
+            {
+                // Wholesale standing orders are NOT evidence that actual
+                // customers will pay for elaborate food. Observe real
+                // retail sales before committing an expensive whole batch.
+                int retailDemand=_businesses.Where(b=>b.Kind==BusinessKinds.FoodRetail)
+                    .Sum(b=>(int)Math.Ceiling(
+                        b.RecentDemand.GetValueOrDefault(product.Key)));
+                int cooks=Math.Max(1,_businesses.Count(b=>b.Kind==BusinessKinds.Bakery));
+                interested=Math.Min(interested,Math.Max(1,retailDemand/cooks+1));
+            }
+            if(product.Key=="bread" && Minute/DayMinutes<=3)
+            {
+                int bakeries=Math.Max(1,_businesses.Count(b=>
+                    b.Kind==BusinessKinds.Bakery));
+                // Town population is visible before the first sales.
+                // Essential food must not require previous starvation to
+                // generate a plausible opening demand estimate.
+                interested=Math.Max(interested,
+                    (_residents.Count+bakeries-1)/bakeries);
+            }
+            // No sale is booked until a real customer actually pays.
             return Math.Min(made,interested)*ExpectedWholesaleAsk(firm,product.Key);
         });
         decimal inputs=recipe.Ingredients.Sum(input=>
@@ -63,8 +84,11 @@ public sealed partial class SettlementWorld
     private CommodityRecipe? PreferredRecipe(BusinessState firm,
         IEnumerable<CommodityRecipe> options,int numerator=1,int denominator=1)
     {
-        return options.Where(r=>RecipeAvailable(r,firm.Stock,
-                    _settings.MaxCommodityStockPerSite,numerator,denominator))
+        // Plans can request missing ingredients for delivery later today.
+        // Actual shifts still use RecipeAvailable, never planned inventory.
+        return options.Where(r=>r.Products.All(x=>Quantity(firm.Stock,x.Key)+
+                    checked(x.Value*numerator/denominator)<=
+                    _settings.MaxCommodityStockPerSite))
             .OrderByDescending(r=>ExpectedRecipeMargin(firm,r,numerator,denominator))
             .ThenBy(r=>r.Id,StringComparer.Ordinal).FirstOrDefault();
     }
@@ -164,18 +188,67 @@ public sealed partial class SettlementWorld
                 budget=Math.Min(maxHours,business.ServiceHoursBudget);
             else if(business.Kind is BusinessKinds.ResourceProducer or
                 BusinessKinds.Hunter or BusinessKinds.Fishery)
-                budget=Math.Min(affordable,Math.Max(1,DemandFor(business,
+            {
+                int normal=Math.Max(1,DemandFor(business,
                     business.Kind==BusinessKinds.Fishery?"fish":
                     business.Kind==BusinessKinds.Hunter?"game_meat":
-                    IsLoggingSite(business)?"logs":"iron_ore")/2+2));
+                    IsLoggingSite(business)?"logs":"iron_ore")/2+2);
+                if(Minute/DayMinutes<=3 &&
+                    business.Kind==BusinessKinds.ResourceProducer &&
+                    IsLoggingSite(business))
+                {
+                    int loggerCount=Math.Max(1,_businesses.Count(b=>
+                        b.Kind==BusinessKinds.ResourceProducer && IsLoggingSite(b)));
+                    int sawmillCount=_businesses.Count(b=>b.Kind==BusinessKinds.Sawmill);
+                    int logsRequired=sawmillCount*8*2/loggerCount;
+                    normal=Math.Max(normal,(logsRequired+
+                        _settings.RawMaterialPerWorkHour-1)/
+                        _settings.RawMaterialPerWorkHour);
+                }
+                budget=Math.Min(affordable,normal);
+            }
             else
                 budget=choice==null?0:Math.Min(affordable,
                     estimatedMargin<=0 ? 1 :
                     Math.Max(2,Math.Min(8,checked((int)Math.Ceiling(
                         business.RecentDemand.Values.DefaultIfEmpty(0).Max()/4m)+3))));
-            if(business.Kind==BusinessKinds.FoodProducer)
-                budget=Math.Min(affordable,Math.Max(2,
-                    choice is null?0:DemandFor(business,choice)/2+2));
+            if(Minute/DayMinutes<=3 &&
+               business.Kind==BusinessKinds.Sawmill && choice is not null &&
+               estimatedMargin>0)
+            {
+                int sawmills=Math.Max(1,_businesses.Count(b=>b.Kind==BusinessKinds.Sawmill));
+                int ovens=_businesses.Count(b=>b.Kind==BusinessKinds.Bakery);
+                budget=Math.Min(affordable,Math.Max(budget,
+                    (ovens*8+3*sawmills-1)/(3*sawmills)));
+            }
+            if(Minute/DayMinutes<=3 &&
+               business.Kind==BusinessKinds.Bakery && choice is not null &&
+               estimatedMargin>0)
+            {
+                int bakers=Math.Max(1,_businesses.Count(b=>b.Kind==BusinessKinds.Bakery));
+                int expectedMeals=(_residents.Count*2+bakers-1)/bakers;
+                int outputPerHour=CommodityRecipes.All
+                    .Where(r=>r.Id==choice).Select(r=>r.Products.Values.Sum())
+                    .FirstOrDefault();
+                if(outputPerHour>0)
+                    budget=Math.Min(affordable,Math.Max(budget,
+                        (expectedMeals+outputPerHour-1)/outputPerHour));
+            }
+            if(business.Kind==BusinessKinds.FoodProducer &&
+               Minute/DayMinutes<=3)
+            {
+                // A brand-new market has little recorded sales, not little
+                // need for food. Farms can observe their settlement's
+                // population and plan a starter supply before sales history
+                // exists. Future shortages and sales still raise the plan.
+                int peoplePerFarm=(_residents.Count+Math.Max(1,_farms.Length)-1)/
+                    Math.Max(1,_farms.Length);
+                int hoursForFood=(peoplePerFarm+
+                    _settings.RenewableFoodPerWorkHour-1)/
+                    _settings.RenewableFoodPerWorkHour;
+                budget=choice==null?0:Math.Min(affordable,
+                    Math.Max(hoursForFood,DemandFor(business,choice)/2+2));
+            }
             if(!_settings.EnableLocalProduction && PlansProduction(business))
                 budget=0;
             if(estimatedMargin<0 && choice!=null)_unprofitablePlans++;
