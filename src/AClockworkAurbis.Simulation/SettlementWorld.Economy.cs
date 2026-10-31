@@ -109,8 +109,8 @@ public sealed partial class SettlementWorld
                     business.Gold<=_settings.StartingBusinessGold)continue;
                 if(!_residentById.TryGetValue(business.SimulatedLeaseholderId,
                     out var leaseholder))continue;
-                long excess=business.Gold-_settings.StartingBusinessGold;
-                long dividend=Math.Min(100,excess/10);
+                decimal excess=business.Gold-_settings.StartingBusinessGold;
+                decimal dividend=Math.Min(100,Math.Round(excess/10,2));
                 if(dividend<=0)continue;
                 business.Gold-=dividend;
                 business.DividendsPaid+=dividend;

@@ -29,21 +29,17 @@ public sealed partial class SettlementWorld
     // Nearby shops with healthy stock and affordable landed costs can
     // profitably meet it; sparse stock or expensive delivery raises the
     // local quote. We still use integral septims for individual loaves.
-    private int BreadRetailQuote(BusinessState seller)
-    {
-        return CommodityRecipes.BreadPriceInSeptims(
-            Quantity(seller.Stock,"bread"),
-            seller.BreadLandedGold,seller.BreadLandedUnits);
-    }
+    private decimal BreadRetailQuote(BusinessState seller) =>
+        MarketRetailQuote(seller,"bread");
 
-    private int MealRetailQuote(BusinessState seller,string sku) =>
-        sku=="bread" ? BreadRetailQuote(seller) :
-        CommodityRecipes.MealRetailPrices[sku];
+    private decimal MealRetailQuote(BusinessState seller,string sku) =>
+        MarketRetailQuote(seller,sku);
 
     private bool BreadBulkDiscount(BusinessState seller) =>
         (seller.Kind==BusinessKinds.Bakery || HasNamedChef(seller)) &&
         CommodityRecipes.CanDiscountSurplusBread(
-            Quantity(seller.Stock,"bread"),BreadRetailQuote(seller));
+            Quantity(seller.Stock,"bread"),BreadRetailQuote(seller)) &&
+        BreadRetailQuote(seller)>=Money(2m*UnitCostMilli(seller,"bread")/1000m);
 
     private static bool IsProvisionsMarket(BusinessState shop) =>
         shop.Kind==BusinessKinds.FoodRetail &&
@@ -52,14 +48,7 @@ public sealed partial class SettlementWorld
          shop.Name.Contains("Provisions",StringComparison.OrdinalIgnoreCase) ||
          shop.Name.Contains("Grocer",StringComparison.OrdinalIgnoreCase));
 
-    private static int GroceryPrice(string sku) => sku switch
-    {
-        "wheat" or "potato" or "onion" or "lettuce" => 4,
-        "firewood" or "fish" or "game_meat" => 3,
-        _=> throw new InvalidOperationException("Not a grocery ingredient: "+sku)
-    };
-
-    private CommodityRecipe? ReadyHomeRecipe(ResidentState person)
+     private CommodityRecipe? ReadyHomeRecipe(ResidentState person)
     {
         if(person.HousingId is null)return null;
         return CommodityRecipes.HouseholdMeals
@@ -73,19 +62,19 @@ public sealed partial class SettlementWorld
         person.HousingId is not null && ReadyHomeRecipe(person) is not null;
 
     private bool TryGroceryKit(ResidentState person,BusinessState shop,
-        out CommodityRecipe? recipe,out int cost)
+        out CommodityRecipe? recipe,out decimal cost)
     {
         recipe=null;
         cost=0;
         if(person.HousingId is null||!IsProvisionsMarket(shop))return false;
         var options=CommodityRecipes.HouseholdMeals.Select(r=>
         {
-            int price=0;
+            decimal price=0;
             foreach(var item in r.Ingredients)
             {
                 int needed=Math.Max(0,item.Value-Quantity(person.Stock,item.Key));
-                if(needed>Quantity(shop.Stock,item.Key))return (Recipe:r,Price:int.MaxValue);
-                price=checked(price+needed*GroceryPrice(item.Key));
+                if(needed>Quantity(shop.Stock,item.Key))return (Recipe:r,Price:decimal.MaxValue);
+                price=checked(price+needed*GroceryRetailQuote(shop,item.Key));
             }
             return (Recipe:r,Price:price);
         }).Where(x=>x.Price>0&&x.Price<=person.Gold &&
@@ -106,15 +95,15 @@ public sealed partial class SettlementWorld
            person.Gold<3 || person.LastFailedGrocerySearchDay==Minute/DayMinutes)
             return null;
         BusinessState? best=null;
-        long score=long.MaxValue;
+        decimal score=decimal.MaxValue;
         foreach(var shop in _foodShops)
         {
-            if(!TryGroceryKit(person,shop,out _,out int cost))continue;
+            if(!TryGroceryKit(person,shop,out _,out decimal cost))continue;
             int minutes=JourneyDuration(person,shop.Id);
             // Never choose an impractically distant bulk-food trip instead
             // of a one-septim emergency bread purchase.
             if(minutes>90)continue;
-            long candidate=(long)minutes*100+cost;
+            decimal candidate=minutes*100m+cost;
             if(candidate<score){score=candidate;best=shop;}
         }
         // If there are no affordable ingredients anywhere nearby today,
@@ -127,18 +116,22 @@ public sealed partial class SettlementWorld
     {
         if(!Detailed||person.HousingId is null||
            !_byBusiness.TryGetValue(person.CurrentPlaceId,out var seller) ||
-           !TryGroceryKit(person,seller,out var recipe,out int cost) ||
+           !TryGroceryKit(person,seller,out var recipe,out decimal cost) ||
            recipe is null)return;
         foreach(var item in recipe.Ingredients)
         {
             int amount=Math.Max(0,item.Value-Quantity(person.Stock,item.Key));
             if(amount==0)continue;
+            decimal unitPrice=GroceryRetailQuote(seller,item.Key);
+            long acquisition=WithdrawInventoryValue(seller,item.Key,amount);
             StockRemove(seller.Stock,item.Key,amount);
             StockAdd(person.Stock,item.Key,amount);
+            MarketObserveSale(seller,item.Key,amount,
+                checked(unitPrice*amount),acquisition,false);
             if(item.Key=="firewood")person.Goods=checked(person.Goods+amount);
         }
         person.Gold-=cost;
-        long tax=cost>=4?1:0;
+        decimal tax=Money(cost*0.05m);
         seller.Gold+=cost-tax;
         _publicGold+=tax;
         _taxRevenue+=tax;
@@ -212,15 +205,9 @@ public sealed partial class SettlementWorld
                 .ToArray();
             if(available.Length==0)break;
             var recipe=available[0];
-            foreach(var input in recipe.Ingredients)
-                UseIngredient(workplace.Stock,input.Key,input.Value);
-            int output=0;
-            foreach(var product in recipe.Products)
-            {
-                int made=checked(product.Value*numerator/2);
-                Make(workplace.Stock,product.Key,made);
-                output=checked(output+made);
-            }
+            CraftMarketRecipe(workplace,recipe,numerator,2,1);
+            int output=recipe.Products.Sum(p=>checked(
+                p.Value*numerator/2));
             _recipeBatches++;
             workplace.ItemsCrafted=checked(workplace.ItemsCrafted+output);
             _crafted+=output;

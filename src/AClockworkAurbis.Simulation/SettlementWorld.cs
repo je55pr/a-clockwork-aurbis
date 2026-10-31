@@ -22,8 +22,9 @@ public sealed partial class SettlementWorld
         new(StringComparer.Ordinal);
     private readonly PriorityQueue<int,(long Minute,long Order)> _queue = new();
     private long _sequence;
-    private long _initialGold,_initialFood,_initialMaterials,_initialGoods;
-    private long _events,_wages,_dividends,_unpaid,_foodSales,_goodsSales,_meals,_travel;
+    private decimal _initialGold,_wages,_dividends;
+    private long _initialFood,_initialMaterials,_initialGoods;
+    private long _events,_unpaid,_foodSales,_goodsSales,_meals,_travel;
     private long _travelMinutes,_longJourneys;
     private long _crafted,_goodsUsed,_foodImported,_materialsImported;
     private long _purchases;

@@ -16,7 +16,7 @@ public sealed partial class SettlementWorld
 {
     private readonly List<HousingUnit> _housing = [];
     private readonly Dictionary<string, HousingUnit> _housingById = new(StringComparer.Ordinal);
-    private long _rentCollected;
+    private decimal _rentCollected;
     private int _evictions, _relocations, _rehousings;
 
     private double RegionalSleepRate(ResidentState resident) =>

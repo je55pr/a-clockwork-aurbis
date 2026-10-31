@@ -16,10 +16,12 @@ public sealed partial class SettlementWorld
         new(StringComparer.Ordinal);
     private long _recipeBatches, _toolsWorn, _fuelBurned;
     private long _carriageEquipmentDelays, _longFreightRuns;
-    private long _scarcityPremiumGold, _surplusDiscountGold, _idleProductionHoursAvoided;
+    private decimal _scarcityPremiumGold,_surplusDiscountGold;
+    private long _idleProductionHoursAvoided;
     private long _homeCookingBatches, _homeCookedMeals, _chefCookedMeals;
     private long _oneSeptimBreadSold, _groceryKitsSold;
-    private long _breadSalesUnits, _breadSalesRevenue,_discountedBreadUnits;
+    private long _breadSalesUnits,_discountedBreadUnits;
+    private decimal _breadSalesRevenue;
 
     private CommodityAccount Account(string id) =>
         _commodityAccounts.TryGetValue(id,out var a) ? a :
@@ -114,6 +116,7 @@ public sealed partial class SettlementWorld
                     break;
             }
         }
+        OpenMarketAccounts();
         foreach(var sku in CommodityRecipes.Prices.Keys)
             Account(sku).Initial = CommodityStockOnHand(sku);
     }
@@ -195,7 +198,7 @@ public sealed partial class SettlementWorld
                         _settings.RenewableFoodPerWorkHour));
                     if(picked==0)break;
                     company.LandYieldRemaining-=picked;
-                    Extract(company.Stock,crop,picked);
+                    ExtractMarketStock(company,crop,picked,1);
                     company.FoodProduced+=picked;
                     _localFood+=picked;
                 }
@@ -214,14 +217,14 @@ public sealed partial class SettlementWorld
                         _settings.RawMaterialPerWorkHour));
                     if(picked==0)break;
                     company.MineralReserve-=picked;
-                    Extract(company.Stock,output,picked);
+                    ExtractMarketStock(company,output,picked,1);
                     company.MaterialsExtracted+=picked;
                     _localMaterials+=picked;
                     company.ToolWearHours++;
                     if(company.ToolWearHours>=_settings.ToolWorkHoursPerWear)
                     {
                         company.ToolWearHours=0;
-                        UseFinished(company.Stock,tool,1);
+                        UseBusinessSupply(company,tool,1);
                     }
                 }
                 break;
@@ -241,11 +244,11 @@ public sealed partial class SettlementWorld
                     if(units<=0)break;
                     company.LandYieldRemaining-=units;
                     if(company.Kind==BusinessKinds.Fishery)
-                        Extract(company.Stock,"fish",units);
+                        ExtractMarketStock(company,"fish",units,1);
                     else
                     {
-                        Extract(company.Stock,"game_meat",units);
-                        Extract(company.Stock,"raw_hide",units);
+                        ExtractMarketStock(company,"game_meat",units,1);
+                        ExtractMarketStock(company,"raw_hide",units,0);
                     }
                     _localFood+=units;
                 }
@@ -279,10 +282,7 @@ public sealed partial class SettlementWorld
                         .ToArray();
                     if(available.Length==0)break;
                     var recipe=available[0];
-                    foreach(var input in recipe.Ingredients)
-                        UseIngredient(company.Stock,input.Key,input.Value);
-                    foreach(var output in recipe.Products)
-                        Make(company.Stock,output.Key,output.Value);
+                    CraftMarketRecipe(company,recipe,1,1,1);
                     _recipeBatches++;
                     company.ItemsCrafted+=recipe.Products.Values.Sum();
                     _crafted+=recipe.Products.Values.Sum();
@@ -310,20 +310,16 @@ public sealed partial class SettlementWorld
         foreach(var store in _businesses.Where(b=>b.Kind is
             BusinessKinds.FoodRetail or BusinessKinds.GoodsRetail))
         {
-            int yesterday=Math.Max(0,store.RetailSales-store.LastRetailSalesAtDay);
-            long revenue=Math.Max(0,store.RetailRevenue-store.LastRetailRevenueAtDay);
-            long breads=Math.Max(0,store.BreadSalesUnits-store.LastBreadSalesAtDay);
+            decimal revenue=Math.Max(0,store.RetailRevenue-store.LastRetailRevenueAtDay);
+            long costBasis=Math.Max(0,store.RetailCostOfGoodsMilli-
+                store.LastRetailCostOfGoodsMilliAtDay);
             store.LastRetailSalesAtDay=store.RetailSales;
             store.LastRetailRevenueAtDay=store.RetailRevenue;
+            store.LastRetailCostOfGoodsMilliAtDay=store.RetailCostOfGoodsMilli;
             store.LastBreadSalesAtDay=store.BreadSalesUnits;
-            // Staff shops from *actual sales*, not the old six-septim meal
-            // price. Deduct an estimated ingredient cost before paying wages.
-            long breadCost=store.BreadLandedUnits==0 ? breads/2 :
-                (breads*store.BreadLandedGold+store.BreadLandedUnits-1)/
-                    store.BreadLandedUnits;
-            long otherCost=Math.Max(0,yesterday-breads)*
-                (store.Kind==BusinessKinds.FoodRetail?1:7);
-            long grossMargin=Math.Max(0,revenue-breadCost-otherCost);
+            // Yesterday's actually earned net revenue, less the real
+            // weighted-average inventory cost of goods sold.
+            decimal grossMargin=Math.Max(0,revenue-costBasis/1000m);
             int affordableHours=checked((int)Math.Min(int.MaxValue,
                 grossMargin/Math.Max(1,_settings.HourlyWage)));
             // A shop with no proven margin can still trade, but cannot
@@ -440,20 +436,8 @@ public sealed partial class SettlementWorld
             _ => false // Retail stock, input stores, tools and carriers aren't a magic wholesaler.
         };
 
-    private int QuoteCommodityWholesalePrice(BusinessState supplier,string sku)
-    {
-        int baseline=CommodityRecipes.Prices[sku];
-        int stock=Quantity(supplier.Stock,sku);
-        // Small observable local price response to the supplier's own stock.
-        // Scarce inputs become more valuable, but finished-food retailers
-        // must still have room to cover sales tax and operating costs.
-        int premium=stock<12?1:stock>90?-1:0;
-        int quoted=Math.Max(1,baseline+premium);
-        if(CommodityRecipes.MealRetailPrices.TryGetValue(sku,out int retail))
-            quoted=Math.Min(quoted,Math.Max(1,retail-
-                Math.Min(_settings.FoodSalesTax,retail-1)));
-        return quoted;
-    }
+    private long QuoteCommodityWholesalePriceMilli(BusinessState supplier,
+        string sku) => MarketAskMilli(supplier,sku);
 
     private int CommodityOrderPriority(BusinessState buyer,string sku)
     {
@@ -495,35 +479,37 @@ public sealed partial class SettlementWorld
             var sellers=_businesses.Where(b=>b.Id!=buyer.Id &&
                     CanSellCommodity(b,sku) &&
                     Quantity(b.Stock,sku)>0)
-                .OrderBy(b=>BusinessTravelCost(b,buyer))
+                // Compare total landed unit costs rather than choosing
+                // the closest supplier even when its prices are ruinous.
+                .OrderBy(b=>QuoteCommodityWholesalePriceMilli(b,sku)+
+                    1000L*(_settings.BaseFreightFee+
+                    (int)Math.Ceiling(PlaceTravelMinutes(b.Place,buyer.Place)/90d)*
+                    _settings.FreightFeePer90Minutes)/
+                    Math.Max(1,Math.Min(need,Math.Min(Quantity(b.Stock,sku),
+                        _settings.MaxFreightLoad))))
+                .ThenBy(b=>BusinessTravelCost(b,buyer))
                 .ThenBy(b=>StableRandom.Hash(b.Id,
                     unchecked(_settings.Seed+day+17)));
             foreach(var seller in sellers)
             {
                 if(need==0)break;
                 int available=Quantity(seller.Stock,sku);
-                int unitPrice=QuoteCommodityWholesalePrice(seller,sku);
+                decimal unitPrice=ToSeptims(
+                    QuoteCommodityWholesalePriceMilli(seller,sku));
                 int minutes=PlaceTravelMinutes(seller.Place,buyer.Place);
                 int charge=checked(_settings.BaseFreightFee+
                     (int)Math.Ceiling(minutes/90d)*_settings.FreightFeePer90Minutes);
                 if(buyer.Gold<charge)continue;
-                long availableGold=buyer.Gold-charge;
-                // Healthy, well-stocked bakeries offer bread in wholesale
-                // pairs for one septim; scarce bread costs a septim each.
-                // Source and carrier retain the actual payment, not a fixed
-                // subsidy or magical merchant credit.
-                int breadPerSeptim=sku=="bread" && available>=12?2:1;
-                int affordable=sku=="bread"
-                    ?(int)Math.Min(int.MaxValue,availableGold*breadPerSeptim)
-                    :unitPrice==0?need:
-                        (int)Math.Min(int.MaxValue,availableGold/unitPrice);
+                decimal availableGold=buyer.Gold-charge;
+                // Each unit price is quoted and settled in hundredths
+                // of a septim. No rounding up whole-septim payments.
+                int affordable=(int)Math.Min(int.MaxValue,
+                    decimal.Floor(availableGold/unitPrice));
                 int units=Math.Min(need,Math.Min(available,
                     Math.Min(_settings.MaxFreightLoad,affordable)));
                 if(units==0)continue;
 
-                long payment=sku=="bread" ?
-                    (units+breadPerSeptim-1L)/breadPerSeptim :
-                    checked((long)units*unitPrice);
+                decimal payment=checked(units*unitPrice);
                 buyer.Gold-=payment+charge;
                 seller.Gold+=payment;
                 _publicGold+=charge;
@@ -535,15 +521,14 @@ public sealed partial class SettlementWorld
                     buyer.BreadLandedGold=checked(buyer.BreadLandedGold+payment+charge);
                     buyer.BreadLandedUnits+=units;
                 }
-                if(sku!="bread")
-                {
-                    int priceDelta=unitPrice-CommodityRecipes.Prices[sku];
-                    if(priceDelta>0)
-                        _scarcityPremiumGold+=checked((long)units*priceDelta);
-                    else if(priceDelta<0)
-                        _surplusDiscountGold+=checked((long)units*(-priceDelta));
-                }
+                decimal priceDelta=unitPrice-CommodityRecipes.Prices[sku];
+                if(priceDelta>0)
+                    _scarcityPremiumGold+=units*priceDelta;
+                else if(priceDelta<0)
+                    _surplusDiscountGold+=units*(-priceDelta);
+                long sourceCost=WithdrawInventoryValue(seller,sku,units);
                 StockRemove(seller.Stock,sku,units);
+                MarketObserveSale(seller,sku,units,payment,sourceCost,true);
                 // Freight still uses abstract common carriers, but long
                 // cart journeys cause real horseshoe wear at the closest
                 // operating depot. Without replacement shoes, some runs
@@ -555,7 +540,7 @@ public sealed partial class SettlementWorld
                         .ThenBy(p=>p.Id,StringComparer.Ordinal).FirstOrDefault();
                     if(depot is not null &&
                         Quantity(depot.Stock,"horseshoes")>0)
-                        UseFinished(depot.Stock,"horseshoes",1);
+                        UseBusinessSupply(depot,"horseshoes",1);
                     else
                     {
                         duration=checked(duration+90);
@@ -565,11 +550,13 @@ public sealed partial class SettlementWorld
                 int id=_nextFreightId++;
                 long arrival=checked(Minute+duration);
                 _freight.Add(id,new FreightShipment(
-                    seller,buyer,sku,units,Minute,arrival));
+                    seller,buyer,sku,units,Minute,arrival,
+                    ToMilli(payment+charge)));
                 _queue.Enqueue(-2-id,(arrival,_sequence++));
                 _shipmentsSent++;
                 need-=units;
             }
+            if(need>0)_unfilledOrders+=need;
         }
     }
 
@@ -618,8 +605,7 @@ public sealed partial class SettlementWorld
             !food && shop.Kind is not (BusinessKinds.GoodsRetail or BusinessKinds.Workshop or
                 BusinessKinds.Sawmill or BusinessKinds.Leatherworker))
             return;
-        int cost=_settings.GoodsPrice;
-        if(!food && resident.Gold<cost)return;
+        decimal cost=0;
         string[] candidates=food?CommodityRecipes.Meals:
             ["firewood","iron_tools","leather_goods","furnishings"];
         string? sku=food
@@ -631,12 +617,14 @@ public sealed partial class SettlementWorld
                 .FirstOrDefault()
             : NeededSupplyAtShop(resident,shop);
         if(sku is null)return;
-        if(food)cost=MealRetailQuote(shop,sku);
-        if(resident.Gold<cost)return;
+        cost=food?MealRetailQuote(shop,sku):HouseholdGoodsQuote(shop,sku);
+        if(resident.Gold<cost || cost<=0)return;
         int count=food && sku=="bread" && BreadBulkDiscount(shop) &&
             resident.Food<2 ? 2 : 1;
+        long acquisition=WithdrawInventoryValue(shop,sku,count);
         StockRemove(shop.Stock,sku,count);
         StockAdd(resident.Stock,sku,count);
+        MarketObserveSale(shop,sku,count,cost,acquisition,false);
         if(food)
         {
             resident.Food+=count;
@@ -649,8 +637,9 @@ public sealed partial class SettlementWorld
             resident.LastGoodsShoppingDay=Minute/DayMinutes;
         }
         resident.Gold-=cost;
-        int tax=food?Math.Min(_settings.FoodSalesTax,cost-1):
-            _settings.GoodsSalesTax;
+        decimal tax=food
+            ?Math.Min(Money(cost*0.05m),Math.Max(0m,cost-0.01m))
+            :Math.Min(Money(cost*0.10m),Math.Max(0m,cost-0.01m));
         if(food && sku=="bread")
         {
             _breadSalesUnits+=count;

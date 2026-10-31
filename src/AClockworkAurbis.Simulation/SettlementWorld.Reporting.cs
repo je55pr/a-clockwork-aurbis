@@ -8,7 +8,7 @@ public sealed partial class SettlementWorld
             Observer(new SimObservation(Minute,actor.Source.Id,action,detail));
     }
 
-    private long TotalGold() =>
+    private decimal TotalGold() =>
         checked(_businesses.Sum(b=>b.Gold)+_residents.Sum(r=>r.Gold)+_publicGold);
 
     private long TotalFood() =>
@@ -94,6 +94,26 @@ public sealed partial class SettlementWorld
             FirewoodBurned=_fuelBurned,
             FreightDelayedForGear=_carriageEquipmentDelays,
             IdleProductionHoursAvoided=_idleProductionHoursAvoided,
+            MarketWholesaleRevenue=_marketWholesaleRevenue,
+            MarketWholesaleCostMilli=_marketWholesaleCostsMilli,
+            MarketRetailRevenue=_marketRetailRevenue,
+            MarketRetailCostMilli=_marketRetailCostsMilli,
+            UnfilledCommodityOrderUnits=_unfilledOrders,
+            MarketTrades=_marketTradeCount,
+            MarketQuotes=Detailed?_businesses
+                .OrderBy(b=>b.Id,StringComparer.Ordinal)
+                .SelectMany(b=>b.Stock.OrderBy(s=>s.Key,StringComparer.Ordinal)
+                    .Where(s=>CanSellCommodity(b,s.Key) ||
+                        IsKitchenBusiness(b) && CommodityRecipes.Edible(s.Key) ||
+                        b.Kind==BusinessKinds.GoodsRetail &&
+                            CommodityRecipes.HouseholdGoods.Contains(s.Key))
+                    .Select(s=>new MarketQuoteSnapshot(b.Id,b.Name,b.Kind,
+                        s.Key,s.Value,UnitCostMilli(b,s.Key),
+                        CanSellCommodity(b,s.Key)?ToSeptims(MarketAskMilli(b,s.Key)):0m,
+                        CommodityRecipes.Edible(s.Key) ||
+                            CommodityRecipes.HouseholdGoods.Contains(s.Key) &&
+                            b.Kind==BusinessKinds.GoodsRetail ?
+                            MarketRetailQuote(b,s.Key):0))).ToArray():[],
             ScarcityPricePremiumGold=_scarcityPremiumGold,
             SurplusPriceDiscountGold=_surplusDiscountGold,
             HomeCookingBatches=_homeCookingBatches,
@@ -150,7 +170,11 @@ public sealed partial class SettlementWorld
         {
             if(checked(TotalGold()+_outsideGold)!=_initialAllGold)
                 throw new InvalidOperationException("All gold accounts including foreign trade do not reconcile");
-            if(Detailed)ValidateCommodityLedger();
+            if(Detailed)
+            {
+                ValidateCommodityLedger();
+                CheckMarketCostInvariants();
+            }
             else
             {
             if(TotalFood()+_outsideFood+_meals!=

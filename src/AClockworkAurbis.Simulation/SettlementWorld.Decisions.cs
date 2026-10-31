@@ -99,7 +99,7 @@ public sealed partial class SettlementWorld
         // Household tool/general-goods purchases are deliberately modest.
         // We do not assert which specific TES items residents need yet.
         if((Detailed?WantsHouseholdSupply(actor):actor.Goods==0) &&
-           actor.Gold>=_settings.GoodsPrice+EverydayMealCost+
+           actor.Gold>=EverydayMealCost+
                (Detailed && actor.HousingId is not null ? _settings.DailySharedRent*3 : 0) &&
            Minute/DayMinutes>actor.LastGoodsShoppingDay+2 &&
            hour>=9&&hour<20 && actor.Satiation>=37)
@@ -130,7 +130,7 @@ public sealed partial class SettlementWorld
     private BusinessState? ChooseShop(ResidentState actor,bool food)
     {
         BusinessState? best=null;
-        long lowest=long.MaxValue;
+        decimal lowest=decimal.MaxValue;
         foreach(var shop in food?_foodShops:_goodsShops)
         {
             if(food)
@@ -145,14 +145,26 @@ public sealed partial class SettlementWorld
             }
             else if(shop.Kind is not (BusinessKinds.GoodsRetail or BusinessKinds.Workshop
                     or BusinessKinds.Sawmill or BusinessKinds.Leatherworker) ||
-                    (Detailed?NeededSupplyAtShop(actor,shop) is null:shop.Goods<1))continue;
+                    (Detailed?NeededSupplyAtShop(actor,shop) is not string sku ||
+                        HouseholdGoodsQuote(shop,sku)>actor.Gold:
+                        shop.Goods<1))continue;
             // Source-backed map proximity outranks an arbitrary source-ID hash.
             // Stable small jitter breaks ties without drawing everyone into
             // one vendor on the same city-centre marker.
             ulong hash=StableRandom.Hash(actor.Source.Id,_settings.Seed)^
                 StableRandom.Hash(shop.Id,unchecked(_settings.Seed+41));
             if(shop.Id==actor.CurrentPlaceId)return shop;
-            long cost=JourneyDuration(actor,shop.Id)+(long)(hash%5uL);
+            long trip=JourneyDuration(actor,shop.Id);
+            decimal price=Detailed
+                ? food?CommodityRecipes.Meals.Where(s=>Quantity(shop.Stock,s)>0 &&
+                        MealRetailQuote(shop,s)<=actor.Gold)
+                        .Select(s=>MealRetailQuote(shop,s)).DefaultIfEmpty(9999).Min()
+                    : NeededSupplyAtShop(actor,shop) is string goodsSku ?
+                        HouseholdGoodsQuote(shop,goodsSku):9999
+                : 0;
+            // A cost of one septim is worth about six minutes of walking
+            // to most customers; urgent food still favours local supply.
+            decimal cost=trip+price*6m+(long)(hash%5uL);
             if(cost<lowest){lowest=cost;best=shop;}
         }
         return best;

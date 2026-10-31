@@ -8,12 +8,13 @@ namespace AClockworkAurbis.Simulation;
 /// </summary>
 public sealed partial class SettlementWorld
 {
-    private long _publicGold, _outsideGold, _initialAllGold;
+    private decimal _publicGold, _outsideGold, _initialAllGold;
     private int _outsideFood, _outsideMaterials, _outsideGoods;
     private int _initialOutsideFood, _initialOutsideMaterials, _initialOutsideGoods;
     private long _localFood, _subsistenceFood, _localMaterials;
-    private long _foodExports, _goodsExports, _materialsExports, _goldImportsPaid, _goldExportsEarned;
-    private long _aidPaid, _taxRevenue, _cooperativeDistributions;
+    private long _foodExports, _goodsExports, _materialsExports;
+    private decimal _goldImportsPaid, _goldExportsEarned;
+    private decimal _aidPaid, _taxRevenue, _cooperativeDistributions;
     private long _foodImportsPaidUnits, _materialsImportsPaidUnits;
     private readonly HashSet<string> _aidRecipients = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<ResidentState>> _staff = new(StringComparer.Ordinal);
@@ -298,15 +299,15 @@ public sealed partial class SettlementWorld
     {
         foreach (var business in _businesses)
         {
-            long surplus = business.Gold - _settings.StartingBusinessGold;
+            decimal surplus = business.Gold - _settings.StartingBusinessGold;
             if (surplus <= 50) continue;
             if (business.Kind == BusinessKinds.FoodProducer &&
                 _staff.TryGetValue(business.Id, out var workers) && workers.Count > 0)
             {
                 // Co-ops share operating surplus with paid workers and the
                 // community. Not a fictitious private shop ownership claim.
-                long budget = Math.Min(surplus / 3, 500);
-                long perWorker = Math.Min(25, budget / workers.Count);
+                decimal budget = Math.Min(Math.Round(surplus / 3,2), 500);
+                decimal perWorker = Math.Min(25,Math.Round(budget / workers.Count,2));
                 foreach (var worker in workers)
                 {
                     if (perWorker <= 0) break;
@@ -324,8 +325,9 @@ public sealed partial class SettlementWorld
                 // Processors also participate, rather than capturing the
                 // entire island's cash in a few profitable bakeries.
                 int cap = IsDetailedProcessor(business) ? 600 : 100;
-                long levy = business.Kind == BusinessKinds.ImportHub ?
-                    surplus / 3 : Math.Min(surplus / 10,cap);
+                decimal levy = business.Kind == BusinessKinds.ImportHub ?
+                    Math.Round(surplus/3,2) :
+                    Math.Min(Math.Round(surplus/10,2),cap);
                 if (levy <= 0) continue;
                 business.Gold -= levy;
                 _publicGold += levy;
@@ -400,8 +402,8 @@ public sealed partial class SettlementWorld
         {
             if (service.WorkerCount == 0) continue;
             long payroll = (long)service.WorkerCount * 8 * _settings.HourlyWage;
-            long missing = Math.Max(0, payroll - service.Gold);
-            long granted = Math.Min(missing, _publicGold / 4);
+            decimal missing = Math.Max(0, payroll - service.Gold);
+            decimal granted = Math.Min(missing, Math.Round(_publicGold/4,2));
             if (granted == 0) continue;
             _publicGold -= granted;
             service.Gold += granted;
@@ -418,12 +420,12 @@ public sealed partial class SettlementWorld
         for (int i = 0; i < count && _publicGold > 0; i++)
         {
             var person = _residents[(start + i) % count];
-            int target = EverydayMealCost * 2 +
+            decimal target = EverydayMealCost * 2 +
                 (Detailed && person.HousingId is not null ?
                     _settings.DailySharedRent * 2 : 0);
             if (person.Gold >= target) continue;
-            long need = target - person.Gold;
-            long grant = Math.Min(_publicGold, Math.Min(need,
+            decimal need = target - person.Gold;
+            decimal grant = Math.Min(_publicGold, Math.Min(need,
                 _settings.DailyAssistanceLimit));
             if (grant == 0) continue;
             _publicGold -= grant;

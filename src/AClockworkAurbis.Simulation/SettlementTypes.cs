@@ -158,7 +158,7 @@ public sealed class ResidentState
     public int Rehousings { get; internal set; }
     public int Evictions { get; internal set; }
     public int HomelessDays { get; internal set; }
-    public long RentSpent { get; internal set; }
+    public decimal RentSpent { get; internal set; }
     // Source-backed job links are immutable; contracts are simulation state.
     public string? WorkId => OnUnpaidLeave ? null : AssignedWorkPlaceId ?? Source.WorkPlaceId;
     public bool OnUnpaidLeave { get; internal set; }
@@ -168,15 +168,15 @@ public sealed class ResidentState
     public int SubsistenceFoodHarvested { get; internal set; }
     public double MinutesAtZeroSatiation { get; internal set; }
     public double MinutesBelow20Satiation { get; internal set; }
-    public long AssistanceGold { get; internal set; }
-    public long CooperativeIncome { get; internal set; }
+    public decimal AssistanceGold { get; internal set; }
+    public decimal CooperativeIncome { get; internal set; }
     public string CurrentPlaceId { get; internal set; }
     public string DestinationPlaceId { get; internal set; }
     public SettlementAction Activity { get; internal set; }
     public long ActionStart { get; internal set; }
     public long LastUpdate { get; internal set; }
     public int WorkStart { get; }
-    public long Gold { get; internal set; }
+    public decimal Gold { get; internal set; }
     public int Food { get; internal set; }
     public int Goods { get; internal set; }
     internal Dictionary<string,int> Stock { get; } = new(StringComparer.Ordinal);
@@ -193,8 +193,8 @@ public sealed class ResidentState
     public int HomeCookingBatches { get; internal set; }
     public int GroceryKitsPurchased { get; internal set; }
     internal long LastFailedGrocerySearchDay { get; set; } = -1;
-    public long WageIncome { get; internal set; }
-    public long DividendIncome { get; internal set; }
+    public decimal WageIncome { get; internal set; }
+    public decimal DividendIncome { get; internal set; }
     public long UnpaidHours { get; internal set; }
     public long WorkMinutes { get; internal set; }
     public long SleepMinutes { get; internal set; }
@@ -220,28 +220,34 @@ public sealed class BusinessState
     public string? OwnerId => Definition.OwnerNpcId; // Actual source owner, if verifiable.
     public string? SimulatedLeaseholderId { get; internal set; }
     public string LeaseEvidence { get; internal set; } = "unresolved";
-    public long DividendsPaid { get; internal set; }
+    public decimal DividendsPaid { get; internal set; }
     public IReadOnlyList<string> Operators => Definition.OperatorNpcIds;
-    public long Gold { get; internal set; }
+    public decimal Gold { get; internal set; }
     public int Food { get; internal set; }
     public int Materials { get; internal set; }
     public int Goods { get; internal set; }
     internal Dictionary<string,int> Stock { get; } = new(StringComparer.Ordinal);
     public IReadOnlyDictionary<string,int> CommodityStock { get; }
+    internal Dictionary<string,long> InventoryValueMilli { get; } =
+        new(StringComparer.Ordinal);
+    internal Dictionary<string,long> SoldBySku { get; } =
+        new(StringComparer.Ordinal);
     public int ToolWearHours { get; internal set; }
-    public long WagesPaid { get; internal set; }
-    public long RetailRevenue { get; internal set; }
-    public long WholesaleRevenue { get; internal set; }
-    public long WholesaleSpending { get; internal set; }
+    public decimal WagesPaid { get; internal set; }
+    public decimal RetailRevenue { get; internal set; }
+    public long RetailCostOfGoodsMilli { get; internal set; }
+    internal long LastRetailCostOfGoodsMilliAtDay { get; set; }
+    public decimal WholesaleRevenue { get; internal set; }
+    public decimal WholesaleSpending { get; internal set; }
     // Includes paid delivery charges. Used to quote bread relative to its
     // actual acquisition cost rather than an arbitrary universal price.
-    public long BreadLandedGold { get; internal set; }
+    public decimal BreadLandedGold { get; internal set; }
     public long BreadLandedUnits { get; internal set; }
-    public long BreadRevenueGold { get; internal set; }
+    public decimal BreadRevenueGold { get; internal set; }
     public long BreadSalesUnits { get; internal set; }
     public int RetailSales { get; internal set; }
     internal int LastRetailSalesAtDay { get; set; }
-    internal long LastRetailRevenueAtDay { get; set; }
+    internal decimal LastRetailRevenueAtDay { get; set; }
     internal long LastBreadSalesAtDay { get; set; }
     internal int ServiceHoursBudget { get; set; } = 2;
     internal int ServiceHoursWorkedToday { get; set; }
@@ -315,17 +321,22 @@ public sealed record SettlementSettings
 public sealed record BusinessSnapshot(
     string Name, string Kind, string PlaceId, string? OwnerId,
     int NamedOperators, string? SimulatedLeaseholderId, string LeaseEvidence,
-    long Gold, int Food, int Materials, int Goods,
-    int RetailSales, int WorkHours, int ItemsCrafted, long WagesPaid,
-    long DividendsPaid,
+    decimal Gold, int Food, int Materials, int Goods,
+    int RetailSales, int WorkHours, int ItemsCrafted, decimal WagesPaid,
+    decimal DividendsPaid,
     int CargoCapacity = 0, long CargoHandled = 0,
     IReadOnlyDictionary<string,int>? CommodityInventory = null);
 
+public sealed record MarketQuoteSnapshot(
+    string BusinessId,string BusinessName,string BusinessKind,
+    string Commodity,int Stock,long UnitCostMilli,
+    decimal WholesaleAsk,decimal RetailPrice);
+
 public sealed record BreadMarketSnapshot(
     string BusinessId,string BusinessName,string District,
-    int BreadInStock,int PricePerLoaf,bool TwoForOneAvailable,
-    long PurchasedLoaves,long LandedCostGold,
-    long LoavesSold,long BreadRevenueGold);
+    int BreadInStock,decimal PricePerLoaf,bool TwoForOneAvailable,
+    long PurchasedLoaves,decimal LandedCostGold,
+    long LoavesSold,decimal BreadRevenueGold);
 
 public sealed record FreightRouteSnapshot(
     string FromId, string From, string ToId, string To, string Commodity, long Units);
@@ -347,8 +358,8 @@ public sealed record SettlementReport
     public required int InferredWorkAssignments { get; init; }
     public required long Minute { get; init; }
     public required long Events { get; init; }
-    public required long Wages { get; init; }
-    public required long Dividends { get; init; }
+    public required decimal Wages { get; init; }
+    public required decimal Dividends { get; init; }
     public required long UnpaidHours { get; init; }
     public required long RetailFoodSales { get; init; }
     public required long RetailGoodsSales { get; init; }
@@ -369,8 +380,8 @@ public sealed record SettlementReport
     public required long InitialFood { get; init; }
     public required long InitialMaterials { get; init; }
     public required long InitialGoods { get; init; }
-    public required long InitialGold { get; init; }
-    public required long TotalGold { get; init; }
+    public required decimal InitialGold { get; init; }
+    public required decimal TotalGold { get; init; }
     public required int SyntheticHomeCount { get; init; }
     public required int UnemployedResidents { get; init; }
     public required int ResidentsWithLowSatiation { get; init; }
@@ -388,16 +399,16 @@ public sealed record SettlementReport
     public long MaterialsExported { get; init; }
     public long FoodBoughtExternally { get; init; }
     public long MaterialsBoughtExternally { get; init; }
-    public long GoldPaidAbroad { get; init; }
-    public long GoldReceivedFromAbroad { get; init; }
-    public long AssistanceGoldPaid { get; init; }
+    public decimal GoldPaidAbroad { get; init; }
+    public decimal GoldReceivedFromAbroad { get; init; }
+    public decimal AssistanceGoldPaid { get; init; }
     public int AssistedResidents { get; init; }
-    public long RevenueTaxed { get; init; }
-    public long CooperativeDistributions { get; init; }
-    public long PublicGold { get; init; }
-    public long ExternalGold { get; init; }
-    public long InitialAllAccountsGold { get; init; }
-    public long AllAccountsGold { get; init; }
+    public decimal RevenueTaxed { get; init; }
+    public decimal CooperativeDistributions { get; init; }
+    public decimal PublicGold { get; init; }
+    public decimal ExternalGold { get; init; }
+    public decimal InitialAllAccountsGold { get; init; }
+    public decimal AllAccountsGold { get; init; }
     public int ExternalFood { get; init; }
     public int ExternalMaterials { get; init; }
     public long TotalFoodIncludingExternal { get; init; }
@@ -413,7 +424,7 @@ public sealed record SettlementReport
     public int HousingBeds { get; init; }
     public int HousingOccupied { get; init; }
     public int HomelessResidents { get; init; }
-    public long RentCollected { get; init; }
+    public decimal RentCollected { get; init; }
     public int TotalEvictions { get; init; }
     public int TotalRelocations { get; init; }
     public int TotalRehousings { get; init; }
@@ -424,7 +435,7 @@ public sealed record SettlementReport
     public int FoodInTransit { get; init; }
     public int MaterialsInTransit { get; init; }
     public int GoodsInTransit { get; init; }
-    public long FreightFees { get; init; }
+    public decimal FreightFees { get; init; }
     public FreightRouteSnapshot[] FreightRoutes { get; init; } = [];
     public CommoditySnapshot[] CommodityDetails { get; init; } = [];
     public long RecipesCompleted { get; init; }
@@ -432,14 +443,21 @@ public sealed record SettlementReport
     public long FirewoodBurned { get; init; }
     public long FreightDelayedForGear { get; init; }
     public long IdleProductionHoursAvoided { get; init; }
-    public long ScarcityPricePremiumGold { get; init; }
-    public long SurplusPriceDiscountGold { get; init; }
+    public decimal MarketWholesaleRevenue { get; init; }
+    public long MarketWholesaleCostMilli { get; init; }
+    public decimal MarketRetailRevenue { get; init; }
+    public long MarketRetailCostMilli { get; init; }
+    public long UnfilledCommodityOrderUnits { get; init; }
+    public long MarketTrades { get; init; }
+    public MarketQuoteSnapshot[] MarketQuotes { get; init; } = [];
+    public decimal ScarcityPricePremiumGold { get; init; }
+    public decimal SurplusPriceDiscountGold { get; init; }
     public long HomeCookingBatches { get; init; }
     public long HomeCookedMeals { get; init; }
     public long ChefCookedMeals { get; init; }
     public long OneSeptimBreadSold { get; init; }
     public long BreadUnitsSold { get; init; }
-    public long BreadSalesRevenue { get; init; }
+    public decimal BreadSalesRevenue { get; init; }
     public long DiscountedBreadUnits { get; init; }
     public int OneSeptimBreadMarkets { get; init; }
     public BreadMarketSnapshot[] BreadMarkets { get; init; } = [];

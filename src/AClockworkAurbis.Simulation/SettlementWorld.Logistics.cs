@@ -5,7 +5,8 @@ namespace AClockworkAurbis.Simulation;
 // Carrier ownership, roads and vessel simulation are not modelled yet.
 internal sealed record FreightShipment(
     BusinessState From, BusinessState To, string Commodity, int Quantity,
-    long DepartMinute, long ArriveMinute);
+    long DepartMinute, long ArriveMinute,
+    long LandedValueMilli = 0);
 
 public sealed partial class SettlementWorld
 {
@@ -13,7 +14,8 @@ public sealed partial class SettlementWorld
     private readonly Dictionary<(string From,string To,string Commodity),long>
         _deliveredByRoute = new();
     private int _nextFreightId;
-    private long _shipmentsSent, _shipmentsDelivered, _freightFees;
+    private long _shipmentsSent, _shipmentsDelivered;
+    private decimal _freightFees;
     private long _freightUnitsDelivered;
 
     private int Inbound(BusinessState buyer, string commodity)
@@ -73,7 +75,7 @@ public sealed partial class SettlementWorld
                 (int)Math.Ceiling((double)duration / 90) *
                 _settings.FreightFeePer90Minutes);
             if (buyer.Gold < fee) continue;
-            long budget = buyer.Gold - fee;
+            decimal budget = buyer.Gold - fee;
             int affordable = unitPrice == 0 ? needed :
                 (int)Math.Min(int.MaxValue, budget / unitPrice);
             int amount = Math.Min(_settings.MaxFreightLoad,
@@ -107,7 +109,11 @@ public sealed partial class SettlementWorld
         var shipment = _freight[id];
         _freight.Remove(id);
         if(Detailed)
+        {
             StockAdd(shipment.To.Stock,shipment.Commodity,shipment.Quantity);
+            CreditInventoryValue(shipment.To,shipment.Commodity,
+                shipment.LandedValueMilli);
+        }
         else switch (shipment.Commodity)
         {
             case "food":

@@ -12,8 +12,9 @@ public static class CommodityRecipes
     public static readonly string[] Meals =
         ["provisions","foraged_greens","bread","vegetable_stew",
          "garden_salad","fish_meal","roast_meat","chef_game_pie"];
-    // Consumer prices, not wholesale ingredient valuations. A loaf of bread
-    // is always the one-septim, one-full-meal reference basket.
+    // Reference prices for opening economic assumptions and the basic
+    // one-septim bread affordability benchmark. Actual shop prices are
+    // computed per seller from costs, local stock and delivery conditions.
     public static readonly IReadOnlyDictionary<string,int> MealRetailPrices =
         new Dictionary<string,int>(StringComparer.Ordinal)
         {
@@ -21,24 +22,10 @@ public static class CommodityRecipes
             ["garden_salad"]=3, ["vegetable_stew"]=4,
             ["fish_meal"]=5, ["roast_meat"]=5, ["chef_game_pie"]=8
         };
-    public static int BreadPriceInSeptims(int stock,long landedGold,
-        long landedUnits)
-    {
-        if(stock<=0)return 0;
-        if(landedGold<0 || landedUnits<0)
-            throw new ArgumentOutOfRangeException(nameof(landedGold));
-        int price=1; // Everyday bread in a well-supplied connected town.
-        if(landedUnits>0 && landedGold*4>landedUnits*3)
-            price++; // Expensive freight or purchasing requires higher margins.
-        if(stock<=3)price++; // Local shortage.
-        return price;
-    }
-
-    // With indivisible septims, an exceptionally well-stocked bakery can
-    // offer two loaves for one coin. This is a surplus discount, not the
-    // ordinary one-septim-per-loaf price.
-    public static bool CanDiscountSurplusBread(int stock,int oneLoafPrice) =>
-        stock>=145 && oneLoafPrice==1;
+    // Deep-surplus bakeries may offer extra loaves as a promotion.
+    // This is separate from ordinary two-decimal per-loaf quotations.
+    public static bool CanDiscountSurplusBread(int stock,decimal oneLoafPrice) =>
+        stock>=145 && oneLoafPrice is >0m and <=1m;
 
     public static int SatiationPerMeal(string sku) => sku switch
     {

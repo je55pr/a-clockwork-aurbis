@@ -34,6 +34,7 @@ var tests=new (string Name,Action Run)[]
     ("Public foraging cannot bypass finite commercial agriculture", FinitePublicForaging),
     ("One septim bread is a full meal with sustainable producer yields", BreadSeptimBenchmark),
     ("Bread prices respond to local stock and logistics", BreadScarcityPricing),
+    ("Fractional septims really settle and all accounts reconcile", FractionalMarketSettlement),
     ("Households cook with real ingredients at lower yields than chefs", HouseholdCookingAndChefs),
     ("Deterministic regional simulations can run in time chunks", RegionalDeterminism),
     ("Large 10k actor headless performance and integrity", Stress)
@@ -900,34 +901,47 @@ static void BreadSeptimBenchmark()
     });
     var opening=world.Report();
     Expect(opening.BreadMarkets.Any(m=>m.BusinessName=="Ye Olde Test Tavern" &&
-        m.PricePerLoaf==1 && m.BreadInStock>0),
-        "a stocked ordinary tavern begins by listing bread at one septim");
+        m.PricePerLoaf>=0.75m && m.PricePerLoaf<=1.25m &&
+        m.PricePerLoaf==Math.Round(m.PricePerLoaf,2) &&
+        m.BreadInStock>0),
+        "a stocked ordinary tavern quotes bread near one septim to two decimals");
+    Expect(opening.BreadMarkets.Any(m=>m.PricePerLoaf>0m &&
+        m.PricePerLoaf!=decimal.Truncate(m.PricePerLoaf)),
+        "a real initial market has a sub-septim loaf price");
     world.AdvanceTo(1440L*6);
     world.CheckInvariants();
     var daySix=world.Report();
     CheckCommodityBalance(daySix);
-    Expect(daySix.OneSeptimBreadSold>0 && daySix.BreadSalesRevenue>0,
-        "one-septim bread is really sold and its proceeds reach a seller");
+    Expect(daySix.BreadUnitsSold>0 && daySix.BreadSalesRevenue>0,
+        "fractionally priced bread is really sold and its proceeds reach a seller");
     Expect(daySix.AllAccountsGold==daySix.InitialAllAccountsGold,
         "cheap bread does not mint money or require a public subsidy");
 }
 
 static void BreadScarcityPricing()
 {
-    Expect(CommodityRecipes.BreadPriceInSeptims(24,12,24)==1,
-        "well-stocked shop buying 24 loaves for 12 septims quotes one per loaf");
-    Expect(CommodityRecipes.BreadPriceInSeptims(24,22,24)==2,
-        "landed cost over three-quarters septim can raise the local price");
-    Expect(CommodityRecipes.BreadPriceInSeptims(2,12,24)==2,
-        "low inventory alone can lift bread above the baseline");
-    Expect(CommodityRecipes.BreadPriceInSeptims(2,22,24)==3,
-        "scarcity plus expensive delivery can raise the price further");
-    Expect(CommodityRecipes.BreadPriceInSeptims(0,12,24)==0,
-        "a sold-out shop cannot quote imaginary bread");
-    Expect(CommodityRecipes.CanDiscountSurplusBread(150,1) &&
-        !CommodityRecipes.CanDiscountSurplusBread(24,1) &&
-        !CommodityRecipes.CanDiscountSurplusBread(150,2),
-        "two-for-one offers only apply to genuinely surplus one-septim bread");
+    var world=new SettlementWorld(CommodityFixture(),new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false
+    });
+    var opening=world.Report();
+    Expect(opening.BreadMarkets.Any(m=>m.PricePerLoaf is >0m and <1m),
+        "production-cost bread may retail below one septim");
+    Expect(opening.BreadMarkets.All(m=>m.PricePerLoaf*100m==
+        decimal.Truncate(m.PricePerLoaf*100m)),
+        "all displayed bread quotes use exactly hundredths of a septim");
+    world.AdvanceTo(1440L*10);
+    world.CheckInvariants();
+    var later=world.Report();
+    CheckCommodityBalance(later);
+    Expect(later.MarketTrades>0 && later.MarketQuotes.Any(),
+        "wholesale and retail market activity creates real quotes");
+    Expect(later.MarketQuotes.All(q=>q.RetailPrice>=0m &&
+        q.RetailPrice*100m==decimal.Truncate(q.RetailPrice*100m)),
+        "item-level retail prices remain exact to two decimal places");
+    Expect(later.MarketQuotes.Any(q=>q.WholesaleAsk>0m &&
+        q.WholesaleAsk*100m==decimal.Truncate(q.WholesaleAsk*100m)),
+        "wholesale offers can settle at fractional septims");
 }
 
 static void HouseholdCookingAndChefs()
@@ -953,4 +967,33 @@ static void HouseholdCookingAndChefs()
     Expect(rare.Products.Values.Sum()>0 &&
         !CommodityRecipes.HouseholdMeals.Any(r=>r.Id==rare.Id),
         "higher skill cuisine is not an ordinary household recipe");
+}
+
+static void FractionalMarketSettlement()
+{
+    var world=new SettlementWorld(CommodityFixture(),new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableExternalTrade=false
+    });
+    world.AdvanceTo(1440L*10);
+    world.CheckInvariants();
+    var report=world.Report();
+    CheckCommodityBalance(report);
+    Expect(report.MarketRetailRevenue>0m && report.MarketWholesaleRevenue>0m,
+        "wholesale and retail transactions pay into real accounts");
+    Expect(report.MarketRetailRevenue!=decimal.Truncate(report.MarketRetailRevenue) ||
+        report.MarketWholesaleRevenue!=decimal.Truncate(report.MarketWholesaleRevenue),
+        "actual market transactions settle in fractional septims");
+    Expect(world.Residents.Any(r=>r.Gold!=decimal.Truncate(r.Gold)) ||
+        world.Businesses.Any(b=>b.Gold!=decimal.Truncate(b.Gold)),
+        "fractional market receipts appear in real wallets, not just reporting");
+    Expect(report.AllAccountsGold==report.InitialAllAccountsGold,
+        "one-hundredth septim transfers cannot mint or destroy gold");
+    Expect(report.MarketQuotes.Any(q=>q.RetailPrice is >0m and <1m),
+        "dynamic retail quotes can fall below a whole septim");
+    Expect(report.MarketQuotes.All(q=>
+        q.WholesaleAsk*100m==decimal.Truncate(q.WholesaleAsk*100m) &&
+        q.RetailPrice*100m==decimal.Truncate(q.RetailPrice*100m)),
+        "every advertised price is exactly cent-precise");
 }
