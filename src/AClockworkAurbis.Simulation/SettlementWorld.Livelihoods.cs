@@ -169,7 +169,7 @@ public sealed partial class SettlementWorld
         _casualHours++;
         _casualWages+=rate;
         _casualWorkers.Add(person.Source.Id);
-        CompleteCommodityWork(person,employer,1);
+        CompleteCommodityWork(person,employer,1,rate);
         Observe(person,"casual_work",employer.Name+": "+rate+
             " gold for one resource-gathering hour");
     }

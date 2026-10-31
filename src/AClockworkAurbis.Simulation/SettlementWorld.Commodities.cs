@@ -210,7 +210,8 @@ public sealed partial class SettlementWorld
         }
     }
 
-    private bool CompleteCommodityWork(ResidentState actor,BusinessState company,int hours)
+    private bool CompleteCommodityWork(ResidentState actor,BusinessState company,
+        int hours,int? hourlyWage=null)
     {
         if(!_settings.EnableLocalProduction || hours<=0)return true;
         if(OpenResourceJob(company) && !CanCasualProduce(company))
@@ -240,7 +241,7 @@ public sealed partial class SettlementWorld
                         _settings.RenewableFoodPerWorkHour+company.CapitalLevel-1));
                     if(picked==0)break;
                     company.LandYieldRemaining-=picked;
-                    ExtractMarketStock(company,crop,picked,1);
+                    ExtractMarketStock(company,crop,picked,1,hourlyWage);
                     company.FoodProduced+=picked;
                     _localFood+=picked;
                 }
@@ -259,7 +260,7 @@ public sealed partial class SettlementWorld
                         _settings.RawMaterialPerWorkHour+company.CapitalLevel-1));
                     if(picked==0)break;
                     company.MineralReserve-=picked;
-                    ExtractMarketStock(company,output,picked,1);
+                    ExtractMarketStock(company,output,picked,1,hourlyWage);
                     company.MaterialsExtracted+=picked;
                     _localMaterials+=picked;
                     company.ToolWearHours++;
@@ -287,10 +288,10 @@ public sealed partial class SettlementWorld
                     if(units<=0)break;
                     company.LandYieldRemaining-=units;
                     if(company.Kind==BusinessKinds.Fishery)
-                        ExtractMarketStock(company,"fish",units,1);
+                        ExtractMarketStock(company,"fish",units,1,hourlyWage);
                     else
                     {
-                        ExtractMarketStock(company,"game_meat",units,1);
+                        ExtractMarketStock(company,"game_meat",units,1,hourlyWage);
                         ExtractMarketStock(company,"raw_hide",units,0);
                     }
                     _localFood+=units;

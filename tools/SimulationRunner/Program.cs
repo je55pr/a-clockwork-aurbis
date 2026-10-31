@@ -85,7 +85,7 @@ try
     world.CheckInvariants();
     var report = world.Report();
     double agentsPerSecond = simClock.Elapsed.TotalSeconds > 0
-        ? seeds.Count * Math.Max(days, 1) / simClock.Elapsed.TotalSeconds : 0;
+        ? (double)seeds.Count * days / simClock.Elapsed.TotalSeconds : 0;
     double eventsPerSecond = simClock.Elapsed.TotalSeconds > 0
         ? report.EventsProcessed / simClock.Elapsed.TotalSeconds : 0;
     var output = new

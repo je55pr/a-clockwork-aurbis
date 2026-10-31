@@ -66,6 +66,8 @@ public sealed partial class SettlementWorld
         if(paid && OpenResourceJob(business))
             actor.RegularHoursToday+=hours;
         if(CompleteRegionalWork(actor,business,paid?hours:0))return;
+        // Even the simple prototype must not turn unpaid hours into goods.
+        if(!paid)return;
         // Craft workshops actually convert one raw-material unit into one
         // finished goods unit per completed productive hour.
         if(business.Kind==BusinessKinds.Workshop)

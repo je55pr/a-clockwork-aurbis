@@ -52,12 +52,13 @@ public sealed partial class SettlementWorld
             }
     }
 
-    private void ExtractMarketStock(BusinessState firm,string sku,int units,int hours)
+    private void ExtractMarketStock(BusinessState firm,string sku,int units,
+        int hours,int? paidWagePerHour=null)
     {
         Extract(firm.Stock,sku,units);
         // Extraction carries the labour hours that were actually paid.
         CreditInventoryValue(firm,sku,
-            checked((long)hours*_settings.HourlyWage*Milli));
+            checked((long)hours*(paidWagePerHour??_settings.HourlyWage)*Milli));
     }
 
     private void UseBusinessSupply(BusinessState firm,string sku,int units)

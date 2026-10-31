@@ -272,6 +272,11 @@ static void CatalogValidation()
         "none",BusinessKinds.FoodRetail,null,[],"")]}).Validate();}
     catch(InvalidDataException){failed=true;}
     Expect(failed,"businesses must reference genuine place IDs");
+    failed=false;
+    var missingOperators=cat with {Businesses=cat.Businesses.Select((b,i)=>
+        i==0?b with {OperatorNpcIds=null!}:b).ToArray()};
+    try{missingOperators.Validate();}catch(InvalidDataException){failed=true;}
+    Expect(failed,"null operator arrays in deserialized catalogs fail validation");
 }
 static void IslandTravel()
 {

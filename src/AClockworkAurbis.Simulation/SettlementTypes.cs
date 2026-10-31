@@ -78,6 +78,8 @@ public sealed record SettlementCatalog(
         }
         foreach (var business in Businesses)
         {
+            if (business.OperatorNpcIds is null)
+                throw new InvalidDataException("Business operator list cannot be null");
             if (business.OwnerNpcId is not null && !actorIds.Contains(business.OwnerNpcId))
                 throw new InvalidDataException("Owner has no source-backed resident profile");
         }

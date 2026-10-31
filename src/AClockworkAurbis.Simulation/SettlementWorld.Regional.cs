@@ -74,6 +74,7 @@ public sealed partial class SettlementWorld
                 var current = _staff[employer.Id].Count;
                 if (current >= ContractCapacity(employer)) continue;
                 long route = JourneyDuration(person, employer.Id);
+                if(route>130)continue;
                 ulong tie = StableRandom.Hash(person.Source.Id + employer.Id, _settings.Seed);
                 long score = route * 10L + (long)(tie % 30UL);
                 // A job involving someone's known profession is more

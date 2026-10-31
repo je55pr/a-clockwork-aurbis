@@ -12,7 +12,7 @@ function param(key,fallback=null){
  return args[i+1];
 }
 if(args.includes('--help')){
- console.log('node tools/SettlementCatalog/benchmark.js --db PATH --zone Auridon --days 3,30,90 --out-dir PATH [--seed 42] [--economy production|prototype] [--scenario normal|no-foreign|crop-failure|no-assistance]');
+ console.log('node tools/SettlementCatalog/benchmark.js --db PATH --zone Auridon --days 3,30,90 --out-dir PATH [--seed 42] [--economy commodities|production|prototype] [--scenario normal|no-foreign|crop-failure|no-assistance]');
  process.exit(0);
 }
 const dbPath=param('db'),zone=param('zone');
@@ -21,13 +21,16 @@ const days=param('days','3,30').split(',').map(Number);
 if(!days.length||days.some(n=>!Number.isInteger(n)||n<0||n>365))
  throw Error('Days must be comma-separated integers in 0..365');
 const seed=param('seed','42');
-if(!Number.isInteger(Number(seed)))throw Error('Seed must be an integer');
+if(!/^-?(?:0|[1-9][0-9]*)$/.test(seed)||!Number.isInteger(Number(seed))||
+ Number(seed)<-2147483648||Number(seed)>2147483647)
+ throw Error('Seed must be an Int32 decimal integer');
 const root=path.resolve(__dirname,'../..');
 const folder=param('out-dir',path.join(root,'.research','benchmarks'));
 const scenario=param('scenario','normal');
 if(!['normal','no-foreign','crop-failure','no-assistance'].includes(scenario))throw Error('Unknown benchmark scenario');
 const economicMode=param('economy','production');
-if(!['prototype','production'].includes(economicMode))throw Error('Expected economy prototype|production');
+if(!['prototype','production','commodities'].includes(economicMode))
+ throw Error('Expected economy prototype|production|commodities');
 const filename=zone.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')+(scenario==='normal'?'':'-'+scenario);
 fs.mkdirSync(folder,{recursive:true});
 const catalogPath=path.join(folder,filename+'-catalog.json');
@@ -111,7 +114,7 @@ const summary={
  'Imports and exports explicitly transfer stock and gold to a foreign account, not magic inventory',
  'Needs, prices, generic goods, wages and travel speed remain simulation assumptions',
  'Only eligible single-appearance profiles are simulated, not all source-linked NPCs',
- 'Wholesale transfers are currently same-day abstractions without cargo travel',
+ 'Wholesale transfers require funded physical freight and delayed delivery in regional and commodity modes',
  'No 3D simulation or Godot scene is loaded'
  ]};
 const summaryPath=path.join(folder,filename+'-summary.json');

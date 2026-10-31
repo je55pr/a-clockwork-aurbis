@@ -98,7 +98,7 @@ public sealed partial class SettlementWorld
                     id, 0, "Shared lodging near " + district + " #" + (i + 1),
                     "simulation_default_shared_housing", district, Catalog.Settlement,
                     "dwelling", "", reference?.MapX, reference?.MapY,
-                    "simulation_at_source_neighbourhood", reference?.District ?? district),
+                    "simulation_at_source_neighbourhood", reference?.District),
                     beds: 4, rent: _settings.DailySharedRent);
             }
         }

@@ -344,7 +344,8 @@ public sealed partial class SettlementWorld
         if(CommodityRecipes.HouseholdGoods.Contains(task.Sku,StringComparer.Ordinal))
             resident.Goods=checked(resident.Goods+task.Quantity);
         decimal tax=Money(cost*(CommodityRecipes.HouseholdGoods.Contains(
-            task.Sku,StringComparer.Ordinal)?_settings.DetailedGoodsTaxRate:
+            task.Sku,StringComparer.Ordinal) ||
+            !CommodityRecipes.Edible(task.Sku)?_settings.DetailedGoodsTaxRate:
             _settings.DetailedFoodTaxRate));
         tax=Math.Min(tax,Math.Max(0,cost-0.01m));
         resident.Gold-=cost;

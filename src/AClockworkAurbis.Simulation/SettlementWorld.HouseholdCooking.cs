@@ -80,7 +80,7 @@ public sealed partial class SettlementWorld
             return (Recipe:r,Price:price);
         }).Where(x=>x.Price>0&&x.Price<=person.Gold &&
             x.Price<=x.Recipe.Products.Values.Sum()*2)
-          .OrderBy(x=>(long)x.Price*1000/x.Recipe.Products.Values.Sum())
+          .OrderBy(x=>x.Price/x.Recipe.Products.Values.Sum())
           .ThenBy(x=>x.Price)
           .ThenBy(x=>StableRandom.Hash(x.Recipe.Id+person.Source.Id,_settings.Seed))
           .ToArray();

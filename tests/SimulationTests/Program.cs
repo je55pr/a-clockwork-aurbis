@@ -154,6 +154,27 @@ static void SourceProfiles()
         var nearby = NpcSeeds.ReadProfiles(path, area: "Vulkhel Guard");
         Assert(nearby.Count == 2, "area matches primary and candidate links");
         Assert(NpcSeeds.ReadProfiles(path, 1).Count == 1, "limit works");
+        File.WriteAllLines(path,
+        [
+            "    ",
+            """{"id":"npc:good","identity":{"name":"Good"}}""",
+            "{ malformed"
+        ]);
+        bool jsonLine=false;
+        try{NpcSeeds.ReadProfiles(path);}
+        catch(InvalidDataException e){jsonLine=e.Message.Contains("line 3");}
+        Assert(jsonLine,"whitespace-only lines count toward physical parse-error line numbers");
+        Assert(NpcSeeds.ReadProfiles(path,1).Count==1,
+            "explicit profile limit stops before a later malformed line");
+        File.WriteAllLines(path,
+        [
+            "",
+            """{"identity":{"name":"Missing id"}}"""
+        ]);
+        bool missingIdLine=false;
+        try{NpcSeeds.ReadProfiles(path);}
+        catch(InvalidDataException e){missingIdLine=e.Message.Contains("line 2");}
+        Assert(missingIdLine,"missing source ID reports its physical JSONL line");
     }
     finally { File.Delete(path); }
 }
