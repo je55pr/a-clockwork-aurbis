@@ -4,6 +4,7 @@ param(
     [switch]$FirstPersonLab,
     [switch]$ModelLab,
     [switch]$RigLab,
+    [switch]$WalkComparisonLab,
     [switch]$LegacyExperimentalRigLab
 )
 
@@ -148,6 +149,7 @@ try {
     # The default rig lab contains only native ESO poses. Explicit legacy
     # mode preserves the earlier experimental prosthetic-face/gait tests.
     if ($RigLab) { $arguments += ' "res://scenes/eso_native_animation_lab.tscn"' }
+    if ($WalkComparisonLab) { $arguments += ' "res://scenes/eso_walk_comparison_lab.tscn"' }
     if ($LegacyExperimentalRigLab) { $arguments += ' "res://scenes/source_rig_lab.tscn"' }
     $process = Start-Process -FilePath $godotExe -ArgumentList $arguments -WorkingDirectory $projectRoot -PassThru
     Add-Content -LiteralPath $logFile -Value "Started Godot PID $($process.Id): $godotExe"

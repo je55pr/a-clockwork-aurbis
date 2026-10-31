@@ -286,7 +286,7 @@ internal static class AnimationSurvey
                                 {
                                     // GrannyTransformTrack: name + flags + three 16-byte curve variants.
                                     const int trackStride = 60;
-                                    for (int t = 0; t < Math.Min(12, transformCount); t++)
+                                    for (int t = 0; t < Math.Min(512, transformCount); t++)
                                         names.Add(Str(tracks + t * trackStride));
                                 }
                                 groups.Add(new GroupInfo(Str(group), vectorCount, transformCount,
