@@ -50,6 +50,7 @@ public sealed partial class SettlementWorld
         int cost=food?_settings.MealPrice:_settings.GoodsPrice;
         int hour=(int)(Minute%DayMinutes)/60;
         if(hour is <7 or >=22||actor.Gold<cost)return;
+        if(Detailed){CompleteCommodityPurchase(actor,food);return;}
         if(food)
         {
             if(business.Kind!=BusinessKinds.FoodRetail||business.Food<=0)return;

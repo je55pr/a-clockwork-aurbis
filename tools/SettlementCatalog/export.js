@@ -188,8 +188,18 @@ try{
        zone:wholeZone,role:'food_producer',sourceUrl:'',
        mapX:anchor.mapX,mapY:anchor.mapY,
        mapEvidence:'simulation_at_source_anchor',district});
+     const cropProfiles={
+       'Constellation Farms':'lettuce,wheat',
+       'Flowervine Farm':'wheat,onion',
+       'Greenwater Cove':'potato,onion',
+       "Smuggler's Cove":'potato,lettuce',
+       'Glister Vale':'onion,lettuce',
+       'Dawnbreak':'wheat,potato',
+       'College of Aldmeri Propriety':'potato,wheat'};
+     const crop= cropProfiles[anchor.name]||'wheat,potato';
      businesses.push({placeId:farmId,kind:'food_producer',ownerNpcId:null,
-       operatorNpcIds:[],evidence:'SIMULATION HYPOTHESIS based on geographic/name hints, NOT confirmed ESO farmland'});
+       operatorNpcIds:[],productionProfile:crop,
+       evidence:'SIMULATION HYPOTHESIS '+crop+' based on place hints; crops NOT verified at ESO site'});
    }
    // Only a few unserved, populous settlements warrant a hypothetical food
    // market. Ruins and every roadside landmark do not receive one by default.
@@ -214,6 +224,39 @@ try{
      businesses.push({placeId:id,kind:'food_retail',ownerNpcId:null,
        operatorNpcIds:[],evidence:'SIMULATION HYPOTHESIS for an underserved population centre, NOT confirmed ESO market'});
      addedMarkets++;
+   }
+   // Specialized processing facilities are geographically sparse hypotheses.
+   // Source-backed mines, groves and forges remain source locations, while
+   // processors, hunting grounds and fisheries are explicitly invented.
+   const additional=[
+     ["Del's Claim",'smeltery','Smeltery near Del\'s Claim',null],
+     ['Isle of Contemplation','sawmill','Sawmill near Isle of Contemplation',null],
+     ['Shattered Grove','resource_producer','Managed woodland near Shattered Grove','logs'],
+     ['Shattered Grove','sawmill','Sawmill near Shattered Grove',null],
+     ['Glister Vale','hunter','Hunting grounds near Glister Vale',null],
+     ['Greenwater Cove','fishery','Fishing grounds near Greenwater Cove',null],
+     ['Glister Vale','tannery','Tannery near Glister Vale',null],
+     ['Phaer','leatherworker','Leather workshop near Phaer',null],
+     ['Vulkhel Guard','bakery','Bakery near Vulkhel Guard',null],
+     ['Skywatch','bakery','Bakery near Skywatch',null],
+     ['Firsthold','bakery','Bakery near Firsthold',null],
+     ['Phaer','bakery','Bakery near Phaer',null],
+     ['Dawnbreak','bakery','Bakery near Dawnbreak',null],
+     ['Greenwater Cove','bakery','Bakery near Greenwater Cove',null]
+   ];
+   for(const [anchorName,kind,label,profile] of additional){
+     const anchor=sourceSites.find(p=>p.name===anchorName&&p.mapX!==null);
+     if(!anchor)continue; // No invented geometry for missing source locations.
+     const id='sim:industry:'+kind+':'+anchor.id.replace(/[^a-z0-9]+/gi,'-');
+     resultPlaces.push({id,sourcePageId:0,name:label,
+       sourceType:'simulation_inferred_'+kind,settlement:anchor.name,
+       zone:wholeZone,role:kind,sourceUrl:'',
+       mapX:anchor.mapX,mapY:anchor.mapY,
+       mapEvidence:'simulation_at_source_anchor',district:anchor.district||anchor.name});
+     businesses.push({placeId:id,kind,ownerNpcId:null,operatorNpcIds:[],
+       productionProfile:profile,
+       evidence:'SIMULATION HYPOTHESIS: inferred '+kind+
+         ' anchored to named ESO place; existence and operations unverified'});
    }
  }
  const businessIds=new Set(businesses.map(b=>b.placeId));

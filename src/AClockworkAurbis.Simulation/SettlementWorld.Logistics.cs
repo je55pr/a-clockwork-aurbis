@@ -106,7 +106,9 @@ public sealed partial class SettlementWorld
         int id = -2 - eventIndex;
         var shipment = _freight[id];
         _freight.Remove(id);
-        switch (shipment.Commodity)
+        if(Detailed)
+            StockAdd(shipment.To.Stock,shipment.Commodity,shipment.Quantity);
+        else switch (shipment.Commodity)
         {
             case "food":
                 shipment.To.Food = checked(shipment.To.Food + shipment.Quantity);

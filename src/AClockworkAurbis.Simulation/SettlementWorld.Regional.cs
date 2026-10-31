@@ -24,13 +24,19 @@ public sealed partial class SettlementWorld
     private int _simulatedContracts;
     private long _furloughs, _rehired;
 
-    private bool Regional => _settings.Economy == EconomyMode.RegionalProduction;
+    private bool Regional => _settings.Economy is EconomyMode.RegionalProduction
+        or EconomyMode.CommodityProduction;
+    private bool Detailed => _settings.Economy == EconomyMode.CommodityProduction;
 
     private void InitializeRegional()
     {
-        _outsideGold = _settings.InitialOutsideGold;
-        _outsideFood = _initialOutsideFood = _settings.InitialOutsideFood;
-        _outsideMaterials = _initialOutsideMaterials = _settings.InitialOutsideMaterials;
+        // Commodity mode is a closed island until foreign cargo is converted
+        // to the same physical SKU ledger. Do not expose a phantom reserve.
+        _outsideGold = Detailed ? 0 : _settings.InitialOutsideGold;
+        _outsideFood = _initialOutsideFood =
+            Detailed ? 0 : _settings.InitialOutsideFood;
+        _outsideMaterials = _initialOutsideMaterials =
+            Detailed ? 0 : _settings.InitialOutsideMaterials;
         _initialOutsideGoods = _outsideGoods = 0;
         _publicGold = checked((long)_residents.Count * _settings.InitialPublicGoldPerResident);
         _farms = _businesses.Where(b => b.Kind == BusinessKinds.FoodProducer).ToArray();
@@ -96,6 +102,9 @@ public sealed partial class SettlementWorld
         employer.Kind switch
         {
             BusinessKinds.FoodProducer => 7,
+            BusinessKinds.Smeltery or BusinessKinds.Sawmill or BusinessKinds.Tannery
+                or BusinessKinds.Bakery or BusinessKinds.Hunter or BusinessKinds.Fishery
+                or BusinessKinds.Leatherworker => 5,
             BusinessKinds.ResourceProducer => 4,
             BusinessKinds.Workshop => 5,
             BusinessKinds.FoodRetail => 3,
@@ -108,6 +117,7 @@ public sealed partial class SettlementWorld
     private bool CompleteRegionalWork(ResidentState actor, BusinessState employer, int hours)
     {
         if (!Regional) return false;
+        if (Detailed) return CompleteCommodityWork(actor,employer,hours);
         if (!_settings.EnableLocalProduction || hours <= 0) return true;
         switch (employer.Kind)
         {
@@ -198,6 +208,7 @@ public sealed partial class SettlementWorld
         if (!Regional || !_byBusiness.TryGetValue(actor.CurrentPlaceId, out var plot) ||
             plot.Kind != BusinessKinds.FoodProducer || !_settings.EnableLocalProduction)
             return;
+        if(Detailed){HarvestCommoditySubsistence(actor,plot);return;}
         int harvested = Math.Min(2, plot.LandYieldRemaining);
         plot.LandYieldRemaining -= harvested;
         actor.Food += harvested;
@@ -213,7 +224,7 @@ public sealed partial class SettlementWorld
         if (_residents.Count == 0) return;
         // Environmental productivity: land regenerates a bounded harvest
         // potential once a day, not an inventory of magically delivered food.
-        if (_settings.EnableLocalProduction)
+        if (_settings.EnableLocalProduction && !Detailed)
         {
             int perFarm = _farms.Length == 0 ? 0 :
                 Math.Max(10, checked(_residents.Count *
@@ -228,7 +239,7 @@ public sealed partial class SettlementWorld
                         checked(producer.MineralReserve + 16)); // renewable forestry
         }
 
-        if (Minute > DayMinutes && Minute / DayMinutes % 5 == 0)
+        if (!Detailed && Minute > DayMinutes && Minute / DayMinutes % 5 == 0)
             foreach (var person in _residents)
                 if (person.Goods > 0) { person.Goods--; _goodsUsed++; }
 
@@ -239,7 +250,8 @@ public sealed partial class SettlementWorld
         ProvideFundedAssistance();
         ReassignSolventEmployment();
         RunHousingDay();
-        RegionalWholesaleAndTrade();
+        if(Detailed)RunCommodityDay();
+        else RegionalWholesaleAndTrade();
     }
 
     private void DistributeRegionalSurplus()

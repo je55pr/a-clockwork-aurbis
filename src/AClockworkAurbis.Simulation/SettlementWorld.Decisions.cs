@@ -97,10 +97,11 @@ public sealed partial class SettlementWorld
         {
             if(food)
             {
-                if(shop.Kind!=BusinessKinds.FoodRetail||shop.Food<1)continue;
+                if(shop.Kind!=BusinessKinds.FoodRetail||
+                    (Detailed?!HasPreparedMeal(shop):shop.Food<1))continue;
             }
             else if(shop.Kind is not (BusinessKinds.GoodsRetail or BusinessKinds.Workshop)||
-                    shop.Goods<1)continue;
+                    (Detailed?!HasHouseholdSupply(shop):shop.Goods<1))continue;
             // Source-backed map proximity outranks an arbitrary source-ID hash.
             // Stable small jitter breaks ties without drawing everyone into
             // one vendor on the same city-centre marker.

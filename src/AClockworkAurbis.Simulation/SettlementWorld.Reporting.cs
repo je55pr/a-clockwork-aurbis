@@ -12,6 +12,8 @@ public sealed partial class SettlementWorld
         checked(_businesses.Sum(b=>b.Gold)+_residents.Sum(r=>r.Gold)+_publicGold);
 
     private long TotalFood() =>
+        Detailed ? CommodityRecipes.Meals.Sum(s=>
+            CommodityStockOnHand(s)+InboundAll(s)) :
         checked(_businesses.Sum(b=>(long)b.Food)+_residents.Sum(r=>(long)r.Food)
             +TransitCount("food"));
 
@@ -81,6 +83,10 @@ public sealed partial class SettlementWorld
                 _residents.Count(r=>r.HousingId is null) : 0,
             RentCollected=_rentCollected,TotalEvictions=_evictions,
             TotalRelocations=_relocations,TotalRehousings=_rehousings,
+            CommodityDetails=Detailed?CommodityLedger():[],
+            RecipesCompleted=_recipeBatches,ToolsWornOut=_toolsWorn,
+            FirewoodBurned=_fuelBurned,
+            FreightDelayedForGear=_carriageEquipmentDelays,
             ShipmentsSent=_shipmentsSent,ShipmentsDelivered=_shipmentsDelivered,
             ShipmentsInTransit=_freight.Count,FreightUnitsDelivered=_freightUnitsDelivered,
             FoodInTransit=TransitCount("food"),MaterialsInTransit=TransitCount("materials"),
@@ -99,7 +105,9 @@ public sealed partial class SettlementWorld
                     b.Operators.Count,b.SimulatedLeaseholderId,b.LeaseEvidence,
                     b.Gold,b.Food,b.Materials,b.Goods,
                     b.RetailSales,b.WorkHours,b.ItemsCrafted,b.WagesPaid,b.DividendsPaid,
-                    b.CargoCapacity,b.CargoHandled)).ToArray()
+                    b.CargoCapacity,b.CargoHandled,
+                    Detailed?new SortedDictionary<string,int>(b.Stock,
+                        StringComparer.Ordinal):null)).ToArray()
         };
     }
 
@@ -109,12 +117,16 @@ public sealed partial class SettlementWorld
         {
             if(checked(TotalGold()+_outsideGold)!=_initialAllGold)
                 throw new InvalidOperationException("All gold accounts including foreign trade do not reconcile");
+            if(Detailed)ValidateCommodityLedger();
+            else
+            {
             if(TotalFood()+_outsideFood+_meals!=
                _initialFood+_initialOutsideFood+_localFood)
                 throw new InvalidOperationException("Regional food accounting mismatch");
             if(TotalMaterials()+TotalGoods()+_outsideMaterials+_outsideGoods+_goodsUsed!=
                _initialMaterials+_initialGoods+_initialOutsideMaterials+_initialOutsideGoods+_localMaterials)
                 throw new InvalidOperationException("Regional materials and goods accounting mismatch");
+            }
         }
         else if(TotalGold()!=_initialGold)
             throw new InvalidOperationException("Gold appeared or disappeared outside transfers");

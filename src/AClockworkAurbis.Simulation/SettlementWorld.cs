@@ -61,6 +61,8 @@ public sealed partial class SettlementWorld
            _settings.DailySharedRent<0 || _settings.PortCargoUnitsPerWorkHour<0 ||
            _settings.MaxPortCargoCapacity<0 ||
            _settings.MaxFreightLoad<1 || _settings.BaseFreightFee<0 ||
+           _settings.ToolWorkHoursPerWear<1 || _settings.FirewoodDaysPerHousehold<1 ||
+           _settings.MaxCommodityStockPerSite<1 ||
            _settings.FreightFeePer90Minutes<0 ||
            _settings.ExternalFoodImportPrice<0 ||
            _settings.ExternalMaterialImportPrice<0 || _settings.DailyAssistanceLimit<0)
@@ -79,7 +81,7 @@ public sealed partial class SettlementWorld
 
         // If a settlement lacks a documented dock/port, imports remain
         // possible via an explicitly synthetic outside-trade depot.
-        if(!_businesses.Any(b=>b.Kind==BusinessKinds.ImportHub))
+        if(!Detailed && !_businesses.Any(b=>b.Kind==BusinessKinds.ImportHub))
         {
             const string id="sim:external-trade-depot";
             var generated=new BusinessState(
@@ -143,6 +145,7 @@ public sealed partial class SettlementWorld
         if (Regional)
         {
             InitializeRegional();
+            if (Detailed) InitializeCommodityEconomy();
             if (_settings.EnableHousing) InitializeHousing();
         }
         _initialGold=TotalGold();
@@ -235,11 +238,15 @@ public sealed partial class SettlementWorld
             case SettlementAction.Eat:
                 if(actor.Food>0)
                 {
-                    actor.Food--;
-                    actor.Satiation=Math.Min(100,actor.Satiation+56);
-                    actor.MealsEaten++;
-                    _meals++;
-                    Observe(actor,"eat","Consumed 1 food; satiation "+actor.Satiation.ToString("0"));
+                    if(Detailed)EatCommodityMeal(actor);
+                    else
+                    {
+                        actor.Food--;
+                        actor.Satiation=Math.Min(100,actor.Satiation+56);
+                        actor.MealsEaten++;
+                        _meals++;
+                        Observe(actor,"eat","Consumed 1 food; satiation "+actor.Satiation.ToString("0"));
+                    }
                 }
                 break;
             case SettlementAction.Work:

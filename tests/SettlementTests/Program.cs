@@ -25,6 +25,9 @@ var tests=new (string Name,Action Run)[]
     ("Dock cargo needs paid handling and respects zero capacity", DockLabour),
     ("Competing ports attract cargo from their own productive hinterland", TwoPortCompetition),
     ("Wholesale stock moves as finite, delayed and conserved freight", DelayedFreight),
+    ("Specific commodities flow through extraction and crafting recipes", CommodityChains),
+    ("Missing smeltery blocks new ingots despite abundant ore", MissingSmeltery),
+    ("Commodity world is deterministic with physical freight and consumption", CommodityDeterminism),
     ("Deterministic regional simulations can run in time chunks", RegionalDeterminism),
     ("Large 10k actor headless performance and integrity", Stress)
 };
@@ -617,4 +620,142 @@ static void DelayedFreight()
         "all freight is either moving or arrived, never duplicated");
     Expect(after.FreightFees>0,
         "the distance-dependent common carrier charges for delivery");
+}
+
+static SettlementCatalog CommodityFixture()
+{
+    var original=Fixture(130,production:true);
+    var places=original.Places.ToList();
+    var businesses=original.Businesses.ToList();
+    businesses=businesses.Select(b=>b.PlaceId=="sim:fields"?
+        b with{ProductionProfile="wheat,potato"}:b).ToList();
+    void Add(string id,string name,string kind,string sourceType,string? profile=null)
+    {
+        double x=10000+places.Count*26000;
+        places.Add(new PlaceDefinition(id,0,name,sourceType,"Exampleton",
+            "Test zone",kind,"",x,10000,
+            "simulation_at_source_anchor","Exampleton"));
+        businesses.Add(new BusinessDefinition(id,kind,null,[],
+            "SIMULATION HYPOTHESIS for offline fixture",profile));
+    }
+    Add("sim:greens","Green fields",BusinessKinds.FoodProducer,
+        "simulation_inferred_agriculture","lettuce,onion");
+    Add("sim:woods","Working woodland",BusinessKinds.ResourceProducer,
+        "Grove","logs");
+    Add("sim:smelter","Smelter",BusinessKinds.Smeltery,"simulation_inferred_smeltery");
+    Add("sim:sawmill","Sawmill",BusinessKinds.Sawmill,"simulation_inferred_sawmill");
+    Add("sim:bakery","Bakery",BusinessKinds.Bakery,"simulation_inferred_bakery");
+    Add("sim:tannery","Tannery",BusinessKinds.Tannery,"simulation_inferred_tannery");
+    Add("sim:hunter","Hunting camp",BusinessKinds.Hunter,"simulation_inferred_hunter");
+    Add("sim:fishery","Fishing port",BusinessKinds.Fishery,"simulation_inferred_fishery");
+    Add("sim:leather","Leatherworks",BusinessKinds.Leatherworker,"simulation_inferred_leatherworker");
+
+    var jobs=new[]{"sim:fields","sim:greens","sim:woods","b:mine",
+        "sim:smelter","sim:sawmill","sim:bakery","sim:tannery",
+        "sim:hunter","sim:fishery","sim:leather"};
+    var residents=original.Residents.Select((p,i)=>
+        i>=50&&i<50+jobs.Length*4 ?
+            p with {WorkPlaceId=jobs[(i-50)/4],WorkEvidence="synthetic_fixture_job"}:p)
+        .ToArray();
+    return original with {Places=places.ToArray(),Businesses=businesses.ToArray(),
+        Residents=residents};
+}
+
+static CommoditySnapshot Item(SettlementReport r,string id) =>
+    r.CommodityDetails.Single(x=>x.Commodity==id);
+
+static void CheckCommodityBalance(SettlementReport r)
+{
+    foreach(var item in r.CommodityDetails)
+        Expect(item.Initial+item.Extracted+item.Crafted==
+               item.StockOnHand+item.InTransit+item.UsedAsIngredient+item.Consumed,
+            "all "+item.Commodity+" must be extracted, transformed, stocked, "+
+            "in transit or consumed, without appearing for free");
+}
+
+static void CommodityChains()
+{
+    var world=new SettlementWorld(CommodityFixture(),new SettlementSettings
+        {Economy=EconomyMode.CommodityProduction,
+         EnableExternalTrade=false,MaxCommodityStockPerSite=80});
+    world.AdvanceTo(1440L*25);
+    world.CheckInvariants();
+    var report=world.Report();
+    CheckCommodityBalance(report);
+    Expect(Item(report,"iron_ore").Extracted>0 &&
+        Item(report,"iron_ingot").Crafted>0 &&
+        Item(report,"pickaxe").Crafted>0 &&
+        Item(report,"horseshoes").Crafted>0,
+        "mines, smeltery and separate blacksmith form an actual iron chain");
+    Expect(Item(report,"logs").Extracted>0 &&
+        Item(report,"lumber").Crafted>0 &&
+        Item(report,"firewood").Crafted>0 &&
+        Item(report,"firewood").Consumed>0,
+        "felled logs become timber and household/industrial fuel");
+    Expect(Item(report,"raw_hide").Extracted>0 &&
+        Item(report,"leather").Crafted>0 &&
+        Item(report,"leather_goods").Crafted>0,
+        "hunters supply hides to tanners and leatherworkers");
+    Expect(Item(report,"fish").Extracted>0 &&
+        Item(report,"wheat").Extracted>0 &&
+        Item(report,"onion").Extracted>0 &&
+        Item(report,"potato").Extracted>0 &&
+        Item(report,"lettuce").Extracted>0 &&
+        Item(report,"bread").Crafted>0 &&
+        Item(report,"garden_salad").Crafted>0,
+        "distinct local crops and fishing supply multiple cooked foods");
+    Expect(report.ToolsWornOut>0 && report.RecipesCompleted>0 &&
+        report.ShipmentsSent>0 && report.FreightFees>0,
+        "tools wear out, recipes require paid workers and cargo needs transport");
+    var corn=world.Businesses.Single(b=>b.Id=="sim:fields");
+    var greens=world.Businesses.Single(b=>b.Id=="sim:greens");
+    Expect(corn.CommodityStock.Keys.All(k=>k is "wheat" or "potato") &&
+        greens.CommodityStock.Keys.All(k=>k is "lettuce" or "onion"),
+        "two farms do not automatically grow the same crops");
+    Expect(report.AllAccountsGold==report.InitialAllAccountsGold,
+        "commodity trading and delivery fees conserve all gold");
+    var invalid=CommodityFixture();
+    var bad=invalid with {Businesses=invalid.Businesses.Select(b=>
+        b.PlaceId=="sim:fields"?
+            b with{ProductionProfile="iron_ingot"}:b).ToArray()};
+    bool rejected=false;
+    try{bad.Validate();}catch(InvalidDataException){rejected=true;}
+    Expect(rejected,"crop profiles may only contain recognised growable crops");
+}
+
+static void MissingSmeltery()
+{
+    var cat=CommodityFixture();
+    var reduced=cat with
+    {
+        Places=cat.Places.Where(p=>p.Id!="sim:smelter").ToArray(),
+        Businesses=cat.Businesses.Where(b=>b.PlaceId!="sim:smelter").ToArray(),
+        Residents=cat.Residents.Select(r=>r.WorkPlaceId=="sim:smelter"?
+            r with{WorkPlaceId=null,WorkEvidence="not_available"}:r).ToArray()
+    };
+    var world=new SettlementWorld(reduced,new SettlementSettings
+        {Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false});
+    world.AdvanceTo(1440L*18);
+    world.CheckInvariants();
+    var report=world.Report();
+    CheckCommodityBalance(report);
+    Expect(Item(report,"iron_ore").Extracted>0 &&
+        Item(report,"iron_ingot").Crafted==0,
+        "ore cannot become ingots without an actual staffed smeltery");
+    Expect(Item(report,"pickaxe").Crafted<=2,
+        "a blacksmith cannot conjure ingots to replace worn tools");
+}
+
+static void CommodityDeterminism()
+{
+    var cat=CommodityFixture();
+    var settings=new SettlementSettings{Economy=EconomyMode.CommodityProduction,
+        EnableExternalTrade=false,MaxCommodityStockPerSite=80};
+    var a=new SettlementWorld(cat,settings);
+    var b=new SettlementWorld(cat,settings);
+    a.AdvanceTo(1440L*12);
+    for(long t=0;t<=1440L*12;t+=120)b.AdvanceTo(t);
+    a.CheckInvariants();b.CheckInvariants();
+    Expect(JsonSerializer.Serialize(a.Report())==JsonSerializer.Serialize(b.Report()),
+        "all SKU stockpiles, shipment locations and recipe ledgers repeat across time chunks");
 }

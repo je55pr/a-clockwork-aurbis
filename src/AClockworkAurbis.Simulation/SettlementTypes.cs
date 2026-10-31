@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Collections.ObjectModel;
 
 namespace AClockworkAurbis.Simulation;
 
@@ -46,6 +47,20 @@ public sealed record SettlementCatalog(
             if (!placeIds.Contains(business.PlaceId) || !businessIds.Add(business.PlaceId) ||
                 !BusinessKinds.Valid.Contains(business.Kind))
                 throw new InvalidDataException("Invalid business location or kind");
+            if(business.ProductionProfile is string profile)
+            {
+                bool validCrops=business.Kind==BusinessKinds.FoodProducer &&
+                    profile.Split(',',StringSplitOptions.TrimEntries|
+                        StringSplitOptions.RemoveEmptyEntries) is var crops &&
+                    crops.Length is >=1 and <=4 &&
+                    crops.Distinct(StringComparer.Ordinal).Count()==crops.Length &&
+                    crops.All(c=>CommodityRecipes.Crops.Contains(c,StringComparer.Ordinal));
+                bool validForest=business.Kind==BusinessKinds.ResourceProducer &&
+                    profile=="logs";
+                if(!validCrops && !validForest)
+                    throw new InvalidDataException(
+                        "Unknown or incompatible production profile: "+profile);
+            }
         }
 
         var actorIds = new HashSet<string>(StringComparer.Ordinal);
@@ -74,9 +89,18 @@ public static class BusinessKinds
     public const string Workshop = "workshop";
     public const string ImportHub = "import_hub";
     public const string Institution = "institution";
+    public const string Smeltery = "smeltery";
+    public const string Sawmill = "sawmill";
+    public const string Tannery = "tannery";
+    public const string Bakery = "bakery";
+    public const string Hunter = "hunter";
+    public const string Fishery = "fishery";
+    public const string Leatherworker = "leatherworker";
     public static readonly IReadOnlySet<string> Valid =
         new HashSet<string>(StringComparer.Ordinal)
-        { FoodRetail, FoodProducer, ResourceProducer, GoodsRetail, Workshop, ImportHub, Institution };
+        { FoodRetail, FoodProducer, ResourceProducer, GoodsRetail, Workshop,
+          ImportHub, Institution, Smeltery, Sawmill, Tannery,
+          Bakery, Hunter, Fishery, Leatherworker };
 }
 
 public sealed record PlaceDefinition(
@@ -87,7 +111,8 @@ public sealed record PlaceDefinition(
 
 public sealed record BusinessDefinition(
     string PlaceId, string Kind, string? OwnerNpcId,
-    string[] OperatorNpcIds, string Evidence);
+    string[] OperatorNpcIds, string Evidence,
+    string? ProductionProfile = null);
 
 public sealed record ResidentDefinition(
     string Id, int SourcePageId, string Name,
@@ -102,7 +127,7 @@ public enum SettlementAction : byte
     Idle, Travel, Work, Eat, Sleep, BuyFood, BuyGoods, HarvestFood
 }
 
-public enum EconomyMode { Prototype, RegionalProduction }
+public enum EconomyMode { Prototype, RegionalProduction, CommodityProduction }
 
 public sealed class ResidentState
 {
@@ -110,6 +135,7 @@ public sealed class ResidentState
         int gold, int food, double satiation, double energy, int workStart)
     {
         Source = source;
+        CommodityStock = new ReadOnlyDictionary<string,int>(Stock);
         HomeId = homeId;
         CurrentPlaceId = homeId;
         DestinationPlaceId = homeId;
@@ -148,6 +174,8 @@ public sealed class ResidentState
     public long Gold { get; internal set; }
     public int Food { get; internal set; }
     public int Goods { get; internal set; }
+    internal Dictionary<string,int> Stock { get; } = new(StringComparer.Ordinal);
+    public IReadOnlyDictionary<string,int> CommodityStock { get; }
     public double Satiation { get; internal set; }
     public double Energy { get; internal set; }
     public int WorkRemainderMinutes { get; internal set; }
@@ -169,6 +197,7 @@ public sealed class BusinessState
     {
         Definition = definition;
         Place = place;
+        CommodityStock = new ReadOnlyDictionary<string,int>(Stock);
         Gold = gold;
     }
 
@@ -186,6 +215,9 @@ public sealed class BusinessState
     public int Food { get; internal set; }
     public int Materials { get; internal set; }
     public int Goods { get; internal set; }
+    internal Dictionary<string,int> Stock { get; } = new(StringComparer.Ordinal);
+    public IReadOnlyDictionary<string,int> CommodityStock { get; }
+    public int ToolWearHours { get; internal set; }
     public long WagesPaid { get; internal set; }
     public long RetailRevenue { get; internal set; }
     public long WholesaleRevenue { get; internal set; }
@@ -233,6 +265,9 @@ public sealed record SettlementSettings
     public int PortCargoUnitsPerWorkHour { get; init; } = 50;
     public int MaxPortCargoCapacity { get; init; } = 2000;
     public int MaxFreightLoad { get; init; } = 40;
+    public int ToolWorkHoursPerWear { get; init; } = 24;
+    public int FirewoodDaysPerHousehold { get; init; } = 5;
+    public int MaxCommodityStockPerSite { get; init; } = 160;
     public int BaseFreightFee { get; init; } = 1;
     public int FreightFeePer90Minutes { get; init; } = 1;
     public int MealPrice { get; init; } = 6;
@@ -259,10 +294,15 @@ public sealed record BusinessSnapshot(
     long Gold, int Food, int Materials, int Goods,
     int RetailSales, int WorkHours, int ItemsCrafted, long WagesPaid,
     long DividendsPaid,
-    int CargoCapacity = 0, long CargoHandled = 0);
+    int CargoCapacity = 0, long CargoHandled = 0,
+    IReadOnlyDictionary<string,int>? CommodityInventory = null);
 
 public sealed record FreightRouteSnapshot(
     string FromId, string From, string ToId, string To, string Commodity, long Units);
+
+public sealed record CommoditySnapshot(
+    string Commodity, long Initial, long Extracted, long Crafted,
+    long UsedAsIngredient, long Consumed, long StockOnHand, long InTransit);
 
 public sealed record SettlementReport
 {
@@ -356,4 +396,9 @@ public sealed record SettlementReport
     public int GoodsInTransit { get; init; }
     public long FreightFees { get; init; }
     public FreightRouteSnapshot[] FreightRoutes { get; init; } = [];
+    public CommoditySnapshot[] CommodityDetails { get; init; } = [];
+    public long RecipesCompleted { get; init; }
+    public long ToolsWornOut { get; init; }
+    public long FirewoodBurned { get; init; }
+    public long FreightDelayedForGear { get; init; }
 }

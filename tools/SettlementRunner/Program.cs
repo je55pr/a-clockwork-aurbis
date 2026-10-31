@@ -30,7 +30,7 @@ try
                 Console.WriteLine(
                     "dotnet run -c Release --project tools/SettlementRunner -- "+
                     "--catalog catalog.json [--days 3] [--seed 42] [--trace-first] "+
-                    "[--economy prototype|production] [--no-foreign-trade] "+
+                    "[--economy prototype|production|commodities] [--no-foreign-trade] "+
                     "[--no-local-production] [--no-assistance] [--trace NPC_ID] [--details] [--resident-details]");
                 return 0;
             default:throw new ArgumentException("Unknown parameter "+args[i]);
@@ -40,11 +40,14 @@ try
         throw new ArgumentException("--catalog FILE required; --days must be 0..365");
     var loading=Stopwatch.StartNew();
     var catalog=SettlementCatalog.Load(catalogPath);
-    if(economicMode is not null && economicMode is not ("production" or "prototype"))
-        throw new ArgumentException("--economy must be production or prototype");
-    EconomyMode mode=economicMode=="production" ||
+    if(economicMode is not null &&
+       economicMode is not ("production" or "prototype" or "commodities"))
+        throw new ArgumentException("--economy must be production, prototype or commodities");
+    EconomyMode mode=economicMode=="commodities" ||
         economicMode is null && catalog.Scope=="whole_zone"
-            ? EconomyMode.RegionalProduction : EconomyMode.Prototype;
+        ? EconomyMode.CommodityProduction :
+        economicMode=="production" ? EconomyMode.RegionalProduction :
+        EconomyMode.Prototype;
     var world=new SettlementWorld(catalog,new SettlementSettings
     {Seed=seed,Economy=mode,EnableExternalTrade=!disableTrade,
         EnableLocalProduction=!disableProduction,EnablePublicAssistance=!disableAid});
@@ -112,6 +115,11 @@ try
         summary.GoodsInTransit,
         summary.FreightFees,
         FreightRoutes=details?summary.FreightRoutes.Take(30).ToArray():null,
+        summary.CommodityDetails,
+        summary.RecipesCompleted,
+        summary.ToolsWornOut,
+        summary.FirewoodBurned,
+        summary.FreightDelayedForGear,
         summary.ResidentsWithLowSatiation,
         summary.ResidentsWithZeroSatiation,
         summary.ResidentsWithoutFood,
@@ -163,11 +171,20 @@ try
         GoldConserved=mode==EconomyMode.Prototype?
             summary.TotalGold==summary.InitialGold :
             summary.AllAccountsGold==summary.InitialAllAccountsGold,
-        FoodLedgerValid=summary.FoodRemaining+summary.Meals+
+        CommodityLedgerValid=summary.CommodityDetails.All(s=>
+            s.Initial+s.Extracted+s.Crafted==
+            s.StockOnHand+s.InTransit+s.UsedAsIngredient+s.Consumed),
+        FoodLedgerValid=mode==EconomyMode.CommodityProduction?
+            summary.CommodityDetails.All(s=>s.Initial+s.Extracted+s.Crafted==
+                s.StockOnHand+s.InTransit+s.UsedAsIngredient+s.Consumed):
+            summary.FoodRemaining+summary.Meals+
             (mode==EconomyMode.Prototype?0:summary.FoodExported)==
             summary.InitialFood+summary.FoodImported+
             (mode==EconomyMode.Prototype?0:summary.FoodProducedLocally),
-        MaterialLedgerValid=summary.MaterialsRemaining+summary.GoodsRemaining+summary.GoodsUsed+
+        MaterialLedgerValid=mode==EconomyMode.CommodityProduction?
+            summary.CommodityDetails.All(s=>s.Initial+s.Extracted+s.Crafted==
+                s.StockOnHand+s.InTransit+s.UsedAsIngredient+s.Consumed):
+            summary.MaterialsRemaining+summary.GoodsRemaining+summary.GoodsUsed+
             (mode==EconomyMode.Prototype?0:summary.MaterialsExported+summary.GoodsExported)==
             summary.InitialMaterials+summary.InitialGoods+summary.MaterialsImported+
             (mode==EconomyMode.Prototype?0:summary.RawMaterialsExtracted),
@@ -184,6 +201,8 @@ try
             LastLocation=r.CurrentPlaceId,
             r.HomeId,r.HousingId,r.RentSpent,r.Evictions,r.Relocations,r.Rehousings,
             r.HomelessDays,r.Gold,r.Food,r.Goods,r.Satiation,r.Energy,
+            CommodityInventory=mode==EconomyMode.CommodityProduction?
+                r.CommodityStock:null,
             r.MealsEaten,r.Purchases,r.Journeys,r.WageIncome,
             r.DividendIncome,r.CooperativeIncome,r.AssistanceGold,
             r.SubsistenceFoodHarvested,r.UnpaidHours,r.WorkMinutes,
@@ -203,7 +222,11 @@ try
             }).ToArray(),
         Assumptions="Source identities and map markers are preserved. Contracts, co-ops, "+
             "production yields, prices, welfare, foreign trade, needs and travel "+
-            "are simulation assumptions. Vendor association does not establish ownership"
+            "are simulation assumptions. Vendor association does not establish ownership. "+
+            (mode==EconomyMode.CommodityProduction?
+                "Commodity mode currently simulates CLOSED domestic trade only; "+
+                "crop mixes, processors, recipes and prices are hypothetical, "+
+                "and carriers are abstract freight services.":"")
     };
     Console.WriteLine(JsonSerializer.Serialize(report,
         new JsonSerializerOptions{WriteIndented=true}));
