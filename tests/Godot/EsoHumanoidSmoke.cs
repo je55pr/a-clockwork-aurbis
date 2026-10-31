@@ -37,6 +37,9 @@ public partial class EsoHumanoidSmoke : Node3D
                 ["test:male"] = doc.RootElement.GetProperty("male").Clone(),
                 ["test:female"] = doc.RootElement.GetProperty("female").Clone()
             };
+            if (EsoHumanoidVisualLayer.HeadSourceId(0) != 0x000E2CFF ||
+                EsoHumanoidVisualLayer.HeadSourceId(1) != 0x000E2D77)
+                throw new Exception("Skull-like Head_502/Head_503 mistakenly selected instead of Head_004");
             if (!EsoHumanoidVisualLayer.CanUseHumanoidBody("High Elf") ||
                 !EsoHumanoidVisualLayer.CanUseHumanoidBody("Wood Elf") ||
                 !EsoHumanoidVisualLayer.CanUseHumanoidBody("Dark Elf") ||
@@ -62,11 +65,12 @@ public partial class EsoHumanoidSmoke : Node3D
                     meshes++;
                     totalInstances += instance.Multimesh.InstanceCount;
                     var aabb = instance.Multimesh.Mesh.GetAabb();
-                    if (aabb.End.Y > 2.6f || aabb.Position.Y < -0.20f)
+                    if (instance.Name.ToString().StartsWith("ESO_", StringComparison.Ordinal) &&
+                        (aabb.End.Y > 2.6f || aabb.Position.Y < -0.20f))
                         throw new Exception("Original source body part geometry not at bind pose");
                 }
-            if (meshes != 16 || totalInstances != 16)
-                throw new Exception($"Expected 16 source-part GPU batches, got {meshes}, {totalInstances} instances");
+            if (meshes != 26 || totalInstances != 32)
+                throw new Exception($"Expected 16 source parts plus 10 face-detail batches, got {meshes} batches, {totalInstances} instances");
             GD.Print("PASS original ESO 8-part humanoids (two variants), gender metadata, race fallback and GPU batching");
             string? screenshot = System.Environment.GetEnvironmentVariable("ESO_NPC_PREVIEW_PATH");
             if (!string.IsNullOrWhiteSpace(screenshot) && DisplayServer.GetName() != "headless")
@@ -85,10 +89,10 @@ public partial class EsoHumanoidSmoke : Node3D
                     BackgroundColor = new Color("#344353")
                 };
                 AddChild(new WorldEnvironment { Environment = environment });
-                var camera = new Camera3D { Current = true, Fov = 35f,
-                    Position = new Vector3(0,1.7f,2.8f) };
+                var camera = new Camera3D { Current = true, Fov = 38f,
+                    Position = new Vector3(-0.9f,2.12f,-2.15f) };
                 AddChild(camera);
-                camera.LookAt(new Vector3(0,1.05f,-4));
+                camera.LookAt(new Vector3(-0.9f,2.07f,-4));
                 for (int i = 0; i < 4; i++)
                     await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
                 var image=GetViewport().GetTexture().GetImage();

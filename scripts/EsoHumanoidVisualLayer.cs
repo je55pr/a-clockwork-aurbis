@@ -12,8 +12,8 @@ using Process = System.Diagnostics.Process;
 namespace EsoTest;
 
 /// <summary>
-/// First source-backed humanoid visual pass. Seven genuine ESO customization
-/// body-part meshes share their authoring-space bind pose (0..2.2m).
+/// First source-backed humanoid visual pass. Eight genuine ESO customization
+/// body/hair meshes share their authoring-space bind pose (0..2.3m).
 /// No character appearance or animation is inferred from a wiki NPC name.
 /// The files and licensed native decoders remain outside the Git repository.
 /// </summary>
@@ -24,14 +24,14 @@ public partial class EsoHumanoidVisualLayer : Node3D
     private static readonly uint[][] Parts =
     {
         new uint[] { 0x000DEE23, 0x000DEE5B, 0x000DEE9D, 0x000DEF03,
-            0x000DEDDB, 0x000DEDA1, 0x000DEE57, 0x0009EC43 },
+            0x000DEDDB, 0x000DEDA1, 0x000E2CFF, 0x0009EC43 },
         new uint[] { 0x000DEE25, 0x000DEE5D, 0x000DEE9F, 0x000DEF05,
-            0x000DEDDD, 0x000DEDA3, 0x000DEE59, 0x0009FB4D }
+            0x000DEDDD, 0x000DEDA3, 0x000E2D77, 0x0009FB4D }
     };
     private static readonly string[] Names =
         { "Feet", "Lower legs", "Upper legs", "Torso", "Upper arms", "Lower arms", "Head", "Hair" };
     private static readonly string[] SourcePrefixes =
-        { "Feet_", "LegsLower_", "LegsUpper_", "Torso_", "ArmsUpper_", "ArmsLower_", "Head_", "HAR_" };
+        { "Feet_", "LegsLower_", "LegsUpper_", "Torso_", "ArmsUpper_", "ArmsLower_", "Head_004", "HAR_" };
     private readonly ConcurrentQueue<(uint Id, string Path, string Error)> _prepared = new();
     private readonly Dictionary<uint, ArrayMesh> _meshes = new();
     private readonly List<PopulationSpawnPlanner.Placement> _placements = new();
@@ -46,6 +46,7 @@ public partial class EsoHumanoidVisualLayer : Node3D
     public bool HasOriginalBodies { get; private set; }
     public int OriginalBodyCount { get; private set; }
     public int SourcePartTypes => _meshes.Count;
+    public static uint HeadSourceId(int variant) => Parts[variant][6];
     public bool HasRenderedPerson(string id) => _renderedIds.Contains(id);
     public event Action? Completed;
 
@@ -299,6 +300,74 @@ public partial class EsoHumanoidVisualLayer : Node3D
         return cloth[at];
     }
 
+    // Original character face materials are applied by ESO's customization
+    // system, not by GR2 material diffuse IDs. Until those shader inputs are
+    // decoded, give the source Head_004 shell subtle, clearly non-skeletal
+    // facial features. All features reuse one mesh and batch by type.
+    private static readonly (string Name, Vector3[] Spots, Vector3 Scale)[] FaceFeatures =
+    {
+        ("EyeWhites", new [] { new Vector3(-0.035f,2.122f,0), new Vector3(0.035f,2.122f,0) },
+            new Vector3(0.011f,0.0057f,0.003f)),
+        ("Irises", new [] { new Vector3(-0.035f,2.121f,0.004f), new Vector3(0.035f,2.121f,0.004f) },
+            new Vector3(0.0044f,0.0047f,0.0022f)),
+        ("Eyebrows", new [] { new Vector3(-0.037f,2.150f,0), new Vector3(0.037f,2.150f,0) },
+            new Vector3(0.020f,0.0026f,0.0025f)),
+        ("Nose", new [] { new Vector3(0,2.074f,0.008f) },
+            new Vector3(0.007f,0.020f,0.009f)),
+        ("Lips", new [] { new Vector3(0,2.016f,0.012f) },
+            new Vector3(0.017f,0.0028f,0.0024f))
+    };
+
+    private void RenderFaceFeatures(int variant,
+        IReadOnlyList<PopulationSpawnPlanner.Placement> matches)
+    {
+        float front = variant == 0 ? 0.086f : 0.077f;
+        var unitSphere = new SphereMesh { Radius=1f, Height=2f,
+            RadialSegments=12, Rings=8 };
+        var faceMaterial = new StandardMaterial3D
+        {
+            Roughness=0.93f, VertexColorUseAsAlbedo=true,
+            CullMode=BaseMaterial3D.CullModeEnum.Disabled
+        };
+        foreach (var feature in FaceFeatures)
+        {
+            int count=matches.Count*feature.Spots.Length;
+            var multi = new MultiMesh { Mesh=unitSphere, UseColors=true,
+                TransformFormat=MultiMesh.TransformFormatEnum.Transform3D,
+                InstanceCount=count };
+            for(int i=0;i<matches.Count;i++)
+            {
+                var person=matches[i];
+                float size=0.86f +
+                    (PopulationSpawnPlanner.StableHash(person.Id+":size")%10)*0.007f;
+                var placement=new Transform3D(
+                    Basis.FromEuler(new Vector3(0,person.Facing,0))
+                        .Scaled(Vector3.One*size),person.Position);
+                Color colour=feature.Name switch
+                {
+                    "EyeWhites" => new Color("#ded9cd"),
+                    "Irises" => new Color("#343b40"),
+                    "Eyebrows" => HairColour(person.Id).Darkened(0.35f),
+                    "Lips" => SkinColour(person.Race).Darkened(0.28f),
+                    _ => SkinColour(person.Race).Darkened(0.065f)
+                };
+                for(int k=0;k<feature.Spots.Length;k++)
+                {
+                    var position=feature.Spots[k]+new Vector3(0,0,front);
+                    var local=new Transform3D(Basis.Identity.Scaled(feature.Scale),position);
+                    int at=i*feature.Spots.Length+k;
+                    multi.SetInstanceTransform(at,placement*local);
+                    multi.SetInstanceColor(at,colour);
+                }
+            }
+            AddChild(new MultiMeshInstance3D
+            {
+                Name=$"Face_{feature.Name}_Variant{variant}",
+                Multimesh=multi,MaterialOverride=faceMaterial
+            });
+        }
+    }
+
     private void RenderHumanoids()
     {
         for (int variant = 0; variant < Parts.Length; variant++)
@@ -342,13 +411,14 @@ public partial class EsoHumanoidVisualLayer : Node3D
                     MaterialOverride = material
                 });
             }
+            RenderFaceFeatures(variant,matches);
             foreach (var person in matches) _renderedIds.Add(person.Id);
             OriginalBodyCount += matches.Length;
         }
         HasOriginalBodies = OriginalBodyCount > 0;
         GD.Print($"ESO HUMANOID VISUALS: {OriginalBodyCount}/{_placements.Count} " +
             $"people assembled from {_meshes.Count} original GR2 part meshes (incl. hair); " +
-            "static original bind poses, provisional garment colours, race-specific heads not imported");
+            "static original bind poses, provisional skin/face details; ESO skin materials not imported");
     }
 
     public override void _ExitTree() { _stopping = true; }
