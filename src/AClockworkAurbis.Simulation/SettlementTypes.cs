@@ -96,11 +96,15 @@ public static class BusinessKinds
     public const string Hunter = "hunter";
     public const string Fishery = "fishery";
     public const string Leatherworker = "leatherworker";
+    public const string GuardPost = "guard_post";
+    public const string CleaningService = "cleaning_service";
+    public const string DomesticService = "domestic_service";
     public static readonly IReadOnlySet<string> Valid =
         new HashSet<string>(StringComparer.Ordinal)
         { FoodRetail, FoodProducer, ResourceProducer, GoodsRetail, Workshop,
           ImportHub, Institution, Smeltery, Sawmill, Tannery,
-          Bakery, Hunter, Fishery, Leatherworker };
+          Bakery, Hunter, Fishery, Leatherworker,
+          GuardPost, CleaningService, DomesticService };
 }
 
 public sealed record PlaceDefinition(
@@ -124,7 +128,8 @@ public sealed record ResidentDefinition(
 
 public enum SettlementAction : byte
 {
-    Idle, Travel, Work, Eat, Sleep, BuyFood, BuyGoods, HarvestFood
+    Idle, Travel, Work, Eat, Sleep, BuyFood, BuyGoods, HarvestFood,
+    BuyGroceries, CookAtHome
 }
 
 public enum EconomyMode { Prototype, RegionalProduction, CommodityProduction }
@@ -182,6 +187,12 @@ public sealed class ResidentState
     public int MealsEaten { get; internal set; }
     public int Purchases { get; internal set; }
     public int Journeys { get; internal set; }
+    public string? SimulatedServiceRole { get; internal set; }
+    public string? ServiceRoleEvidence { get; internal set; }
+    public int HomeMealsCooked { get; internal set; }
+    public int HomeCookingBatches { get; internal set; }
+    public int GroceryKitsPurchased { get; internal set; }
+    internal long LastFailedGrocerySearchDay { get; set; } = -1;
     public long WageIncome { get; internal set; }
     public long DividendIncome { get; internal set; }
     public long UnpaidHours { get; internal set; }
@@ -222,8 +233,16 @@ public sealed class BusinessState
     public long RetailRevenue { get; internal set; }
     public long WholesaleRevenue { get; internal set; }
     public long WholesaleSpending { get; internal set; }
+    // Includes paid delivery charges. Used to quote bread relative to its
+    // actual acquisition cost rather than an arbitrary universal price.
+    public long BreadLandedGold { get; internal set; }
+    public long BreadLandedUnits { get; internal set; }
+    public long BreadRevenueGold { get; internal set; }
+    public long BreadSalesUnits { get; internal set; }
     public int RetailSales { get; internal set; }
     internal int LastRetailSalesAtDay { get; set; }
+    internal long LastRetailRevenueAtDay { get; set; }
+    internal long LastBreadSalesAtDay { get; set; }
     internal int ServiceHoursBudget { get; set; } = 2;
     internal int ServiceHoursWorkedToday { get; set; }
     public int WorkHours { get; internal set; }
@@ -301,6 +320,12 @@ public sealed record BusinessSnapshot(
     long DividendsPaid,
     int CargoCapacity = 0, long CargoHandled = 0,
     IReadOnlyDictionary<string,int>? CommodityInventory = null);
+
+public sealed record BreadMarketSnapshot(
+    string BusinessId,string BusinessName,string District,
+    int BreadInStock,int PricePerLoaf,bool TwoForOneAvailable,
+    long PurchasedLoaves,long LandedCostGold,
+    long LoavesSold,long BreadRevenueGold);
 
 public sealed record FreightRouteSnapshot(
     string FromId, string From, string ToId, string To, string Commodity, long Units);
@@ -409,4 +434,18 @@ public sealed record SettlementReport
     public long IdleProductionHoursAvoided { get; init; }
     public long ScarcityPricePremiumGold { get; init; }
     public long SurplusPriceDiscountGold { get; init; }
+    public long HomeCookingBatches { get; init; }
+    public long HomeCookedMeals { get; init; }
+    public long ChefCookedMeals { get; init; }
+    public long OneSeptimBreadSold { get; init; }
+    public long BreadUnitsSold { get; init; }
+    public long BreadSalesRevenue { get; init; }
+    public long DiscountedBreadUnits { get; init; }
+    public int OneSeptimBreadMarkets { get; init; }
+    public BreadMarketSnapshot[] BreadMarkets { get; init; } = [];
+    public long GroceryKitsSold { get; init; }
+    public int SourceChefsEmployed { get; init; }
+    public int SimulatedGuards { get; init; }
+    public int SimulatedServants { get; init; }
+    public int SimulatedCleaners { get; init; }
 }

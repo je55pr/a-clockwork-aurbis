@@ -149,7 +149,15 @@ public sealed partial class SettlementWorld
         if (Regional)
         {
             InitializeRegional();
-            if (Detailed) InitializeCommodityEconomy();
+            if (Detailed)
+            {
+                InitializeCommodityEconomy();
+                // A documented chef working at a shop or manor can prepare
+                // food there; the place's original ESO type is unchanged.
+                _foodShops=_businesses.Where(b=>
+                    b.Kind is BusinessKinds.FoodRetail or BusinessKinds.Bakery ||
+                    HasNamedChef(b)).ToArray();
+            }
             if (_settings.EnableHousing) InitializeHousing();
         }
         _initialGold=TotalGold();
@@ -261,6 +269,12 @@ public sealed partial class SettlementWorld
                 break;
             case SettlementAction.BuyGoods:
                 CompletePurchase(actor,food:false);
+                break;
+            case SettlementAction.BuyGroceries:
+                CompleteGroceryPurchase(actor);
+                break;
+            case SettlementAction.CookAtHome:
+                CompleteHomeCooking(actor);
                 break;
             case SettlementAction.HarvestFood:
                 CompleteSubsistenceHarvest(actor);

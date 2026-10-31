@@ -11,10 +11,21 @@ public sealed partial class SettlementWorld
         int hours=actor.WorkRemainderMinutes/60;
         actor.WorkRemainderMinutes%=60;
         if(hours<=0)return;
-        business.WorkHours+=hours;
         if(Detailed && business.Kind is BusinessKinds.FoodRetail or
             BusinessKinds.GoodsRetail)
+        {
+            // Several workers can start a shift together. Respect the
+            // shared shop payroll budget when each finishes, otherwise
+            // simultaneous shifts overshoot the amount sales can fund.
+            int available=Math.Max(0,
+                business.ServiceHoursBudget-business.ServiceHoursWorkedToday);
+            int wasted=Math.Max(0,hours-available);
+            hours=Math.Min(hours,available);
+            _idleProductionHoursAvoided+=wasted;
+            if(hours==0)return;
             business.ServiceHoursWorkedToday+=hours;
+        }
+        business.WorkHours+=hours;
         long payment=checked((long)hours*_settings.HourlyWage);
         bool paid = business.Gold>=payment;
         if(paid)
@@ -52,8 +63,9 @@ public sealed partial class SettlementWorld
         if(!_byBusiness.TryGetValue(actor.CurrentPlaceId,out var business))return;
         int cost=food?_settings.MealPrice:_settings.GoodsPrice;
         int hour=(int)(Minute%DayMinutes)/60;
-        if(hour is <7 or >=22||actor.Gold<cost)return;
+        if(hour is <7 or >=22)return;
         if(Detailed){CompleteCommodityPurchase(actor,food);return;}
+        if(actor.Gold<cost)return;
         if(food)
         {
             if(business.Kind!=BusinessKinds.FoodRetail||business.Food<=0)return;

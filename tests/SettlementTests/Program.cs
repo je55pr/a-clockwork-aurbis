@@ -32,6 +32,9 @@ var tests=new (string Name,Action Run)[]
     ("Idle processing and unsold retail shifts do not burn full payroll", DemandDrivenLabour),
     ("Scarcity pricing and essential household purchases conserve accounts", CommodityPriceAndDemand),
     ("Public foraging cannot bypass finite commercial agriculture", FinitePublicForaging),
+    ("One septim bread is a full meal with sustainable producer yields", BreadSeptimBenchmark),
+    ("Bread prices respond to local stock and logistics", BreadScarcityPricing),
+    ("Households cook with real ingredients at lower yields than chefs", HouseholdCookingAndChefs),
     ("Deterministic regional simulations can run in time chunks", RegionalDeterminism),
     ("Large 10k actor headless performance and integrity", Stress)
 };
@@ -874,4 +877,80 @@ static void FinitePublicForaging()
     forbidden.CheckInvariants();
     Expect(forbidden.Report().FoodHarvestedForSubsistence==0,
         "commercial farmland cannot provide unlimited free meals");
+}
+
+static void BreadSeptimBenchmark()
+{
+    Expect(CommodityRecipes.MealRetailPrices["bread"]==1 &&
+        CommodityRecipes.SatiationPerMeal("bread")==56,
+        "a single one-septim loaf is one complete basic meal");
+    var baking=CommodityRecipes.All.Single(r=>r.Id=="bake_bread");
+    var home=CommodityRecipes.HouseholdMeals.Single(r=>r.Id=="bake_bread");
+    Expect(baking.Products["bread"]>=home.Products["bread"]*2,
+        "a professional baker makes at least twice the household yield");
+    var prices=CommodityRecipes.Prices;
+    int bakeryCost=baking.Ingredients.Sum(x=>x.Value*prices[x.Key])+
+        new SettlementSettings().HourlyWage;
+    Expect(2L*bakeryCost<=baking.Products["bread"],
+        "baseline ingredient costs and paid wages permit bakery wholesale at "+
+        "two loaves per septim without a forced producer loss");
+    var world=new SettlementWorld(CommodityFixture(),new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false
+    });
+    var opening=world.Report();
+    Expect(opening.BreadMarkets.Any(m=>m.BusinessName=="Ye Olde Test Tavern" &&
+        m.PricePerLoaf==1 && m.BreadInStock>0),
+        "a stocked ordinary tavern begins by listing bread at one septim");
+    world.AdvanceTo(1440L*6);
+    world.CheckInvariants();
+    var daySix=world.Report();
+    CheckCommodityBalance(daySix);
+    Expect(daySix.OneSeptimBreadSold>0 && daySix.BreadSalesRevenue>0,
+        "one-septim bread is really sold and its proceeds reach a seller");
+    Expect(daySix.AllAccountsGold==daySix.InitialAllAccountsGold,
+        "cheap bread does not mint money or require a public subsidy");
+}
+
+static void BreadScarcityPricing()
+{
+    Expect(CommodityRecipes.BreadPriceInSeptims(24,12,24)==1,
+        "well-stocked shop buying 24 loaves for 12 septims quotes one per loaf");
+    Expect(CommodityRecipes.BreadPriceInSeptims(24,22,24)==2,
+        "landed cost over three-quarters septim can raise the local price");
+    Expect(CommodityRecipes.BreadPriceInSeptims(2,12,24)==2,
+        "low inventory alone can lift bread above the baseline");
+    Expect(CommodityRecipes.BreadPriceInSeptims(2,22,24)==3,
+        "scarcity plus expensive delivery can raise the price further");
+    Expect(CommodityRecipes.BreadPriceInSeptims(0,12,24)==0,
+        "a sold-out shop cannot quote imaginary bread");
+    Expect(CommodityRecipes.CanDiscountSurplusBread(150,1) &&
+        !CommodityRecipes.CanDiscountSurplusBread(24,1) &&
+        !CommodityRecipes.CanDiscountSurplusBread(150,2),
+        "two-for-one offers only apply to genuinely surplus one-septim bread");
+}
+
+static void HouseholdCookingAndChefs()
+{
+    var source=CommodityFixture();
+    var workers=source.Residents.Select(r=>
+        r.WorkPlaceId=="b:tavern"?
+            r with{Profession="Chef"}:r).ToArray();
+    var cat=source with{Residents=workers};
+    var world=new SettlementWorld(cat,new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,EnableExternalTrade=false
+    });
+    world.AdvanceTo(1440L*25);
+    world.CheckInvariants();
+    var report=world.Report();
+    CheckCommodityBalance(report);
+    Expect(report.HomeCookedMeals>0 && report.GroceryKitsSold>0,
+        "households buy ingredients and cook them into conserved meals");
+    Expect(report.ChefCookedMeals>0 && report.SourceChefsEmployed>0,
+        "named chefs prepare food with their employer's actual ingredients");
+    var rare=CommodityRecipes.All.Single(r=>r.Id=="chef_game_pie");
+    Expect(rare.Products.Values.Sum()>0 &&
+        !CommodityRecipes.HouseholdMeals.Any(r=>r.Id==rare.Id),
+        "higher skill cuisine is not an ordinary household recipe");
 }

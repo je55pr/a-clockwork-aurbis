@@ -83,6 +83,13 @@ public sealed partial class SettlementWorld
                 if (employer.Kind == BusinessKinds.ResourceProducer &&
                     (profession.Contains("miner") || profession.Contains("wood")))
                     score = Math.Max(0, score - 300);
+                if (employer.Kind == BusinessKinds.GuardPost &&
+                    (person.Source.Name.StartsWith("Watchman",StringComparison.OrdinalIgnoreCase) ||
+                     person.Source.Name.StartsWith("Watchwoman",StringComparison.OrdinalIgnoreCase)))
+                    score = Math.Max(0,score-500);
+                if (employer.Kind == BusinessKinds.DomesticService &&
+                    profession.Contains("steward"))
+                    score = Math.Max(0,score-350);
                 if (score < best) { best = score; choice = employer; }
             }
             if (choice is null) continue;
@@ -94,8 +101,33 @@ public sealed partial class SettlementWorld
             _simulatedContracts++;
         }
         foreach (var employer in _businesses)
+        {
             employer.WorkerCount = _staff[employer.Id].Count;
+            foreach(var worker in _staff[employer.Id])
+                AssignServiceRole(worker,employer);
+        }
         _initialAllGold = checked(TotalGold() + _outsideGold);
+    }
+
+    private static void AssignServiceRole(ResidentState worker,BusinessState employer)
+    {
+        string? role=employer.Kind switch
+        {
+            BusinessKinds.GuardPost => "guard",
+            BusinessKinds.DomesticService => "servant",
+            BusinessKinds.CleaningService => "cleaner",
+            BusinessKinds.Institution when worker.Source.Name.StartsWith(
+                "Watchman",StringComparison.OrdinalIgnoreCase) ||
+                worker.Source.Name.StartsWith("Watchwoman",StringComparison.OrdinalIgnoreCase)
+                => "guard",
+            BusinessKinds.Institution when string.Equals(worker.Source.Profession,
+                "Hall Steward",StringComparison.OrdinalIgnoreCase) => "servant",
+            _ => null
+        };
+        worker.SimulatedServiceRole=role;
+        worker.ServiceRoleEvidence=role is null?null:
+            employer.Place.SourcePageId==0?"simulated_paid_service_contract":
+            "source_name_or_profession_inferred_service";
     }
 
     private static int ContractCapacity(BusinessState employer) =>
@@ -111,6 +143,8 @@ public sealed partial class SettlementWorld
             BusinessKinds.GoodsRetail => 3,
             BusinessKinds.ImportHub => 3,
             BusinessKinds.Institution => 2,
+            BusinessKinds.GuardPost or BusinessKinds.CleaningService or
+                BusinessKinds.DomesticService => 3,
             _ => 0
         };
 
@@ -324,6 +358,10 @@ public sealed partial class SettlementWorld
                     (long)(StableRandom.Hash(person.Source.Id+employer.Id,_settings.Seed)%31uL);
                 if(person.Source.WorkPlaceId==employer.Id)
                     candidate=Math.Max(0,candidate-500);
+                if(employer.Kind==BusinessKinds.GuardPost &&
+                    (person.Source.Name.StartsWith("Watchman",StringComparison.OrdinalIgnoreCase) ||
+                     person.Source.Name.StartsWith("Watchwoman",StringComparison.OrdinalIgnoreCase)))
+                    candidate=Math.Max(0,candidate-300);
                 if(candidate<score){score=candidate;best=employer;}
             }
             if(best is null)continue;
@@ -335,6 +373,7 @@ public sealed partial class SettlementWorld
                 person.Source.WorkEvidence:"simulated_solvent_labor_contract";
             _staff[best.Id].Add(person);
             best.WorkerCount++;
+            AssignServiceRole(person,best);
             _rehired++;
             Observe(person, "hired", best.Name + ": solvent employment contract");
         }
@@ -355,7 +394,9 @@ public sealed partial class SettlementWorld
 
     private void FundPublicServices()
     {
-        foreach (var service in _businesses.Where(b => b.Kind == BusinessKinds.Institution))
+        foreach (var service in _businesses.Where(b => b.Kind is
+            BusinessKinds.Institution or BusinessKinds.GuardPost or
+            BusinessKinds.CleaningService or BusinessKinds.DomesticService))
         {
             if (service.WorkerCount == 0) continue;
             long payroll = (long)service.WorkerCount * 8 * _settings.HourlyWage;
@@ -377,7 +418,7 @@ public sealed partial class SettlementWorld
         for (int i = 0; i < count && _publicGold > 0; i++)
         {
             var person = _residents[(start + i) % count];
-            int target = _settings.MealPrice * 2 +
+            int target = EverydayMealCost * 2 +
                 (Detailed && person.HousingId is not null ?
                     _settings.DailySharedRent * 2 : 0);
             if (person.Gold >= target) continue;

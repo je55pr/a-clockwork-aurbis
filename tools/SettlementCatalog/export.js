@@ -242,7 +242,15 @@ try{
      ['Firsthold','bakery','Bakery near Firsthold',null],
      ['Phaer','bakery','Bakery near Phaer',null],
      ['Dawnbreak','bakery','Bakery near Dawnbreak',null],
-     ['Greenwater Cove','bakery','Bakery near Greenwater Cove',null]
+     ['Greenwater Cove','bakery','Bakery near Greenwater Cove',null],
+     // Paid nonproductive service work; existence is hypothetical, not ESO canon.
+     ['Vulkhel Guard','guard_post','Simulated Vulkhel Guard watch post',null],
+     ['Skywatch','guard_post','Simulated Skywatch watch post',null],
+     ['Firsthold','guard_post','Simulated Firsthold watch post',null],
+     ['Vulkhel Guard','cleaning_service','Simulated Vulkhel Guard cleaning crew',null],
+     ['Skywatch','cleaning_service','Simulated Skywatch cleaning crew',null],
+     ['Skywatch Manor','domestic_service','Simulated Skywatch Manor servants',null],
+     ['Castle Rilis','domestic_service','Simulated Castle Rilis household staff',null]
    ];
    for(const [anchorName,kind,label,profile] of additional){
      const anchor=sourceSites.find(p=>p.name===anchorName&&p.mapX!==null);

@@ -21,6 +21,15 @@ public sealed partial class SettlementWorld
             return;
         }
 
+        if(Detailed && actor.Food==0 && actor.Satiation<75 &&
+            CanCookAtHome(actor))
+        {
+            if(actor.CurrentPlaceId!=actor.HomeId)
+                Travel(index,actor,actor.HomeId);
+            else Enqueue(index,45,SettlementAction.CookAtHome);
+            return;
+        }
+
         if(actor.Satiation<53)
         {
             if(actor.Food>0)
@@ -29,7 +38,19 @@ public sealed partial class SettlementWorld
                 Observe(actor,"eat",actor.Source.Name+" is hungry");
                 return;
             }
-            if(hour>=7&&hour<21&&actor.Gold>=_settings.MealPrice)
+            if(Detailed && actor.HousingId is not null &&
+                hour>=7 && hour<20)
+            {
+                var grocery=ChooseGroceryShop(actor);
+                if(grocery is not null)
+                {
+                    if(actor.CurrentPlaceId!=grocery.Id)
+                        Travel(index,actor,grocery.Id);
+                    else Enqueue(index,8,SettlementAction.BuyGroceries);
+                    return;
+                }
+            }
+            if(hour>=7&&hour<21&&actor.Gold>=EverydayMealCost)
             {
                 var food=ChooseShop(actor,food:true);
                 if(food is not null)
@@ -41,7 +62,7 @@ public sealed partial class SettlementWorld
             }
         }
 
-        if (Regional && actor.Food==0 && actor.Gold<_settings.MealPrice &&
+        if (Regional && actor.Food==0 && actor.Gold<EverydayMealCost &&
             actor.Satiation<72 && ChooseSubsistence(index,actor))return;
 
         if(actor.WorkId is not null &&
@@ -57,7 +78,7 @@ public sealed partial class SettlementWorld
                     Enqueue(index,60,SettlementAction.Idle);
                     return;
                 }
-                if(!CanScheduleCommodityWork(employer))
+                if(!CanScheduleCommodityWork(actor,employer))
                 {
                     _idleProductionHoursAvoided++;
                     Enqueue(index,60,SettlementAction.Idle);
@@ -78,7 +99,7 @@ public sealed partial class SettlementWorld
         // Household tool/general-goods purchases are deliberately modest.
         // We do not assert which specific TES items residents need yet.
         if((Detailed?WantsHouseholdSupply(actor):actor.Goods==0) &&
-           actor.Gold>=_settings.GoodsPrice+_settings.MealPrice+
+           actor.Gold>=_settings.GoodsPrice+EverydayMealCost+
                (Detailed && actor.HousingId is not null ? _settings.DailySharedRent*3 : 0) &&
            Minute/DayMinutes>actor.LastGoodsShoppingDay+2 &&
            hour>=9&&hour<20 && actor.Satiation>=37)
@@ -114,8 +135,13 @@ public sealed partial class SettlementWorld
         {
             if(food)
             {
-                if(shop.Kind is not (BusinessKinds.FoodRetail or BusinessKinds.Bakery) ||
-                    (Detailed?!HasPreparedMeal(shop):shop.Food<1))continue;
+                if(shop.Kind is not (BusinessKinds.FoodRetail or BusinessKinds.Bakery) &&
+                    !(Detailed && IsKitchenBusiness(shop)) ||
+                    (Detailed?!HasPreparedMeal(shop):shop.Food<1) ||
+                    Detailed && !CommodityRecipes.MealRetailPrices.Any(
+                        m=>Quantity(shop.Stock,m.Key)>0 &&
+                            MealRetailQuote(shop,m.Key)<=actor.Gold))
+                    continue;
             }
             else if(shop.Kind is not (BusinessKinds.GoodsRetail or BusinessKinds.Workshop
                     or BusinessKinds.Sawmill or BusinessKinds.Leatherworker) ||

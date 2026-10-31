@@ -11,7 +11,42 @@ public static class CommodityRecipes
 {
     public static readonly string[] Meals =
         ["provisions","foraged_greens","bread","vegetable_stew",
-         "garden_salad","fish_meal","roast_meat"];
+         "garden_salad","fish_meal","roast_meat","chef_game_pie"];
+    // Consumer prices, not wholesale ingredient valuations. A loaf of bread
+    // is always the one-septim, one-full-meal reference basket.
+    public static readonly IReadOnlyDictionary<string,int> MealRetailPrices =
+        new Dictionary<string,int>(StringComparer.Ordinal)
+        {
+            ["bread"]=1, ["provisions"]=2, ["foraged_greens"]=1,
+            ["garden_salad"]=3, ["vegetable_stew"]=4,
+            ["fish_meal"]=5, ["roast_meat"]=5, ["chef_game_pie"]=8
+        };
+    public static int BreadPriceInSeptims(int stock,long landedGold,
+        long landedUnits)
+    {
+        if(stock<=0)return 0;
+        if(landedGold<0 || landedUnits<0)
+            throw new ArgumentOutOfRangeException(nameof(landedGold));
+        int price=1; // Everyday bread in a well-supplied connected town.
+        if(landedUnits>0 && landedGold*4>landedUnits*3)
+            price++; // Expensive freight or purchasing requires higher margins.
+        if(stock<=3)price++; // Local shortage.
+        return price;
+    }
+
+    // With indivisible septims, an exceptionally well-stocked bakery can
+    // offer two loaves for one coin. This is a surplus discount, not the
+    // ordinary one-septim-per-loaf price.
+    public static bool CanDiscountSurplusBread(int stock,int oneLoafPrice) =>
+        stock>=145 && oneLoafPrice==1;
+
+    public static int SatiationPerMeal(string sku) => sku switch
+    {
+        "chef_game_pie" => 80,
+        "fish_meal" or "roast_meat" => 70,
+        "vegetable_stew" => 65,
+        _ => 56 // One bread restores the same hunger as the old full meal.
+    };
     public static readonly string[] HouseholdGoods =
         ["firewood","iron_tools","leather_goods","furnishings"];
     public static readonly string[] Crops = ["wheat","potato","onion","lettuce"];
@@ -26,8 +61,8 @@ public static class CommodityRecipes
             ["fish"]=3, ["game_meat"]=3, ["raw_hide"]=3,
             ["iron_ore"]=3, ["logs"]=3, ["lumber"]=5,
             ["firewood"]=3, ["iron_ingot"]=8, ["leather"]=6,
-            ["bread"]=3, ["vegetable_stew"]=3, ["garden_salad"]=3,
-            ["fish_meal"]=4, ["roast_meat"]=4,
+            ["bread"]=1, ["vegetable_stew"]=3, ["garden_salad"]=2,
+            ["fish_meal"]=4, ["roast_meat"]=4, ["chef_game_pie"]=7,
             ["pickaxe"]=16, ["felling_axe"]=16, ["horseshoes"]=9,
             ["iron_tools"]=7, ["leather_goods"]=7, ["furnishings"]=9,
             ["harness"]=15
@@ -45,18 +80,22 @@ public static class CommodityRecipes
         new("tan_hide",BusinessKinds.Tannery,
             Stock(("raw_hide",2),("firewood",1)),Stock(("leather",2))),
         new("bake_bread",BusinessKinds.Bakery,
-            Stock(("wheat",2),("firewood",1)),Stock(("bread",12))),
+            Stock(("wheat",2),("firewood",1)),Stock(("bread",28))),
         new("cook_stew",BusinessKinds.Bakery,
             Stock(("potato",1),("onion",1),("firewood",1)),
-            Stock(("vegetable_stew",12))),
+            Stock(("vegetable_stew",16))),
         new("prepare_salad",BusinessKinds.Bakery,
-            Stock(("lettuce",1),("onion",1)),Stock(("garden_salad",12))),
+            Stock(("lettuce",1),("onion",1)),Stock(("garden_salad",16))),
         new("cook_fish",BusinessKinds.Bakery,
             Stock(("fish",1),("potato",1),("firewood",1)),
-            Stock(("fish_meal",12))),
+            Stock(("fish_meal",16))),
         new("roast_game",BusinessKinds.Bakery,
             Stock(("game_meat",1),("onion",1),("firewood",1)),
-            Stock(("roast_meat",12))),
+            Stock(("roast_meat",16))),
+        // Only a source-labelled chef can make this uncommon dish.
+        new("chef_game_pie",BusinessKinds.Bakery,
+            Stock(("game_meat",1),("wheat",1),("onion",1),("firewood",1)),
+            Stock(("chef_game_pie",8))),
         new("forge_pickaxes",BusinessKinds.Workshop,
             Stock(("iron_ingot",2),("lumber",1)),Stock(("pickaxe",2))),
         new("forge_felling_axes",BusinessKinds.Workshop,
@@ -81,6 +120,16 @@ public static class CommodityRecipes
     public static bool IsCarpenter(BusinessState business) =>
         (business.Place.SourceType?.Contains("carpent",StringComparison.OrdinalIgnoreCase)??false) ||
         business.Name.Contains("Timber",StringComparison.OrdinalIgnoreCase);
+
+    public static readonly IReadOnlyList<CommodityRecipe> HouseholdMeals =
+        All.Where(r=>r.Industry==BusinessKinds.Bakery &&
+            !r.Id.StartsWith("chef_",StringComparison.Ordinal))
+            .Select(r=>r with
+            {
+                Industry="household",
+                Products=r.Products.ToDictionary(
+                    x=>x.Key,x=>Math.Max(1,x.Value/2),StringComparer.Ordinal)
+            }).ToArray();
 
     public static bool Edible(string sku) => Meals.Contains(sku,StringComparer.Ordinal);
 }

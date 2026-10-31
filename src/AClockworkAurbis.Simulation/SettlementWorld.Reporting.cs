@@ -96,6 +96,30 @@ public sealed partial class SettlementWorld
             IdleProductionHoursAvoided=_idleProductionHoursAvoided,
             ScarcityPricePremiumGold=_scarcityPremiumGold,
             SurplusPriceDiscountGold=_surplusDiscountGold,
+            HomeCookingBatches=_homeCookingBatches,
+            HomeCookedMeals=_homeCookedMeals,
+            ChefCookedMeals=_chefCookedMeals,
+            OneSeptimBreadSold=_oneSeptimBreadSold,
+            BreadUnitsSold=_breadSalesUnits,
+            BreadSalesRevenue=_breadSalesRevenue,
+            DiscountedBreadUnits=_discountedBreadUnits,
+            OneSeptimBreadMarkets=Detailed?_foodShops.Count(
+                b=>Quantity(b.Stock,"bread")>0 && BreadRetailQuote(b)==1):0,
+            BreadMarkets=Detailed?_foodShops.Where(b=>Quantity(b.Stock,"bread")>0)
+                .OrderBy(b=>b.Id,StringComparer.Ordinal)
+                .Select(b=>new BreadMarketSnapshot(b.Id,b.Name,b.Place.District??"",
+                    Quantity(b.Stock,"bread"),BreadRetailQuote(b),
+                    BreadBulkDiscount(b),b.BreadLandedUnits,b.BreadLandedGold,
+                    b.BreadSalesUnits,b.BreadRevenueGold)).ToArray():[],
+            GroceryKitsSold=_groceryKitsSold,
+            SourceChefsEmployed=_residents.Count(r=>r.WorkId is not null &&
+                IsNamedChef(r)),
+            SimulatedGuards=_residents.Count(r=>r.WorkId is not null &&
+                r.SimulatedServiceRole=="guard"),
+            SimulatedServants=_residents.Count(r=>r.WorkId is not null &&
+                r.SimulatedServiceRole=="servant"),
+            SimulatedCleaners=_residents.Count(r=>r.WorkId is not null &&
+                r.SimulatedServiceRole=="cleaner"),
             ShipmentsSent=_shipmentsSent,ShipmentsDelivered=_shipmentsDelivered,
             ShipmentsInTransit=_freight.Count,FreightUnitsDelivered=_freightUnitsDelivered,
             FoodInTransit=TransitCount("food"),MaterialsInTransit=TransitCount("materials"),

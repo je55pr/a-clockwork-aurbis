@@ -181,7 +181,7 @@ public sealed partial class SettlementWorld
 
     private HousingUnit? AvailableHousingNear(ResidentState resident, BusinessState workplace)
     {
-        if (resident.Gold < _settings.MealPrice + _settings.DailySharedRent * 2 + 4)
+        if (resident.Gold < EverydayMealCost + _settings.DailySharedRent * 2 + 4)
             return null;
         return _housing.Where(h => h.Vacant && h.Id != resident.HousingId &&
                 (h.Place.SourcePageId == 0 || h.Id == resident.Source.HomePlaceId) &&
@@ -215,7 +215,7 @@ public sealed partial class SettlementWorld
             var room = _housing.Where(h => h.Vacant &&
                 (h.Place.SourcePageId == 0 || h.Id == person.Source.HomePlaceId) &&
                 PlaceTravelMinutes(ResidentAnchor(person), h.Place) <= 130 &&
-                person.Gold >= h.Rent * 5 + _settings.MealPrice)
+                person.Gold >= h.Rent * 5 + EverydayMealCost)
                 .OrderBy(h => PlaceTravelMinutes(ResidentAnchor(person), h.Place))
                 .ThenBy(h => h.Rent).ThenBy(h => h.Id, StringComparer.Ordinal)
                 .FirstOrDefault();
