@@ -5,6 +5,9 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using EsoTest;
 
+if(args.Length>0 && args[0]=="--inspect-animation")
+    return AnimationSurvey.Run(args.Skip(1).ToArray());
+
 if(args.Length<2||args.Contains("--help"))
 {
  Console.WriteLine("Usage: ModelGeometry <granny-dll> <hex-resource-id> [output-file] [manifest] [oodle-dll]");

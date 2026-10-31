@@ -1,6 +1,7 @@
 param(
     [switch]$BuildOnly,
-    [switch]$ForceBuild
+    [switch]$ForceBuild,
+    [switch]$FirstPersonLab
 )
 
 $ErrorActionPreference = 'Stop'
@@ -139,6 +140,7 @@ try {
 
     # Launch graphical Godot; no long-lived launcher console is required.
     $arguments = '--path "' + $projectRoot + '"'
+    if ($FirstPersonLab) { $arguments += ' "res://scenes/first_person_lab.tscn"' }
     $process = Start-Process -FilePath $godotExe -ArgumentList $arguments -WorkingDirectory $projectRoot -PassThru
     Add-Content -LiteralPath $logFile -Value "Started Godot PID $($process.Id): $godotExe"
     exit 0
