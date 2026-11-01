@@ -57,9 +57,40 @@ internal sealed class EsoSourceRig
         var skeletons=root.GetProperty("RigSkeletons");
         if(rigMeshes.GetArrayLength()!=1 || skeletons.GetArrayLength()!=1)
             throw new InvalidDataException("Expected a single source mesh and skeleton");
-        var mesh=rigMeshes[0];
+        return ReadElements(rigMeshes[0],skeletons[0]);
+    }
+
+    /// <summary>
+    /// Some ORIGINAL ESO meshes intentionally contain no embedded skeleton:
+    /// their binding names are resolved against a separately archived model.
+    /// This path accepts only exact source binding names from the original
+    /// target skeleton. It never infers/renames an incompatible joint.
+    /// Native Granny binding must also be checked separately.
+    /// </summary>
+    internal static EsoSourceRig ReadExternal(string meshPath,string skeletonPath)
+    {
+        foreach(string path in new[]{meshPath,skeletonPath})
+            if(new FileInfo(path).Length is <100 or >9_000_000)
+                throw new InvalidDataException("External GR2 record size invalid");
+        // Research GR2 skeleton catalogue may have been redirected using
+        // UTF-16 PowerShell; ReadAllText honors either source encoding.
+        using var model=JsonDocument.Parse(File.ReadAllText(meshPath));
+        using var rig=JsonDocument.Parse(File.ReadAllText(skeletonPath));
+        var meshes=model.RootElement.GetProperty("RigMeshes");
+        var embedded=model.RootElement.GetProperty("RigSkeletons");
+        var targets=rig.RootElement.GetProperty("RigSkeletons");
+        if(meshes.GetArrayLength()!=1||embedded.GetArrayLength()!=0||
+           targets.GetArrayLength()!=1 ||
+           targets[0].GetProperty("Name").GetString()!="GrannyRootBone")
+            throw new InvalidDataException(
+                "External mesh/skeleton must be original single-mesh + standalone humanoid rig");
+        return ReadElements(meshes[0],targets[0]);
+    }
+
+    private static EsoSourceRig ReadElements(JsonElement mesh,JsonElement skeleton)
+    {
         var bones=new List<Bone>();
-        foreach(var bone in skeletons[0].GetProperty("Bones").EnumerateArray())
+        foreach(var bone in skeleton.GetProperty("Bones").EnumerateArray())
         {
             if(bones.Count>=256)throw new InvalidDataException("Too many bones");
             int parent=bone.GetProperty("Parent").GetInt32();

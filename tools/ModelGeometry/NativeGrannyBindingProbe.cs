@@ -46,7 +46,7 @@ internal static class NativeGrannyBindingProbe
         if(obj==0)throw new InvalidDataException("GR2 first source entry missing");
         return obj;
     }
-    public static unsafe int Run(string[] args)
+    public static unsafe int Run(string[] args,bool externalSkeleton=false)
     {
         if(args.Length<5)
         {
@@ -92,15 +92,21 @@ internal static class NativeGrannyBindingProbe
                 {
                     nint mi=info(meshFile),ri=info(rigFile);
                     nint mesh=First(mi,84,88);
-                    nint fromSkeleton=First(mi,48,52);
                     nint targetSkeleton=First(ri,48,52);
+                    // A number of original ESO GR2 mesh resources are
+                    // skeleton-agnostic: their mesh binding table supplies
+                    // mshBn_* names, but the file embeds no skeleton.
+                    // Test them using Granny's own native external-rig API
+                    // with the independently archived original skeleton.
+                    nint fromSkeleton=externalSkeleton
+                        ?targetSkeleton:First(mi,48,52);
                     int bones=Int(mesh,48);
                     nint bindings=Ptr(mesh,52);
                     int toBoneCount=Int(targetSkeleton,8);
                     nint targetBoneData=Ptr(targetSkeleton,12);
                     if(bones is <1 or >512||bindings==0||toBoneCount is <1 or >512)
                         throw new InvalidDataException("Native mesh/rig tables out of bounds");
-                    Console.WriteLine($"NATIVE ESO MESH 0x{meshId:X8}; source={SkeletonName(fromSkeleton)}, {Int(fromSkeleton,8)} bones; target animation 0x{rigId:X8}={SkeletonName(targetSkeleton)}, {toBoneCount} bones");
+                    Console.WriteLine($"NATIVE ESO MESH 0x{meshId:X8}; source={SkeletonName(fromSkeleton)}, {Int(fromSkeleton,8)} bones; target animation 0x{rigId:X8}={SkeletonName(targetSkeleton)}, {toBoneCount} bones; external-rig={externalSkeleton}");
                     // 'from' is the GR2 mesh's own source skeleton; 'to'
                     // is the actual, separately stored animation skeleton.
                     nint binding=make(mesh,fromSkeleton,targetSkeleton);

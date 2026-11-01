@@ -91,6 +91,77 @@ do not establish ESO's in-game animation blending or IK behaviour.
 - Native Granny binding checks and full Auridon regression remain
   separate. No change to the live population renderer.
 
+### Original head geometry variation
+
+The authoring-source `Head_004` customization mesh
+`0x000E2CFF` and hybrid source `0x000E2D77` have exactly
+**404 vertices and 710 triangles**, identical vertex indices and UV
+coordinates, but different positions, normals and skinning. A
+vertex-by-vertex comparison of the extracted original positions finds a
+mean **absolute component** difference of 0.004231 m, with a maximum
+single-component difference of 0.024740 m. This is concrete evidence of
+face-shape deformation encoded in the source geometry, not a constant
+head-position offset. It does not identify the exact face customization
+parameters responsible.
+
+## Complete source-skinned humanoid-shaped diagnostic
+
+ESO also contains **skeleton-external GR2 meshes**: the original mesh file
+does not embed a skeleton. Its native binding names identify the source
+bones to be supplied by a separate original skeleton model.
+
+The new isolated viewer (`./Launch-ESOTest.ps1 -OriginalSkinnedBodyLab`)
+uses **ESO-authored `VoriplasticCorpse`** (resource `0x0015D6CD`):
+8,109 original vertices, 11,836 triangles, and 81 original skinned
+bone bindings. The shipped Granny library reports that **all 81/81
+bind names resolve exactly** to original `GrannyRootBone`
+`0x000020A2`. Its related `Voriplastic_Goo` mesh (`0x0015D6CF`)
+also binds exactly, **59/59**. These are game-authored creature assets,
+not the ordinary customized Altmer, Breton, etc. humanoids we ultimately
+need. The viewer uses the corpse alone as a proof of the
+unmodified GR2 skeleton-external skinning path, and neutral diagnostic
+material because the external source texture association is unresolved.
+
+The viewer uses all 202 original bones and all 70 fully evaluated,
+60 Hz native `GEN_Walk` pose samples. The original vertex/triangle
+data, the original 81-name mesh skin table and all original GR2
+vertex weights are transferred intact. Bind indices are explicitly
+resolved by the **native Granny `GrannyNewMeshBinding` API** against
+the original source rig before the viewer loads. Incompatible skeletons
+are rejected; e.g. the exact same mesh resolves **0/81** names against
+the original customization-only head and torso skeletons.
+
+The Godot world-pose transforms from every original source bone on
+every animation frame match Granny's independently evaluated source
+positions, with a measured maximum difference below 0.000001 m.
+This confirms the bone/mesh assembly and source animation pipeline for
+a complete original mesh. It does **not** prove the game uses the same
+rendering material, actor customization transforms, animation blends,
+IK, or LOD selection.
+
+Run the independent tests:
+`res://tests/Godot/eso_original_skinned_body_smoke.tscn`,
+`res://tests/Godot/eso_original_skinned_body_ui_smoke.gd`,
+and `tests/check_native_character_binding.ps1`.
+
+### Why this does not yet solve ordinary humanoids
+
+The `--scan-character-assemblies` helper inspected **all 653**
+`Bip01` GR2 model files available in the local indexed model-name
+catalogue. It decoded all successfully. **597** have meshes
+referencing `mshBn_*`, but only **one** model in this indexed set
+has a single original skeleton containing both native `mshBn_*`
+and `defBn_*` branches: the `Head_004` hybrid described above.
+The normal source torso, arms, legs and head customization meshes
+still bind to an incompatible `CustomizationSkeleton`, as proved
+by the native API. They cannot simply be attached to the original
+`GrannyRootBone`.
+
+The assembly of customizable NPC bodies remains unsolved: need the
+**actual game customization/deformation metadata and algorithm**,
+not a hand-inferred `defBn_*` to `mshBn_*` map. This is why
+the test keeps the world population renderer unchanged.
+
 ## Next blocker
 
 Identify the **original ESO mechanism that combines

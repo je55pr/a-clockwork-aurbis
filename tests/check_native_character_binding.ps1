@@ -21,8 +21,10 @@ foreach ($needed in @($manifest, $OodleDll, $GrannyDll, $helper)) {
 $dotnet = (Get-Command dotnet -ErrorAction Stop).Source
 
 function Test-GrannyBinding([string]$partId, [string]$targetId,
-                            [int]$expectedCode, [int]$expectedCount) {
-    $result = & $dotnet $helper --inspect-native-binding $GrannyDll $partId $targetId $manifest $OodleDll 2>&1
+                            [int]$expectedCode, [int]$expectedCount,
+                            [bool]$externalRig = $false) {
+    $mode = if ($externalRig) { '--inspect-native-external-binding' } else { '--inspect-native-binding' }
+    $result = & $dotnet $helper $mode $GrannyDll $partId $targetId $manifest $OodleDll 2>&1
     $exitCode = $LASTEXITCODE
     $summary = ($result | Out-String)
     if ($exitCode -ne $expectedCode) {
@@ -54,4 +56,24 @@ Test-GrannyBinding '000E2CFF' '000E2CFF' 0 6
 # bindings. A native fallback to root index zero is NOT a valid skin.
 Test-GrannyBinding '000DEF03' '0000209F' 3 22
 Test-GrannyBinding '000E2CFF' '0000209F' 3 6
-Write-Output 'PASS no approximate outfit-to-animation mapping accepted'
+# ESO also ships skeleton-agnostic source meshes. The original Granny
+# binding API can attach these only when EVERY named skin binding is present
+# on the external original source skeleton. No aliasing/fallback is accepted.
+Test-GrannyBinding '0015D6CD' '000020A2' 0 81 $true
+Test-GrannyBinding '0015D6CF' '000020A2' 0 59 $true
+Test-GrannyBinding '0015D6CD' '000DEF03' 3 81 $true
+Test-GrannyBinding '0015D6CD' '000E2CFF' 3 81 $true
+# The genuine original hybrid Head_004 includes five animation bindings
+# AND four customization controls. Native Granny resolves only five of the
+# nine against the animation model. That partial match is NOT acceptable
+# for a complete skin, even though most of the head follows the walk.
+$hybridResult = & $dotnet $helper --inspect-native-external-binding $GrannyDll '000E2D77' '000020A2' $manifest $OodleDll 2>&1
+$hybridExit = $LASTEXITCODE
+$hybridText = ($hybridResult | Out-String)
+if ($hybridExit -ne 3 -or
+    -not $hybridText.Contains('total=9, exact=5, name-differing=4, index-unmapped=0') -or
+    -not $hybridText.Contains('INCOMPATIBLE_SOURCE_RIG:')) {
+    throw "Hybrid Head_004 must not be treated as a fully compatible skin. $hybridText"
+}
+Write-Output 'PASS original hybrid Head_004 remains partially bound (5/9), not falsely declared complete'
+Write-Output 'PASS exact native external skeletal binding and no approximate skin aliases'
