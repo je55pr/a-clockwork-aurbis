@@ -5,6 +5,9 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using EsoTest;
 
+if(args.Length>0 && args[0]=="--inspect-face-colors")
+    return FaceVertexColorInspector.Run(args.Skip(1).ToArray());
+
 if(args.Length>0 && args[0]=="--scan-character-assemblies")
     return CharacterAssemblyCatalogue.Run(args.Skip(1).ToArray());
 

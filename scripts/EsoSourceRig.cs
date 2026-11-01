@@ -51,7 +51,10 @@ internal sealed class EsoSourceRig
     {
         if(new FileInfo(path).Length is <100 or >8_000_000)
             throw new InvalidDataException("Source rig cache size out of range");
-        using var document=JsonDocument.Parse(File.ReadAllBytes(path));
+        // Historical local source metadata may be UTF-16 from Windows
+        // PowerShell redirection, while new extracts are UTF-8. Preserve
+        // the original numeric JSON values in either encoding.
+        using var document=JsonDocument.Parse(File.ReadAllText(path));
         var root=document.RootElement;
         var rigMeshes=root.GetProperty("RigMeshes");
         var skeletons=root.GetProperty("RigSkeletons");
@@ -142,6 +145,49 @@ internal sealed class EsoSourceRig
             throw new InvalidDataException($"Source rig {VertexCount} vertices != mesh {vertices}");
         arrays[(int)Mesh.ArrayType.Bones]=Indices;
         arrays[(int)Mesh.ArrayType.Weights]=Weights;
+    }
+
+    /// <summary>
+    /// Bind a separately-authored original ESO GR2 mesh to another original
+    /// CustomizationSkeleton, but ONLY when every named mesh binding has an
+    /// exact counterpart and the two ORIGINAL inverse-world bind matrices
+    /// agree. This is not a name-similarity heuristic or rest-pose retarget.
+    /// Both sources must have been verified separately with native Granny.
+    /// </summary>
+    internal Skin BindToIdenticalSourceRest(EsoSourceRig target,float tolerance=0.00001f)
+    {
+        if(tolerance<=0||tolerance>0.00001f)
+            throw new ArgumentOutOfRangeException(nameof(tolerance));
+        var result=new Skin();
+        foreach(string name in BindingNames)
+        {
+            int srcIndex=-1,targetIndex=-1;
+            for(int i=0;i<Bones.Count;i++)
+                if(Bones[i].Name==name){srcIndex=i;break;}
+            for(int i=0;i<target.Bones.Count;i++)
+                if(target.Bones[i].Name==name){targetIndex=i;break;}
+            if(srcIndex<0||targetIndex<0)
+                throw new InvalidDataException(
+                    $"Original source binding {name} missing from matching head rig");
+            var from=Bones[srcIndex].InverseWorld;
+            var to=target.Bones[targetIndex].InverseWorld;
+            float mismatch=Math.Max(Math.Abs(from.Origin.X-to.Origin.X),
+                Math.Max(Math.Abs(from.Origin.Y-to.Origin.Y),
+                    Math.Abs(from.Origin.Z-to.Origin.Z)));
+            for(int axis=0;axis<3;axis++)
+            {
+                Vector3 a=from.Basis[axis],b=to.Basis[axis];
+                mismatch=Math.Max(mismatch,Math.Max(Math.Abs(a.X-b.X),
+                    Math.Max(Math.Abs(a.Y-b.Y),Math.Abs(a.Z-b.Z))));
+            }
+            if(mismatch>tolerance)
+                throw new InvalidDataException(
+                    $"Original ESO source rest mismatch for {name}: {mismatch:F8}");
+            result.AddBind(targetIndex,from);
+        }
+        if(result.GetBindCount()!=BindingNames.Length)
+            throw new InvalidDataException("Original matching source skin incomplete");
+        return result;
     }
 
     internal (Skeleton3D Skeleton,Skin Skin) BuildSkeleton()

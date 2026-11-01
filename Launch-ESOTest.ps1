@@ -8,6 +8,7 @@ param(
     [switch]$HybridHeadLab,
     [switch]$OriginalSkinnedBodyLab,
     [switch]$OriginalBodyWalkComparisonLab,
+    [switch]$OriginalFaceGallery,
     [switch]$LegacyExperimentalRigLab
 )
 
@@ -156,6 +157,7 @@ try {
     if ($HybridHeadLab) { $arguments += ' "res://scenes/eso_hybrid_head_lab.tscn"' }
     if ($OriginalSkinnedBodyLab) { $arguments += ' "res://scenes/eso_original_skinned_body_lab.tscn"' }
     if ($OriginalBodyWalkComparisonLab) { $arguments += ' "res://scenes/eso_original_body_walk_comparison.tscn"' }
+    if ($OriginalFaceGallery) { $arguments += ' "res://scenes/eso_original_face_gallery.tscn"' }
     if ($LegacyExperimentalRigLab) { $arguments += ' "res://scenes/source_rig_lab.tscn"' }
     $process = Start-Process -FilePath $godotExe -ArgumentList $arguments -WorkingDirectory $projectRoot -PassThru
     Add-Content -LiteralPath $logFile -Value "Started Godot PID $($process.Id): $godotExe"
