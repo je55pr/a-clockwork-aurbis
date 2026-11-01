@@ -162,6 +162,47 @@ The assembly of customizable NPC bodies remains unsolved: need the
 not a hand-inferred `defBn_*` to `mshBn_*` map. This is why
 the test keeps the world population renderer unchanged.
 
+## Six original walking styles on the complete source-skinned creature
+
+The `VoriplasticCorpse` source mesh (`0x0015D6CD`) is shown by UESP
+under the in-game name **Voriplasmic Corpse**:
+https://en.uesp.net/wiki/File:ON-npc-Voriplasmic_Corpse.jpg
+
+Run `./Launch-ESOTest.ps1 -OriginalBodyWalkComparisonLab` for six
+independently skinned copies of the **same original mesh**, one per native
+walking animation:
+
+| Clip | Original animation resource |
+|---|---|
+| `GEN_Walk` | `0x0004C319` |
+| `1H_Walk` | `0x0000D200` |
+| `1HShield_Walk` | `0x0002C3EF` |
+| `2HS_Walk` | `0x0000D20E` |
+| `2HL_Walk` | `0x00011BBB` |
+| `Bow_Walk` | `0x0002DB0F` |
+
+All six clips are sampled at 60 Hz through the installed Granny runtime,
+preserving each original source duration. Each model uses **8,109 actual
+ESO vertices, 81/81 native mesh-to-bone bindings, and its own 202-bone
+skeleton**. No retarget mapping, synthesized motion, guessed weapons,
+facial approximations, skin recolouring logic, or animation blending is
+applied. A shared original `ArrayMesh` and separate original `Skin`/
+`Skeleton3D` pairs provide six independently driven skinned figures.
+
+The native pose smoke test compares all 202 bone origins against
+Granny's independently sampled world positions across **every frame
+of all six original clips**, with a maximum observed discrepancy
+of approximately **0.0000011 metres**. The interactive regression
+checks focus/compare, pause, original-source frame stepping, and zoom.
+
+The reference image is an in-game appearance reference, not a source
+material definition. This lab still uses a **neutral diagnostic
+material**, because the real ESO Voriplasmic Corpse diffuse, normal,
+specular and tint-mask binding IDs have not been recovered.
+
+- `res://tests/Godot/eso_original_body_walk_comparison_smoke.tscn`
+- `res://tests/Godot/eso_original_body_walk_comparison_ui_smoke.gd`
+
 ## Next blocker
 
 Identify the **original ESO mechanism that combines
