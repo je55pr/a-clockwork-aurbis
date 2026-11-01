@@ -32,16 +32,23 @@ public partial class EsoHybridHeadLab : Node3D
 
     [Export] public bool SelfTest {get;set;}
     private readonly record struct NativeTransform(Vector3 Position,Quaternion Rotation);
-    private sealed record PoseFrame(float Time,NativeTransform[] SourceBones);
+    private sealed record PoseFrame(float Time,NativeTransform[] SourceBones,
+        Vector3[] NativeWorldPositions);
     private readonly List<(int Target,int Source)> _animated=new();
     private PoseFrame[] _frames=Array.Empty<PoseFrame>();
+    private EsoSourceRig? _rig;
+    private Node3D? _boneReferences;
+    private readonly List<(int Child,int Parent,MeshInstance3D Segment)> _neckSegments=new();
+    private readonly Dictionary<string,MeshInstance3D> _neckMarkers=new(StringComparer.Ordinal);
+    private bool _showReference=true,_showSourceRest=true;
     private Skeleton3D? _skeleton;
     private MeshInstance3D? _head;
     private Camera3D? _camera;
     private Label? _hud;
-    private float _elapsed,_duration,_yaw=Mathf.Pi,_pitch,_distance=1.85f;
+    private float _elapsed,_duration,_yaw=Mathf.Pi,_pitch,_distance=2.1f;
     private bool _playing=true,_dragging,_screenshotTaken;
     private int _screenshotFrames,_currentFrame;
+    private float _maxNativeWorldDeviation;
     public int OriginalBonesAnimated=>_animated.Count;
     public int OriginalSourceSkinBindings=>_head?.Skin?.GetBindCount()??0;
     public int CurrentSourceFrame=>_currentFrame;
@@ -70,6 +77,7 @@ public partial class EsoHybridHeadLab : Node3D
         {
             EnsureSources();
             EsoSourceRig rig=EsoSourceRig.Read(HybridRigFile);
+            _rig=rig;
             var (skeleton,skin)=rig.BuildSkeleton();
             if(rig.VertexCount!=404 || rig.Bones.Count!=54 ||
                rig.BindingNames.Length!=9 || skeleton.GetBoneCount()!=54)
@@ -116,12 +124,14 @@ public partial class EsoHybridHeadLab : Node3D
                     $"{rig.VertexCount} source vertices, {rig.BindingNames.Length} skin bindings, " +
                     $"{_animated.Count} exact-name/parent/rest-compatible animation bones, " +
                     $"{_frames.Length} native Granny frames, " +
+                    $"max native-world joint-position error {_maxNativeWorldDeviation:F6}m, " +
                     $"{animatedWeight/rig.VertexCount:P1} source influence on animated bones; " +
                     "no fabricated geometry, gait, animation retarget or face details");
                 GetTree().Quit(0);
                 return;
             }
             ConfigureCamera();
+            CreateOriginalNeckReferences();
             if(System.Environment.GetEnvironmentVariable("ESO_HYBRID_CAPTURE_REST")=="1")
             {
                 _playing=false;
@@ -293,6 +303,10 @@ public partial class EsoHybridHeadLab : Node3D
             if(sourceTransforms.GetArrayLength()!=202)
                 throw new InvalidDataException("Native pose has missing bones");
             var transforms=new NativeTransform[_animated.Count];
+            var nativeWorld=new Vector3[_animated.Count];
+            var worldArray=frame.GetProperty("WorldPositions");
+            if(worldArray.GetArrayLength()!=202)
+                throw new InvalidDataException("Native world-pose matrix table incomplete");
             for(int i=0;i<_animated.Count;i++)
             {
                 var transform=sourceTransforms[_animated[i].Source];
@@ -315,8 +329,15 @@ public partial class EsoHybridHeadLab : Node3D
                        Math.Abs(s[k].GetSingle()-(k%4==0?1f:0f))>0.0005f)
                         throw new InvalidDataException("Original joint has unsupported native shear");
                 transforms[i]=new NativeTransform(pos,rot);
+                var world=worldArray[_animated[i].Source];
+                if(world.GetArrayLength()!=3)
+                    throw new InvalidDataException("Native world matrix origin malformed");
+                nativeWorld[i]=new Vector3(world[0].GetSingle(),
+                    world[1].GetSingle(),world[2].GetSingle());
+                if(!nativeWorld[i].IsFinite())
+                    throw new InvalidDataException("Native world matrix origin invalid");
             }
-            frames.Add(new PoseFrame(t,transforms));
+            frames.Add(new PoseFrame(t,transforms,nativeWorld));
         }
         if(frames.Count<55||frames.Count>75)
             throw new InvalidDataException("Original native animation has missing sample frames");
@@ -335,14 +356,137 @@ public partial class EsoHybridHeadLab : Node3D
             _skeleton.SetBonePosePosition(target,transforms[i].Position);
             _skeleton.SetBonePoseRotation(target,transforms[i].Rotation);
         }
+        UpdateOriginalNeckReferences();
         if(_hud!=null)
-            _hud.Text=$"ESO HYBRID HEAD 0x{HeadSource:X8} (original geometry and weights)\n"+
-                $"GEN_Walk | original 202-bone source rig | frame {_currentFrame+1}/{_frames.Length}\n"+
-                $"43 exact-name, original-hierarchy, bind-compatible animated joints; "+
-                $"5/9 skinned bindings animated\n"+
-                "No source skin texture yet; neutral diagnostic material only. "+
-                "Customization-only bones remain at original rest.\n"+
-                "Space pause | Left/Right frame | Drag orbit | Wheel zoom | Esc exit";
+        {
+            int neck=_skeleton.FindBone("mshBn_neck");
+            Vector3 sourceRest=_rig!.Bones[neck].InverseWorld.AffineInverse().Origin;
+            Vector3 animatedNeck=_skeleton.GetBoneGlobalPose(neck).Origin;
+            Vector3 neckDelta=animatedNeck-sourceRest;
+            _hud.Text=$"ESO HEAD 0x{HeadSource:X8} | ORIGINAL GEN_Walk frame {_currentFrame+1}/{_frames.Length}\n"+
+                "GOLD: animated source neck/spine/head | BLUE: original resting joints\n"+
+                $"Actual native neck shift from rest (m): X={neckDelta.X:F3}, "+
+                $"Y={neckDelta.Y:F3}, Z={neckDelta.Z:F3}\n"+
+                "43 source animation joints reproduce Granny world positions; 5/9 skin binds animated\n"+
+                "Four customization skin bindings remain at rest; real materials not yet mapped\n"+
+                "Space pause | Left/Right frame | N joint guides | R rest guides | "+
+                "Drag orbit | Wheel zoom | Esc exit";
+        }
+    }
+
+    /// <summary>Direct world-space audit, not an estimated head attachment.
+    /// Compares each Godot animated bone origin with the installed Granny
+    /// runtime's independently evaluated WORLD-pose matrix for the same clip.
+    /// </summary>
+    private void CheckNativeWorldPositions()
+    {
+        if(_skeleton==null)throw new InvalidOperationException("Source rig missing");
+        var expected=_frames[_currentFrame].NativeWorldPositions;
+        for(int i=0;i<_animated.Count;i++)
+        {
+            string name=_rig!.Bones[_animated[i].Target].Name;
+            Vector3 localWorld=_skeleton.GetBoneGlobalPose(_animated[i].Target).Origin;
+            float error=localWorld.DistanceTo(expected[i]);
+            _maxNativeWorldDeviation=Math.Max(_maxNativeWorldDeviation,error);
+            // The two source rigs differ by at most 0.000402 in
+            // individual inverse-bind matrix components.
+            if(!float.IsFinite(error)||error>0.003f)
+                throw new InvalidDataException(
+                    $"Animation/world mismatch for {name} at frame {_currentFrame}: "+
+                    $"Godot={localWorld}, original Granny={expected[i]}, err={error:F6}m");
+        }
+    }
+
+    // No hypothetical anatomy: these are actual native neck/head bone
+    // joints from both matching archived skeletons, shown only as a
+    // positional diagnostic so a moving head can be judged against its
+    // moving neck, rather than the original unanimated neck base.
+    private void CreateOriginalNeckReferences()
+    {
+        if(_skeleton==null||_rig==null)
+            throw new InvalidOperationException("Source head skeleton not ready");
+        _boneReferences=new Node3D{Name="OriginalSourceNeckPositions"};
+        AddChild(_boneReferences);
+        var movingMaterial=new StandardMaterial3D
+        {
+            ShadingMode=BaseMaterial3D.ShadingModeEnum.Unshaded,
+            AlbedoColor=new Color("#f7c76a")
+        };
+        var originalMaterial=new StandardMaterial3D
+        {
+            ShadingMode=BaseMaterial3D.ShadingModeEnum.Unshaded,
+            AlbedoColor=new Color("#75c5e7")
+        };
+        foreach(var name in new[]{"mshBn_spine02","mshBn_neck","mshBn_head"})
+        {
+            var marker=new MeshInstance3D
+            {
+                Name="Native_"+name,
+                Mesh=new SphereMesh{Radius=0.015f,Height=0.03f,
+                    RadialSegments=12,Rings=5},
+                MaterialOverride=movingMaterial
+            };
+            _boneReferences.AddChild(marker);
+            _neckMarkers.Add(name,marker);
+            var original=new MeshInstance3D
+            {
+                Name="Rest_"+name,
+                Mesh=new SphereMesh{Radius=0.009f,Height=0.018f,
+                    RadialSegments=10,Rings=4},
+                MaterialOverride=originalMaterial
+            };
+            _boneReferences.AddChild(original);
+            _neckMarkers.Add("Rest_"+name,original);
+        }
+        foreach(var pair in new[]{
+            ("mshBn_spine02","mshBn_neck"),
+            ("mshBn_neck","mshBn_head")
+        })
+        {
+            var shaft=new MeshInstance3D
+            {
+                Name="OriginalBone_"+pair.Item2,
+                Mesh=new CylinderMesh{TopRadius=0.005f,BottomRadius=0.005f,
+                    Height=1f,RadialSegments=6},
+                MaterialOverride=movingMaterial
+            };
+            _boneReferences.AddChild(shaft);
+            _neckSegments.Add((_skeleton.FindBone(pair.Item2),
+                _skeleton.FindBone(pair.Item1),shaft));
+        }
+        UpdateOriginalNeckReferences();
+    }
+
+    private static void StretchBetween(MeshInstance3D segment,Vector3 from,Vector3 to)
+    {
+        Vector3 vector=to-from;
+        float distance=vector.Length();
+        if(distance<0.001f)
+            throw new InvalidDataException("Original ESO neck bone is degenerate");
+        var quat=new Quaternion(Vector3.Up,vector/distance);
+        segment.Transform=new Transform3D(
+            new Basis(quat).Scaled(new Vector3(1,distance,1)),
+            (from+to)*0.5f);
+    }
+
+    private void UpdateOriginalNeckReferences()
+    {
+        if(_skeleton==null||_rig==null||_boneReferences==null)return;
+        _boneReferences.Visible=_showReference;
+        if(!_showReference)return;
+        foreach(string name in new[]{"mshBn_spine02","mshBn_neck","mshBn_head"})
+        {
+            int target=_skeleton.FindBone(name);
+            if(target<0)throw new InvalidDataException("Missing exact original neck bone");
+            _neckMarkers[name].Position=_skeleton.GetBoneGlobalPose(target).Origin;
+            var rest=_neckMarkers["Rest_"+name];
+            rest.Visible=_showSourceRest;
+            rest.Position=_rig.Bones[target].InverseWorld.AffineInverse().Origin;
+        }
+        foreach(var (child,parent,shaft) in _neckSegments)
+            StretchBetween(shaft,
+                _skeleton.GetBoneGlobalPose(parent).Origin,
+                _skeleton.GetBoneGlobalPose(child).Origin);
     }
 
     private void TestRealSourceAnimation(EsoSourceRig rig,float movingSkinFraction)
@@ -365,6 +509,11 @@ public partial class EsoHybridHeadLab : Node3D
             throw new InvalidDataException("Original native walk did not animate head-bearing skeleton");
         if(!_skeleton.GetBonePosePosition(independent).IsEqualApprox(beforeCustomization))
             throw new InvalidDataException("Native walk illegally changed customization skeleton");
+        for(int i=0;i<_frames.Length;i++)
+        {
+            ApplyNativeFrame(i);
+            CheckNativeWorldPositions();
+        }
     }
 
     private void ConfigureCamera()
@@ -392,7 +541,8 @@ public partial class EsoHybridHeadLab : Node3D
     private void UpdateCamera()
     {
         if(_camera==null)return;
-        var target=new Vector3(0,2.07f,0);
+        // Source neck, head and upper-spine markers all fit at this position.
+        var target=new Vector3(0,1.82f,0.10f);
         var orientation=new Vector3(Mathf.Sin(_yaw)*Mathf.Cos(_pitch),
             Mathf.Sin(_pitch),Mathf.Cos(_yaw)*Mathf.Cos(_pitch));
         _camera.Position=target+orientation*_distance;
@@ -443,6 +593,14 @@ public partial class EsoHybridHeadLab : Node3D
         switch(key.Keycode)
         {
             case Key.Space:_playing=!_playing;break;
+            case Key.N:
+                _showReference=!_showReference;
+                UpdateOriginalNeckReferences();
+                break;
+            case Key.R:
+                _showSourceRest=!_showSourceRest;
+                UpdateOriginalNeckReferences();
+                break;
             case Key.Left:
                 _playing=false;
                 ApplyNativeFrame(_currentFrame==0?_frames.Length-1:_currentFrame-1);

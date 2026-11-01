@@ -43,6 +43,36 @@ func _run() -> void:
         push_error("Original head inspection camera unavailable")
         quit(1)
         return
+    var native_neck: MeshInstance3D = scene.get_node_or_null("OriginalSourceNeckPositions/Native_mshBn_neck")
+    var rest_neck: MeshInstance3D = scene.get_node_or_null("OriginalSourceNeckPositions/Rest_mshBn_neck")
+    if native_neck == null or rest_neck == null or not rest_neck.visible:
+        push_error("Actual source neck and original rest neck references missing")
+        quit(1)
+        return
+    if native_neck.position.distance_to(rest_neck.position) < 0.25:
+        push_error("Original GEN_Walk neck displacement not reproduced")
+        quit(1)
+        return
+    key(scene, KEY_R)
+    if rest_neck.visible:
+        push_error("Original rest-reference toggle did not hide original neck position")
+        quit(1)
+        return
+    key(scene, KEY_R)
+    if not rest_neck.visible:
+        push_error("Original rest-reference toggle did not restore neck position")
+        quit(1)
+        return
+    key(scene, KEY_N)
+    if native_neck.get_parent().visible:
+        push_error("Original bone-guide visibility toggle failed")
+        quit(1)
+        return
+    key(scene, KEY_N)
+    if not native_neck.get_parent().visible:
+        push_error("Original neck-guide visibility toggle failed to restore")
+        quit(1)
+        return
     key(scene, KEY_SPACE)
     var frame0: int = scene.GetOriginalFrameIndex()
     for i in range(3):
