@@ -1,0 +1,5 @@
+# Provisional original ESO hair texture candidate: male HAR_M_HU_0343 artwork explicitly
+# references the same HAR_F_HU_0343 diffuse, normal, specular, tint files as
+# female HAR_F_HU_0343. Female archive-neighbor triplet still lacks runtime material link.
+# Never treat this as confirmed in-game DDS ID assignment or original hair shader.
+0029B2AF	0029A877	0029A879	0029A87B	archive-triplet-authoring-provisional

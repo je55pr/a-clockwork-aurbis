@@ -59,8 +59,36 @@ func _run() -> void:
                 push_error("Original ESO hair vertices or exact hair skin bindings lost")
                 quit(1)
                 return
+            var material: ShaderMaterial = hair.material_override as ShaderMaterial
+            if material == null or material.shader == null or \
+                material.shader.code.find("ALPHA_SCISSOR_THRESHOLD") < 0:
+                push_error("Original male hair source candidate alpha cutout missing")
+                quit(1)
+                return
+            for channel in ["original_diffuse","original_normal","original_specular"]:
+                if not (material.get_shader_parameter(channel) is Texture2D):
+                    push_error("Original hair shared-authoring DDS channel missing: " + channel)
+                    quit(1)
+                    return
         figures.append(figure)
 
+    if scene.SourceDdsHairCount != 2 or not scene.SourceDdsHairVisible:
+        push_error("Original high-detail head DDS hair candidates absent")
+        quit(1)
+        return
+    var original_hair: MeshInstance3D = figures[1].get_node(
+        "OriginalCustomizationSkeleton/OriginalSourceHair_0029B2AF")
+    var initial_material: Material = original_hair.material_override
+    press(scene, KEY_T)
+    if scene.SourceDdsHairVisible or original_hair.material_override == initial_material:
+        push_error("Neutral original head hair comparison not enabled")
+        quit(1)
+        return
+    press(scene, KEY_T)
+    if not scene.SourceDdsHairVisible or original_hair.material_override != initial_material:
+        push_error("Original head DDS hair candidate comparison not restored")
+        quit(1)
+        return
     var camera: Camera3D = scene.get_node_or_null("OriginalFaceCamera")
     if camera == null or not camera.current:
         push_error("Original face gallery camera missing")
@@ -87,5 +115,5 @@ func _run() -> void:
         push_error("Face gallery orbit camera zoom control failed")
         quit(1)
         return
-    print("PASS original ESO face construction UI: six actual head assets, 6530-vertex full face, 2 exact 2841-vertex hair attachments, 12/12 bindings, focus and zoom")
+    print("PASS original ESO face construction UI: 6 true head assets, 6530-vertex high-detail face, 2 source-exact 2841-vertex hair skins with 12/12 binds, shared-authoring provisional original D/N/S hair textures, T toggle, focus and zoom")
     quit(0)

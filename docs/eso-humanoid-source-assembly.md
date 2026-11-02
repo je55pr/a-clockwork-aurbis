@@ -276,6 +276,49 @@ Reproduce the source-built complete humanoid with:
 - All derived mesh data, screenshots and decoder libraries stay
   under ignored `.research/`, not Git.
 
+## Original high-detail head gallery: source-shared hairstyle DDS (2026-11-02)
+
+Two authentic ESO high-detail customization heads have an original
+`HAR_M_HU_0343` hairstyle (`0029B2AF`, 2,841 vertices). Installed
+native Granny validates all **12/12 bone names and original inverse
+rest matrices** on both `Head_600` (`001076DD`, 6,530 vertices)
+and `Head_008` (`00129B5D`, 1,721 vertices), without offsets
+or guessed bindings. Other incompatible source heads still reject
+this hairstyle.
+
+A further original-source authoring discovery: the male hair GR2
+material actually references the same
+`HAR_F_HU_0343_D.tga`, `har_f_hu_0343_n.tga`,
+`har_f_hu_0343_s.tga`, and `har_f_hu_0343_t.tga`
+files as the **female** `HAR_F_HU_0343` (`0029A87F`)
+material. The female source is independently adjacent in the
+installed archive to three original 576 × 256 DXT5 DDS files:
+diffuse `0029A877`, packed normal `0029A879`,
+and specular `0029A87B`.
+
+The source paths are genuinely shared, but the original *runtime*
+GR2-to-DDS material-table linkage has **not** been found. The
+standalone face gallery therefore labels the proposed shared DDS
+mapping `archive-triplet-authoring-provisional` in the small
+tracked file `data/eso_original_face_hair_texture_candidates.tsv`.
+The same diagnostic alpha-cutout + packed-normal + specular shader
+is rendered on both original heads. Local GPU capture of the
+6,530-vertex `Head_600` shows coherent hair-strand detail and
+transparency without distorting the original geometry.
+
+Launch `./Launch-ESOTest.ps1 -OriginalFaceGallery`,
+focus `2` or `4` on a source-haired head, and press `T` to
+compare the provisional original hair DDS images to neutral hair.
+The head skin/eyes remain neutral, and this is **not** a complete,
+animated runtime ESO NPC.
+
+`tests/check_original_face_hair_material.ps1` independently
+checks both artist-source paths, both **12/12 native Granny
+binding** verdicts, and the genuine DDS dimensions/compression.
+The existing source face UI smoke verifies shader textures, original
+skin bindings, and the `T` comparison. All extracted texture bytes,
+game DLLs and screenshots stay locally ignored under `.research/`.
+
 ## Original hybrid-body animation audit (2026-11-02)
 
 The original `CustomizationSkeleton` source catalogue now has a bounded,

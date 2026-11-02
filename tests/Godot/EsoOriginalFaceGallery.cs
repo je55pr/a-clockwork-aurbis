@@ -31,6 +31,10 @@ public partial class EsoOriginalFaceGallery:Node3D
     [Export]public bool SelfTest {get;set;}
     private readonly List<Node3D> _figures=new();
     private readonly Dictionary<uint,EsoSourceRig> _sourceRigs=new();
+    private readonly List<MeshInstance3D> _originalHairs=new();
+    private ShaderMaterial? _candidateHairMaterial;
+    private Material? _neutralHairMaterial;
+    private bool _candidateHairVisible=true;
     private Camera3D? _camera;
     private Label? _hud;
     private int _focus=-1,_shotCount;
@@ -47,6 +51,8 @@ public partial class EsoOriginalFaceGallery:Node3D
         @"C:\ESO\The Elder Scrolls Online\depot\eso.mnf";
     private static string Oodle=>Path.Combine(Root,".research","ooz.dll");
     public int OriginalHeadCount=>_figures.Count;
+    public int SourceDdsHairCount=>_originalHairs.Count;
+    public bool SourceDdsHairVisible=>_candidateHairVisible;
 
     public override void _Ready()
     {
@@ -116,6 +122,9 @@ public partial class EsoOriginalFaceGallery:Node3D
             }
             if(SelfTest)
             {
+                if(_originalHairs.Count!=2||_candidateHairMaterial==null)
+                    throw new InvalidDataException(
+                        "Two source-exact high-detail heads lost provisional shared-authoring hair DDS");
                 var originalHair=EsoSourceRig.Read(Path.Combine(Cache,
                     "face-gallery-hair-0029B2AF-rig.json"));
                 // Native bone names alone are insufficient. The source
@@ -148,7 +157,7 @@ public partial class EsoOriginalFaceGallery:Node3D
         }
     }
 
-    private static void AttachVerifiedOriginalHair(
+    private void AttachVerifiedOriginalHair(
         Skeleton3D skeleton,EsoSourceRig headRig,uint headId)
     {
         const uint hairId=0x0029B2AF;
@@ -177,17 +186,38 @@ public partial class EsoOriginalFaceGallery:Node3D
             meshPath,"HAR_M_HU_0343",hair);
         if(mesh.SurfaceGetArrayLen(0)!=2841||skin.GetBindCount()!=12)
             throw new InvalidDataException("Original ESO hair geometry mismatch");
-        skeleton.AddChild(new MeshInstance3D
+        if(_candidateHairMaterial==null)
+        {
+            string candidateIndex=Path.Combine(Root,"data",
+                "eso_original_face_hair_texture_candidates.tsv");
+            using var sourceTextures=new EsoOriginalCreatureTextures(
+                Manifest,Oodle,candidateIndex);
+            var mapping=sourceTextures.SourceMapping(hairId);
+            if(sourceTextures.MappingCount!=1||mapping==null||
+               mapping.Evidence!="archive-triplet-authoring-provisional"||
+               mapping.Diffuse!=0x0029A877u||
+               mapping.Normal!=0x0029A879u||
+               mapping.Specular!=0x0029A87Bu)
+                throw new InvalidDataException(
+                    "Original male hair authoring-shared DDS candidate IDs changed");
+            _candidateHairMaterial=sourceTextures.LoadAlphaCutoutMaterial(hairId)??
+                throw new InvalidDataException(
+                    "Original female-authoring shared hair DDS assets could not decode");
+        }
+        _neutralHairMaterial??=new StandardMaterial3D
+        {
+            AlbedoColor=new Color("#86878a"),
+            Roughness=0.82f,
+            CullMode=BaseMaterial3D.CullModeEnum.Disabled
+        };
+        var instance=new MeshInstance3D
         {
             Name="OriginalSourceHair_0029B2AF",
             Mesh=mesh,Skin=skin,Skeleton=new NodePath(".."),
-            MaterialOverride=new StandardMaterial3D
-            {
-                AlbedoColor=new Color("#86878a"),
-                Roughness=0.82f,
-                CullMode=BaseMaterial3D.CullModeEnum.Disabled
-            }
-        });
+            MaterialOverride=_candidateHairMaterial
+        };
+        skeleton.AddChild(instance);
+        _originalHairs.Add(instance);
         GD.Print($"PASS original ESO head/hair assembly: Head source 0x{headId:X8} "+
             "with HAR_M_HU_0343, 12/12 exact Granny bindings, "+
             "12/12 inverse-world rest matrices within 0.00001, "+
@@ -265,7 +295,9 @@ public partial class EsoOriginalFaceGallery:Node3D
                 "6 source-skinned head meshes\n"+
                 "No procedural facial features\n"+
                 "No custom morphs applied\n"+
-                "Source skin materials missing\n"+
+                "Original skin materials still missing\n"+
+                "Hair: original DDS candidate (unverified)\n"+
+                "T: compare textured/neutral hair\n"+
                 "1-6 focus on one\n"+
                 "0 compare all\n"+
                 "Drag to orbit\n"+
@@ -314,6 +346,12 @@ public partial class EsoOriginalFaceGallery:Node3D
             case Key.Key1 or Key.Key2 or Key.Key3 or Key.Key4 or Key.Key5 or Key.Key6:
                 _focus=(int)key.Keycode-(int)Key.Key1;
                 UpdateView();break;
+            case Key.T:
+                _candidateHairVisible=!_candidateHairVisible;
+                foreach(var hair in _originalHairs)
+                    hair.MaterialOverride=_candidateHairVisible?
+                        _candidateHairMaterial:_neutralHairMaterial;
+                break;
             case Key.Escape:GetTree().Quit();break;
         }
     }
