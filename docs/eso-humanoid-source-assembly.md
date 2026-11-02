@@ -162,6 +162,79 @@ The assembly of customizable NPC bodies remains unsolved: need the
 not a hand-inferred `defBn_*` to `mshBn_*` map. This is why
 the test keeps the world population renderer unchanged.
 
+## Source-exact eight-piece humanoid assembly (601 family, 2026-11-02)
+
+The first complete original humanoid customization **rest pose** is now
+assembled in the isolated Godot scene
+`./Launch-ESOTest.ps1 -OriginalHumanoid601AssemblyLab`.
+This is a genuinely game-authored *601* body-part family, not a
+procedurally built body, and **not yet a runtime-customized NPC**.
+
+| Original GR2 asset | Source ID | Original vertices | Native skin bindings |
+| --- | --- | ---: | ---: |
+| `ArmsLower_601` | `001230D9` | 90 | 4 |
+| `ArmsUpper_601` | `001230DB` | 218 | 10 |
+| `Hands_601` | `001230DD` | 554 | 14 |
+| `Torso_601` | `001230DF` | 1,462 | 22 |
+| `Head_601` | `001230E1` | 1,443 | 38 |
+| `LegsLower_601` | `001230E3` | 230 | 10 |
+| `LegsUpper_601` | `001230E5` | 2,328 | 8 |
+| `Feet_601` | `001230E7` | 426 | 6 |
+| **`HAR_F_HU_0343` (hair)** | **`0029A87F`** | **2,491** | **10** |
+
+The **eight body meshes** total **6,751 original source vertices**.
+Their eight independently archived `CustomizationSkeleton` subset
+hierarchies merge into **110 unique bones**, with **98 repeated bone
+references** having identical named parents and inverse-world bind
+matrices. The merger rejects any differing parent or bind transform; it
+does not invent an intermediate `defBn_ -> mshBn_` mapping.
+Godot preserves each source mesh's unmodified vertex weights and
+native binding table, independently verifying rest-pose skin matrices.
+
+A source-only hair scan tested the 265 archived `HAR_*` models and
+found 14 candidates whose original skin binding names and inverse-world
+rests match this merged customization skeleton within `0.00001`.
+This is *only* a rest-matrix screen: several other candidates do not
+pass native binding against `Head_601`. The selected
+`HAR_F_HU_0343` (resource `0029A87F`) independently passes
+**10/10 exact bone-name bindings** with Granny's native
+`GrannyNewMeshBinding` API against `Head_601`, as well as 10
+rest-matrix checks against the merged 110-bone rig. Its original
+2,491-vertex mesh is shown in the neutral diagnostic viewer.
+
+The rest scene has been GPU-rendered locally and shows a complete
+source-authored character silhouette, pointed shoulders and long
+skirt, with attached original hairstyle. Its grey colour is
+**diagnostic only**, not ESO skin, hair, fabric or armour materials.
+The source part family itself is stylised; no ordinary playable-race
+identity or named NPC has been established for it.
+
+Important negative checks:
+
+- **`Head_600` must not be substituted**: all 44 overlapping facial
+  bones exist by name, but original rest matrices differ by as much as
+  about 4.195 in matrix component values. The new Godot source
+  assembly smoke test rejects this cross-family combination.
+- The 110 `601` customization bones and the separate 202-bone
+  `GrannyRootBone` animation skeleton share **zero exact bone
+  names**. The game-specific customization-to-animation bridge is
+  therefore still required to make this ordinary body walk.
+- We cannot identify genuine skin, eye, hair or armour DDS runtime
+  references from these body-part GR2s alone.
+
+Reproduce the source-built complete humanoid with:
+
+- `res://tests/Godot/eso_original_humanoid_601_assembly_smoke.tscn`
+  checks original geometry, all shared rest matrices, exact source
+  skinning, original hair, native binding and rejected incompatible head.
+- `res://tests/Godot/eso_original_humanoid_601_assembly_ui_smoke.gd`
+  checks all nine actual mesh instances, the single merged source
+  skeleton, skin-bind rests and orbit/zoom.
+- The scene `res://scenes/eso_original_humanoid_601_assembly.tscn`
+  is an isolated source inspection, not a replacement for Auridon NPCs.
+- All derived mesh data, screenshots and decoder libraries stay
+  under ignored `.research/`, not Git.
+
 ## Six original walking styles on the complete source-skinned creature
 
 The `VoriplasticCorpse` source mesh (`0x0015D6CD`) is shown by UESP

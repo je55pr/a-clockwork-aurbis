@@ -139,6 +139,104 @@ internal sealed class EsoSourceRig
             bones,names,indices,weights);
     }
 
+    /// <summary>
+    /// Reconstruct one source customization rest skeleton from multiple
+    /// original ESO body pieces, but ONLY if all overlapping bone names
+    /// have identical source parents AND inverse-world rest matrices.
+    /// This does not bridge to the different animated GrannyRootBone rig.
+    /// </summary>
+    internal static (Skeleton3D Skeleton,Skin[] Skins,int UniqueBones,int SharedReferences)
+        BuildIdenticalRestAssembly(IReadOnlyList<EsoSourceRig> parts)
+    {
+        if(parts.Count is <2 or >24)
+            throw new ArgumentException("Expected a bounded original body-part family");
+
+        var names=new List<string>();
+        var parents=new List<string?>();
+        var inverse=new List<Transform3D>();
+        var indices=new Dictionary<string,int>(StringComparer.Ordinal);
+        int shared=0;
+
+        static float MatrixDelta(Transform3D a,Transform3D b)
+        {
+            float error=Math.Max(Math.Abs(a.Origin.X-b.Origin.X),
+                Math.Max(Math.Abs(a.Origin.Y-b.Origin.Y),
+                    Math.Abs(a.Origin.Z-b.Origin.Z)));
+            for(int col=0;col<3;col++)
+            {
+                Vector3 x=a.Basis[col],y=b.Basis[col];
+                error=Math.Max(error,Math.Abs(x.X-y.X));
+                error=Math.Max(error,Math.Abs(x.Y-y.Y));
+                error=Math.Max(error,Math.Abs(x.Z-y.Z));
+            }
+            return error;
+        }
+
+        foreach(EsoSourceRig part in parts)
+        {
+            foreach(var bone in part.Bones)
+            {
+                string? parent=bone.Parent<0?null:part.Bones[bone.Parent].Name;
+                if(indices.TryGetValue(bone.Name,out int existing))
+                {
+                    if(parents[existing]!=parent)
+                        throw new InvalidDataException(
+                            $"Source customization parent disagreement on {bone.Name}");
+                    float error=MatrixDelta(inverse[existing],bone.InverseWorld);
+                    if(error>0.00001f)
+                        throw new InvalidDataException(
+                            $"Source customization inverse-rest disagreement on {bone.Name}: {error:F8}");
+                    shared++;
+                    continue;
+                }
+                if(parent!=null&&!indices.ContainsKey(parent))
+                    throw new InvalidDataException(
+                        $"Original subset skeleton's parent missing before {bone.Name}");
+                indices.Add(bone.Name,names.Count);
+                names.Add(bone.Name);
+                parents.Add(parent);
+                inverse.Add(bone.InverseWorld);
+                if(names.Count>256)
+                    throw new InvalidDataException("Source customization skeleton exceeds 256 bones");
+            }
+        }
+
+        var skeleton=new Skeleton3D{Name="OriginalMergedCustomizationSkeleton"};
+        var world=inverse.Select(x=>x.AffineInverse()).ToArray();
+        for(int i=0;i<names.Count;i++)
+        {
+            skeleton.AddBone(names[i]);
+            int parent=parents[i]==null?-1:indices[parents[i]!];
+            if(parent>=i)
+                throw new InvalidDataException("Merged source skeleton order is not topological");
+            if(parent>=0)skeleton.SetBoneParent(i,parent);
+            skeleton.SetBoneRest(i,parent<0
+                ?world[i]:world[parent].AffineInverse()*world[i]);
+        }
+        skeleton.ResetBonePoses();
+
+        for(int i=0;i<names.Count;i++)
+        {
+            var reconstructed=skeleton.GetBoneGlobalPose(i).AffineInverse();
+            if(MatrixDelta(reconstructed,inverse[i])>0.0001f)
+                throw new InvalidDataException(
+                    $"Merged original customization rest drifted for {names[i]}");
+        }
+        var skins=new Skin[parts.Count];
+        for(int i=0;i<parts.Count;i++)
+        {
+            var skin=new Skin();
+            foreach(string name in parts[i].BindingNames)
+            {
+                if(!indices.TryGetValue(name,out int target))
+                    throw new InvalidDataException($"Original skin bind missing: {name}");
+                skin.AddBind(target,inverse[target]);
+            }
+            skins[i]=skin;
+        }
+        return (skeleton,skins,names.Count,shared);
+    }
+
     internal void AddInfluences(Godot.Collections.Array arrays,int vertices)
     {
         if(vertices!=VertexCount)
@@ -187,6 +285,47 @@ internal sealed class EsoSourceRig
         }
         if(result.GetBindCount()!=BindingNames.Length)
             throw new InvalidDataException("Original matching source skin incomplete");
+        return result;
+    }
+
+    /// <summary>
+    /// Attach an original source accessory to an already merged customization
+    /// skeleton ONLY if every source binding name and inverse-world rest
+    /// matrix matches its bone exactly. Never remap anatomy by approximation.
+    /// </summary>
+    internal Skin BindToMergedSourceRest(Skeleton3D skeleton,float tolerance=0.00001f)
+    {
+        if(tolerance<=0||tolerance>0.00001f)
+            throw new ArgumentOutOfRangeException(nameof(tolerance));
+        var result=new Skin();
+        foreach(string name in BindingNames)
+        {
+            int target=skeleton.FindBone(name);
+            int source=-1;
+            for(int i=0;i<Bones.Count;i++)
+                if(Bones[i].Name==name){source=i;break;}
+            if(source<0||target<0)
+                throw new InvalidDataException(
+                    $"Original accessory skin {name} absent from merged source anatomy");
+            Transform3D original=Bones[source].InverseWorld;
+            Transform3D merged=skeleton.GetBoneGlobalPose(target).AffineInverse();
+            float error=Math.Max(Math.Abs(original.Origin.X-merged.Origin.X),
+                Math.Max(Math.Abs(original.Origin.Y-merged.Origin.Y),
+                    Math.Abs(original.Origin.Z-merged.Origin.Z)));
+            for(int axis=0;axis<3;axis++)
+            {
+                Vector3 a=original.Basis[axis],b=merged.Basis[axis];
+                error=Math.Max(error,Math.Abs(a.X-b.X));
+                error=Math.Max(error,Math.Abs(a.Y-b.Y));
+                error=Math.Max(error,Math.Abs(a.Z-b.Z));
+            }
+            if(error>tolerance)
+                throw new InvalidDataException(
+                    $"Original accessory rest mismatch for {name}: {error:F8}");
+            result.AddBind(target,original);
+        }
+        if(result.GetBindCount()!=BindingNames.Length)
+            throw new InvalidDataException("Original accessory skin incomplete");
         return result;
     }
 
