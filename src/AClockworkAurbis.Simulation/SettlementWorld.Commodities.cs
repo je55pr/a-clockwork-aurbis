@@ -621,7 +621,9 @@ public sealed partial class SettlementWorld
                     if(choice.Carrier is null)
                     {
                         if(!choice.HadCapacity)CarrierShortage(need);
-                        else if(choice.HadFundedCourier)CourierStaffShortage();
+                        // An unfunded carrier or unavailable driver both
+                        // leave a valid buyer's shipment unserved.
+                        else CourierStaffShortage();
                         continue;
                     }
                     carrier=choice.Carrier;

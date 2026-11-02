@@ -74,7 +74,7 @@ public sealed partial class SettlementWorld
         _unfulfilledFreightRequests++;
     }
 
-    private IEnumerable<BusinessState> RankedPaidCarriers(BusinessState seller,BusinessState buyer)
+    internal IEnumerable<BusinessState> RankedPaidCarriers(BusinessState seller,BusinessState buyer)
     {
         int routeMinutes=PlaceTravelMinutes(seller.Place,buyer.Place);
         return _businesses

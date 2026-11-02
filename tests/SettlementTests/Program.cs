@@ -2292,6 +2292,8 @@ static void FreightCarrierFallback()
     courier.Energy=100;
     courier.CurrentPlaceId=seller.Id;
 
+    Expect(world.RankedPaidCarriers(seller,buyer).First()==first,
+        "the unfunded carrier is genuinely ranked ahead of the funded fallback");
     var funded=world.ChooseFundedShipmentCarrier(seller,buyer,5,2m,0);
     Expect(funded.Carrier==second && funded.Courier==courier &&
         funded.Units==5 && funded.HadCapacity,
