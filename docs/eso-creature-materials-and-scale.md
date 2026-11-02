@@ -14,17 +14,17 @@ All 27 independently sampled original Walk poses for each rig match Godot's worl
 
 ## Source DDS texture candidate coverage
 
-The material loader (`scripts/EsoOriginalCreatureTextures.cs`) now accepts an **ID-only** candidate index in `data/eso_creature_texture_candidates.tsv`. A user can override it by creating the ignored file `.research/npc-rigs/creature-texture-candidates.tsv`. With neither index, the viewer uses neutral diagnostic materials. Columns are:
+The material loader (`scripts/EsoOriginalCreatureTextures.cs`) reads an **ID-only** candidate index from `data/eso_creature_texture_candidates.tsv` and merges optional local overrides from the ignored `.research/npc-rigs/creature-texture-candidates.tsv` (local entries take precedence). Thus a stale local index can no longer hide the larger tracked source catalogue. With neither index, the viewer uses neutral diagnostic materials. Columns are:
 
 `mesh ID <TAB> diffuse DDS ID <TAB> normal DDS ID <TAB> specular DDS ID <TAB> provenance`
 
-The tracked list has **9 of 13 distinct original source meshes with diffuse DDS candidates**, **7 packed-normal candidates**, and **8 specular DDS candidates now rendered through an explicitly approximate diagnostic shader**. All 24 unique DDS IDs were decoded and validated against the installed ESO archive; the four absent diffuse assignments are basic Clannfear, champion Clannfear, second basic Clannfear and basic Daedroth.
+The expanded index has **60 distinct source mesh-to-DDS candidates**: the original 9 plus **51 newly researched creature meshes**. Across the whole index, 58 original packed-normal and 58 specular candidates, comprising **146 distinct genuine source DDS files**, pass the source-only batch audit. Of the currently animated 13 curated meshes, **9 have diffuse candidates, 7 have packed normals and 7 now have specular shaders**. Four still lack diffuse assignments: basic Clannfear, champion Clannfear, second basic Clannfear and basic Daedroth.
 
 | Creature mesh | Diffuse DDS | Packed normal DDS | Specular DDS | Provenance |
 | --- | --- | --- | --- | --- |
 | Daedroth armoured 000A0A61 | 000A0A63 | unknown | 000A0A67 | archive neighbour |
 | Guar Xitahran 0029B14F | 0029B14D | 0029B151 | 0029B153 | archive neighbour |
-| Clannfear armoured 000A0A3F | 000A0A4D | 000A0A4F | 000A0A51 | archive neighbour |
+| Clannfear armoured 000A0A3F | 000A0A4D | 000A0A4F | unknown (mismatched candidate rejected) | archive neighbour |
 | Clannfear boss 00023B09 | 00023B03 | 00023B05 | 00023B07 | adjacent triple |
 | Guar basic 00023B3D | 00023B37 | 00023B39 | 00023B3B | adjacent triple |
 | Guar variant C 00023C73 | 00023C6B | 00023C6D | 00023C6F | adjacent triple |
@@ -36,11 +36,17 @@ The tracked list has **9 of 13 distinct original source meshes with diffuse DDS 
 
 The loader supports original DXT1, DXT3 and DXT5 DDS content and fixes nonstandard pitch/linear-size fields in an **in-memory copy only**. ESO creature tangent-space normals store X in alpha and Y in green. Before conversion to Godot normal textures, a sample verifies that the source green/alpha channels have the expected packed-normal distributions. This rejected two wrong earlier assignments: `000A0A67` and `000AA37B` are *not* packed-normal maps, and their source IDs are now retained in the **specular** candidate column rather than forced into the wrong normal slot.
 
-Specular candidate DDS IDs are now decoded and sampled in a **diagnostic Godot ShaderMaterial**, modulating per-pixel dielectric highlights with the source RGB specular luminance. This shader also applies the original diffuse and converted packed-normal maps. It is an approximation for source texture inspection, **not ESO's exact original ZOS shader**, gloss/tint/emission equations or a verified DDS-to-mesh assignment. The one mapping without a specular candidate uses StandardMaterial3D instead. Hardware OpenGL rendering has been checked locally with all 13 source meshes; source captures remain under ignored `.research/`.
+Specular candidate DDS IDs are now decoded and sampled in a **diagnostic Godot ShaderMaterial**, modulating per-pixel dielectric highlights with the source RGB specular luminance. This shader also applies the original diffuse and converted packed-normal maps. It is an approximation for source texture inspection, **not ESO's exact original ZOS shader**, gloss/tint/emission equations or a verified DDS-to-mesh assignment. The two currently rendered diffuse candidates without matching specular IDs use StandardMaterial3D instead. The loader also refuses to apply normal/specular textures whose dimensions disagree with the diffuse DDS. Hardware OpenGL rendering has been checked locally with all 13 source meshes; source captures remain under ignored `.research/`.
 
 **Two basic Clannfear meshes are a proven material family:** the native Clannfear A mesh `000815D7` and Clannfear C mesh `0008230B` have byte-identical original UV coordinates and triangle indices, and all three GR2-authored diffuse, normal and specular paths match exactly. The test `tests/check_original_clannfear_material_family.ps1` verifies this against the installed source. Once a **verified** runtime DDS texture set for one is found, its source authoring data supports investigating the same set for the other. Neither DDS ID is currently resolved.
 
 Original GR2 material metadata includes artist paths such as `Characters\Monsters\Clannfear\Textures\Clannfear_D.tga`, `Art\Character\textures\Clannfear_CH_armored_D.dds`, and the Guar Xitahran pet texture source paths. The ZOSFT path index does not provide their final installed DDS archive-ID association. Two older Guar models store embedded Granny texture **metadata**, but the native images have dimensions 0×0 and zero embedded pixels, so those GR2 records cannot directly supply diffuse artwork.
+
+## Expanded source texture research
+
+The independent source-only `--survey-original-creature-texture-triplets` survey inspected **1,888 Bip01-root mesh records** and recovered **393 structurally consistent DDS triples across 290 meshes**. Of these, **225** had one possible triple and **68** were within six resource IDs of the matching mesh. The DXT5 compressed mipmap checker confirmed that all accepted normal channels use an ESO-compatible packed distribution and rejected previously mistaken dark non-normal maps. A further native Granny material audit confirmed that **52 of those 68 models explicitly name diffuse, normal and specular authoring texture paths**. One of those 52, the Guar Scalecaller, was already in the initial index, resulting in **51 additional IDs**. The new entries all carry `archive-triplet-authoring-provisional` evidence, never `source-verified`.
+
+The batch source index audit (`--audit-original-creature-texture-index`) validates **all 60 candidate associations and all 146 distinct DDS resources** in one native source reader, including dimensions and packed normals. It found a mismatched proposed specular DDS for the older armoured Clannfear (`000A0A51`); that assignment has been disabled rather than falsely presented as original. A new Godot runtime smoke test (`tests/Godot/eso_original_creature_texture_coverage_smoke.tscn`) successfully **decodes and shader-binds all three original DDS channels for 12 newly mapped creature families**: giant spider, werewolf, troll, Mantikora, Fell Sentry, thorn gecko, spider daedra, Dreugh, giant wasp, senche, Guar mount and bear cub. No game graphics were committed and no runtime mesh-to-texture association has been proven from an authoritative actor material table. These additional 51 models are **texture-mapped candidates for future general rendering**, not yet newly animated models in the 13-mesh gallery.
 
 ## What broad texture searches actually established
 
@@ -71,10 +77,12 @@ dotnet build tools/ModelGeometry/ModelGeometry.csproj
 dotnet build EsoTest.csproj
 ./tests/check_original_creature_source_animations.ps1
 ./tests/check_original_creature_texture_candidates.ps1
+./tests/check_original_creature_texture_triplet_survey.ps1
+./tests/check_original_creature_texture_authoring.ps1
 ./tests/check_original_clannfear_material_family.ps1
 ./Launch-ESOTest.ps1 -OriginalCreatureVarietyLab
 ```
 
-Run the Godot scene and UI smoke tests for the original creature gallery, creature crowd and creature variety under `tests/Godot/`. The variety UI test asserts **9 loaded original DDS diffuse maps**, the **7 appropriate packed normal maps**, all **8 sampled specular texture materials** and preservation of original skinned mesh/rig identity through toggle and sharing. It also passes using the tracked source-ID index alone when no `.research/` override exists.
+Run the Godot scene and UI smoke tests for the original creature gallery, creature crowd and creature variety under `tests/Godot/`. The variety UI test asserts **9 loaded original DDS diffuse maps**, the **7 appropriate packed normal maps**, **7 sampled specular texture materials**, the **60-entry source-ID catalogue** and preservation of original skinned mesh/rig identity through toggle and sharing. It also passes using the tracked source-ID index alone when no `.research/` override exists.
 
 No proprietary source image or archive is committed to Git. Newly found texture candidates must remain labelled provisional until ESO's authoritative runtime references can be recovered.

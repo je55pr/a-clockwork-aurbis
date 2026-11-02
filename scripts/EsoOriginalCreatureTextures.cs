@@ -13,7 +13,7 @@ namespace EsoTest;
 /// The optional mesh-to-DDS assignments come ONLY from a local research
 /// manifest, never from unverified numeric proximity or inferred colors.
 /// The genuine bytes are read on demand from the installed game archives.
-/// Neither the manifest nor source DDS images are committed to Git.
+/// Only ID/evidence metadata is committed; source DDS images stay local.
 /// </summary>
 internal sealed class EsoOriginalCreatureTextures : IDisposable
 {
@@ -30,12 +30,23 @@ internal sealed class EsoOriginalCreatureTextures : IDisposable
     internal int LoadedDiffuseCount=>_diffuse.Count;
     internal int LoadedNormalCount=>_normal.Count;
 
-    internal EsoOriginalCreatureTextures(string manifest,string oodleDll,string mappings)
+    internal EsoOriginalCreatureTextures(string manifest,string oodleDll,
+        string mappings,string? localOverrides=null)
     {
         _archive=new EsoArchive(manifest);
         _oodle=OodleDecoder.FromEnvironment(oodleDll)
             ??throw new FileNotFoundException("Local original ESO Oodle decoder unavailable");
+        ReadMappings(mappings,false);
+        if(localOverrides!=null &&
+           !Path.GetFullPath(mappings).Equals(Path.GetFullPath(localOverrides),
+               StringComparison.OrdinalIgnoreCase))
+            ReadMappings(localOverrides,true);
+    }
+
+    private void ReadMappings(string mappings,bool allowLocalOverrides)
+    {
         if(!File.Exists(mappings))return;
+        var seenInThisFile=new HashSet<uint>();
         foreach(string line in File.ReadLines(mappings))
         {
             string text=line.Trim();
@@ -53,11 +64,17 @@ internal sealed class EsoOriginalCreatureTextures : IDisposable
                 throw new InvalidDataException("Bad original ESO specular texture candidate: "+text);
             string evidence=fields[^1];
             if(evidence is not ("uv-provisional" or "source-verified" or
-                 "archive-neighbor-provisional" or "archive-triplet-provisional"))
+                 "archive-neighbor-provisional" or "archive-triplet-provisional" or
+                 "archive-triplet-authoring-provisional"))
                 throw new InvalidDataException("Unknown texture candidate evidence classification");
-            if(_mappings.Count>=5000||!_mappings.TryAdd(mesh,
-                new Mapping(mesh,diffuse,normal,specular,evidence)))
+            if(!seenInThisFile.Add(mesh) ||
+               (_mappings.Count>=5000 && !_mappings.ContainsKey(mesh)))
                 throw new InvalidDataException("Duplicate or excessive original material mapping");
+            var entry=new Mapping(mesh,diffuse,normal,specular,evidence);
+            if(allowLocalOverrides)
+                _mappings[mesh]=entry;
+            else if(!_mappings.TryAdd(mesh,entry))
+                throw new InvalidDataException("Duplicate original source material row");
         }
     }
 
@@ -97,6 +114,22 @@ internal sealed class EsoOriginalCreatureTextures : IDisposable
         Texture2D? normal=mapping.Normal!=0?GetTexture(mapping.Normal,_normal,true):null;
         Texture2D? specular=mapping.Specular!=0?GetTexture(mapping.Specular,_specular,false):null;
         if(diffuse==null)return null;
+        if(normal!=null &&
+           (normal.GetWidth()!=diffuse.GetWidth()||
+            normal.GetHeight()!=diffuse.GetHeight()))
+        {
+            GD.PushWarning($"Provisional ESO mesh 0x{meshId:X8}: "+
+                "discarding unmatched original normal-map dimensions");
+            normal=null;
+        }
+        if(specular!=null &&
+           (specular.GetWidth()!=diffuse.GetWidth()||
+            specular.GetHeight()!=diffuse.GetHeight()))
+        {
+            GD.PushWarning($"Provisional ESO mesh 0x{meshId:X8}: "+
+                "discarding unmatched original specular-map dimensions");
+            specular=null;
+        }
         if(specular!=null)
         {
             _diagnosticSpecularShader??=new Shader{Code=SourceSpecularShader};

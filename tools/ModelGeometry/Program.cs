@@ -5,6 +5,15 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using EsoTest;
 
+if(args.Length>0 && args[0]=="--audit-original-creature-texture-index")
+    return EsoCreatureTextureIndexAudit.Run(args.Skip(1).ToArray());
+
+if(args.Length>0 && args[0]=="--inspect-original-packed-normal")
+    return EsoDxt5NormalEvidence.Inspect(args.Skip(1).ToArray());
+
+if(args.Length>0 && args[0]=="--survey-original-creature-texture-triplets")
+    return EsoCreatureTextureTripletSurvey.Run(args.Skip(1).ToArray());
+
 if(args.Length>0 && args[0]=="--audit-original-resource-hashes")
     return EsoResourceHashProvenance.Run(args.Skip(1).ToArray());
 

@@ -52,7 +52,8 @@ func _check() -> void:
         quit(1)
         return
     if FileAccess.file_exists("res://data/eso_creature_texture_candidates.tsv"):
-        if scene.CandidateMaterialCount != 9 or scene.CandidateSpecularCount != 8:
+        if scene.CandidateMaterialCount != 9 or scene.CandidateSpecularCount != 7 \
+            or scene.CandidateIndexEntries != 60:
             push_error("Nine original DDS candidate assignments were not loaded")
             quit(1)
             return
@@ -66,7 +67,7 @@ func _check() -> void:
                 "/NativeCreatureSkeleton/OriginalCreatureMesh")
             var actual: Material = candidate.material_override
             var expects_normal: bool = mapped != 1 and mapped != 8
-            var expects_specular: bool = mapped != 12
+            var expects_specular: bool = mapped != 12 and mapped != 3
             if expects_specular:
                 var source_shader: ShaderMaterial = actual as ShaderMaterial
                 if source_shader == null or source_shader.shader == null:

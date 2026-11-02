@@ -93,6 +93,7 @@ public partial class EsoOriginalCreatureWalkGallery:Node3D
     private EsoOriginalCreatureTextures? _textureLibrary;
     private bool _showTextureCandidates=true;
     public int CandidateMaterialCount=>_creatures.Count(c=>c.CandidateMaterial!=null);
+    public int CandidateIndexEntries=>_textureLibrary?.MappingCount??0;
     public int CandidateSpecularCount=>_creatures.Count(c=>c.CandidateMaterial is ShaderMaterial);
     public bool TextureCandidatesVisible=>_showTextureCandidates;
     public bool HasCandidateMaterial(int index)=>_creatures[index].CandidateMaterial!=null;
@@ -311,11 +312,9 @@ public partial class EsoOriginalCreatureWalkGallery:Node3D
             string localTextures=Path.Combine(Cache,"creature-texture-candidates.tsv");
             string sourceCandidateIndex=Path.Combine(Root,"data",
                 "eso_creature_texture_candidates.tsv");
-            string selectedTextureIndex=File.Exists(localTextures)
-                ?localTextures:sourceCandidateIndex;
-            if(File.Exists(selectedTextureIndex))
+            if(File.Exists(sourceCandidateIndex)||File.Exists(localTextures))
                 _textureLibrary=new EsoOriginalCreatureTextures(
-                    Manifest,Oodle,selectedTextureIndex);
+                    Manifest,Oodle,sourceCandidateIndex,localTextures);
             foreach(var source in _sources)
             {
                 EnsureSources(source);
