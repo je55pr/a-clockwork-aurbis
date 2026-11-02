@@ -77,7 +77,11 @@ public partial class SourcePropLayer : Node3D
     public SourcePropCollisions? NearbyCollisions { get; private set; }
     public void TrackPlayerCollision(Node3D player) => NearbyCollisions?.Track(player);
     public static bool BlocksNpcSpawn(string sourceModelName)
-        => !string.Equals(sourceModelName,"ActiveRunes",StringComparison.OrdinalIgnoreCase);
+        => SourcePropCollisions.IsSolidModel(sourceModelName) ||
+           // Leaves can be genuine tree canopies, though they are not walls.
+           sourceModelName.Contains("Leaf",StringComparison.OrdinalIgnoreCase) &&
+           !sourceModelName.StartsWith("FX_",StringComparison.OrdinalIgnoreCase) &&
+           !sourceModelName.StartsWith("VFX_",StringComparison.OrdinalIgnoreCase);
     private readonly Dictionary<uint,List<PropFootprint>> _coarsePerModel = new();
     private readonly List<PropFootprint> _unresolvedFootprints = new();
     public IReadOnlyList<PropFootprint> UnresolvedFootprints => _unresolvedFootprints;
@@ -395,8 +399,13 @@ public partial class SourcePropLayer : Node3D
         // slow complex architecture costs more, small props fill the remainder.
         long batchStart=Stopwatch.GetTimestamp();
         const int maxModelsPerFrame=32;
+        const int maxPendingRaycastMeshes=8;
         const double uploadBudgetMs=7.0;
+        // Avoid retaining unbounded source triangle arrays while the single
+        // BVH worker catches up. This is a conservative safety bound, not a
+        // calibrated Auridon memory/throughput optimum.
         for(int n=0;n<maxModelsPerFrame &&
+            Volatile.Read(ref _rayPending)<maxPendingRaycastMeshes &&
             (n==0 || Stopwatch.GetElapsedTime(batchStart).TotalMilliseconds<uploadBudgetMs) &&
             _prepared.TryDequeue(out var ready);n++)
         {

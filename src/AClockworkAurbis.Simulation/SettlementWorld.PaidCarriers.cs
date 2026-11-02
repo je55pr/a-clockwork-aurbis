@@ -93,6 +93,18 @@ public sealed partial class SettlementWorld
             .FirstOrDefault();
     }
 
+    // Evaluate the same cash transfers as freight settlement, including
+    // carriers that also act as importers or commodity suppliers. A nominal
+    // freight fee is not extra cash when the buyer pays it to itself.
+    internal static bool CanFundCourierAfterTrade(BusinessState carrier,
+        BusinessState buyer,BusinessState seller,decimal payment,decimal fee)
+    {
+        decimal projected=carrier.Gold+fee+
+            (ReferenceEquals(carrier,seller)?payment:0m)-
+            (ReferenceEquals(carrier,buyer)?payment+fee:0m);
+        return projected>=1m;
+    }
+
     private void SettleFreightFee(decimal fee,int units,BusinessState? carrier)
     {
         if(carrier is null)

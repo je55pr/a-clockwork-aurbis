@@ -45,6 +45,7 @@ var tests=new (string Name,Action Run)[]
     ("Permanent private hires require observed demand and cash runway", SustainablePrivateHiring),
     ("Unfunded processors may offer real casual manufacturing shifts", CasualProcessorWork),
     ("Casual manufacturing uses paid wage cost and worker-specific preflight", CasualManufacturingCosts),
+    ("Couriers cannot bankrupt self-carrying import hubs", CourierBalanceAfterTrade),
     ("Brewing, tavern leisure and clothing form conserved economic activities", BrewingClothingAndTaverns),
     ("Paid hauliers deliver only with real work and finite shipping capacity", PaidFreightCarriers),
     ("Named couriers actually carry freight and settle wage escrow on delivery", NpcCourierJourneys),
@@ -2180,11 +2181,16 @@ static void CasualManufacturingCosts()
     var sawmill=world.Businesses.Single(b=>b.Id=="sim:sawmill");
     var originalValue=sawmill.InventoryValueMilli.Values.Sum();
     var resident=world.Residents.First();
-    Expect(world.CompleteCommodityWork(resident,sawmill,1,2),
-        "a funded casual manufacturing hour can create a real physical product");
-    Expect(sawmill.ItemsCrafted>0 &&
-        sawmill.InventoryValueMilli.Values.Sum()==originalValue+2000L,
-        "inventory cost basis uses the actually paid two-gold wage, not the standard rate");
+    decimal residentBefore=resident.Gold,employerBefore=sawmill.Gold;
+    resident.CurrentPlaceId=sawmill.Id;
+    sawmill.PlannedHours=0;
+    world.CompleteCasualShift(resident);
+    Expect(sawmill.ItemsCrafted>0 && resident.CasualWageIncome==2m &&
+        resident.Gold==residentBefore+2m && sawmill.Gold==employerBefore-2m &&
+        sawmill.CasualHoursWorked==1,
+        "a real casual manufacturing shift pays the worker from employer funds");
+    Expect(sawmill.InventoryValueMilli.Values.Sum()==originalValue+2000L,
+        "actual paid casual wage is credited to the inventory cost basis");
 
     var chefSource=fixture with
     {
@@ -2210,4 +2216,32 @@ static void CasualManufacturingCosts()
     ledger.CheckInvariants();
     Expect(ledger.Report().AllAccountsGold==ledger.Report().InitialAllAccountsGold,
         "casual production still preserves actual monetary balances");
+}
+
+static void CourierBalanceAfterTrade()
+{
+    var world=new SettlementWorld(CommodityFixture(),new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableExternalTrade=false,AutonomousParticipationPercent=0
+    });
+    var buyer=world.Businesses.Single(b=>b.Id=="b:market");
+    var seller=world.Businesses.Single(b=>b.Id=="sim:bakery");
+    var unrelatedCarrier=world.Businesses.Single(b=>b.Id=="sim:sawmill");
+
+    buyer.Gold=3m;
+    Expect(!SettlementWorld.CanFundCourierAfterTrade(buyer,buyer,seller,3m,0m),
+        "an importing carrier cannot owe a courier wage after spending its last gold");
+    Expect(SettlementWorld.CanFundCourierAfterTrade(buyer,buyer,seller,2m,0m),
+        "an importing carrier may reserve a wage if one gold survives its purchase");
+    Expect(!SettlementWorld.CanFundCourierAfterTrade(buyer,buyer,seller,3m,4m),
+        "a carrier paying freight to itself cannot treat the fee as new cash");
+
+    unrelatedCarrier.Gold=0m;
+    Expect(!SettlementWorld.CanFundCourierAfterTrade(unrelatedCarrier,buyer,seller,2m,0m) &&
+        SettlementWorld.CanFundCourierAfterTrade(unrelatedCarrier,buyer,seller,2m,1m),
+        "a separate carrier must earn or hold the courier's wage");
+    seller.Gold=0m;
+    Expect(SettlementWorld.CanFundCourierAfterTrade(seller,buyer,seller,2m,0m),
+        "a carrier that sells the cargo can fund wages from the incoming payment");
 }

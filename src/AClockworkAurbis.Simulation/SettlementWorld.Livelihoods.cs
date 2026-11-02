@@ -166,7 +166,7 @@ public sealed partial class SettlementWorld
         return true;
     }
 
-    private void CompleteCasualShift(ResidentState person)
+    internal void CompleteCasualShift(ResidentState person)
     {
         if(!_byBusiness.TryGetValue(person.CurrentPlaceId,out var employer) ||
             person.CasualHoursToday>=_settings.MaxCasualHoursPerDay ||

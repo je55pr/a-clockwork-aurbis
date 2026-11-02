@@ -49,7 +49,6 @@ public sealed partial class SettlementWorld
 
         long cost=WithdrawInventoryValue(pub,"ale",1);
         UseFinished(pub.Stock,"ale",1);
-        _goodsUsed++;
         MarketObserveSale(pub,"ale",1,price,cost,false);
         decimal tax=Math.Min(Money(price*_settings.DetailedGoodsTaxRate),
             Math.Max(0m,price-0.01m));

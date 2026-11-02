@@ -621,12 +621,17 @@ public sealed partial class SettlementWorld
                 if(carrier is not null)
                     units=Math.Min(units,carrier.CargoCapacity);
                 if(units==0)continue;
+                decimal payment=checked(units*unitPrice);
                 ResidentState? courier=null;
                 if(carrier is not null && _settings.EnableNpcCourierJourneys)
                 {
                     // Only attempt an expensive NPC search after checking
                     // the buyer can fund a nonzero, capacity-limited load.
-                    if(carrier.Gold+charge<1m)continue;
+                    // The carrier may also be the buyer (an import hub).
+                    // Check its balance after goods settlement and fee receipt,
+                    // before reserving the courier's one-gold wage.
+                    if(!CanFundCourierAfterTrade(carrier,buyer,seller,payment,charge))
+                        continue;
                     courier=ChooseCourierFor(carrier,seller);
                     if(courier is null)
                     {
@@ -635,7 +640,6 @@ public sealed partial class SettlementWorld
                     }
                 }
 
-                decimal payment=checked(units*unitPrice);
                 buyer.Gold-=payment+charge;
                 seller.Gold+=payment;
                 SettleFreightFee(charge,units,carrier);
