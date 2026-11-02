@@ -1,0 +1,12 @@
+# Original ESO GR2 creature variants. Source IDs/bindings inspected against the installed game.
+# label	meshId	rigId	walkClipId	originalMeshName	vertices	skinBindings	rigBones
+ClannfearArmored	000A0A3F	00082309	00000E14	Clannfear_Armored_Basic	3690	54	104
+ClannfearChampion	00023921	00082309	00000E14	Clannfear_B_Champion	3044	54	104
+ClannfearBasicCH	0008230B	00082309	00000E14	Clannfear_C_Basic_CH	2424	54	104
+ClannfearBoss	00023B09	00082309	00000E14	Clannfear_D_Boss	2855	54	104
+DaedrothBasic	000816A1	00046563	0000121C	Daedroth_A_Basic	4572	52	102
+DaedrothArmoredGreen	000AA37D	00046563	0000121C	Daedroth_ArmoredGreen_Basic	7074	52	102
+GuarBasic	00023B3D	00024A33	00024A69	Guar_A_Basic	2181	50	113
+GuarVariantC	00023C73	00024A33	00024A69	Guar_C_Basic	2741	50	113
+GuarScalecaller	00123257	00024A33	00024A69	Guar_Scalecaller_Pet	6354	50	113
+GuarPeryite	0031A83B	00024A33	00024A69	Guar_Peryite_Pet	2690	50	113

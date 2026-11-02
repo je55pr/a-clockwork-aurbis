@@ -20,8 +20,8 @@ namespace EsoTest;
 /// </summary>
 public partial class EsoOriginalBodyWalkComparisonLab:Node3D
 {
-    private const int BoneCount=202, VertexCount=8109, SkinBindCount=81, Hz=60;
-    private const string MeshId="0015D6CD", SkeletonId="000020A2";
+    private const int BoneCount=202, VertexCount=8109, SkinBindCount=81, GooVertexCount=2195, GooSkinBindCount=59, Hz=60;
+    private const string MeshId="0015D6CD", GooId="0015D6CF", SkeletonId="000020A2";
     private static readonly (string Id,string Name)[] Walks={
         ("0004C319","GEN_Walk"),
         ("0000D200","1H_Walk"),
@@ -38,7 +38,7 @@ public partial class EsoOriginalBodyWalkComparisonLab:Node3D
         public required string Id,Name;
         public required Node3D Container;
         public required Skeleton3D Skeleton;
-        public required MeshInstance3D Body;
+        public required MeshInstance3D Body,Goo;
         public required Pose[] Poses;
         public float Duration;
         public int CurrentFrame;
@@ -47,10 +47,11 @@ public partial class EsoOriginalBodyWalkComparisonLab:Node3D
     private Camera3D? _camera;
     private Label? _hud;
     private float _elapsed,_yaw,_pitch,_distance=9.7f;
-    private bool _playing=true,_dragging,_screenshot;
+    private bool _playing=true,_dragging,_screenshot,_showGoo=true;
     private int _focus=-1,_screenshotFrames;
     private float _greatestSourceDeviation;
     public int OriginalFigureCount=>_figures.Count;
+    public bool OriginalGooVisible=>_showGoo;
     public float GreatestSourceDeviation=>_greatestSourceDeviation;
     public int GetClipFrame(int index)=>_figures[index].CurrentFrame;
     public string GetClipName(int index)=>_figures[index].Name;
@@ -71,7 +72,9 @@ public partial class EsoOriginalBodyWalkComparisonLab:Node3D
         @"C:\ESO\The Elder Scrolls Online\depot\eso.mnf";
     private static string Oodle=>Path.Combine(Root,".research","ooz.dll");
     private static string SourceMeshRig=>Path.Combine(Cache,"original-external-mesh-"+MeshId+".json");
+    private static string SourceGooRig=>Path.Combine(Cache,"original-external-mesh-"+GooId+".json");
     private static string SourceMeshGeo=>Path.Combine(Cache,"original-external-mesh-"+MeshId+".esm");
+    private static string SourceGooGeo=>Path.Combine(Cache,"original-external-mesh-"+GooId+".esm");
     private static string SourceSkeleton=>Path.Combine(Cache,"animation-skeleton-"+SkeletonId+".json");
     private static string ClipCache(string id)=>Path.Combine(Cache,
         $"native-source-{SkeletonId}-{id}-world-v2-{Hz}fps.json");
@@ -88,7 +91,29 @@ public partial class EsoOriginalBodyWalkComparisonLab:Node3D
                 StringComparison.Ordinal)||
                 !nativeBinding.Contains("COMPATIBLE_SOURCE_RIG:",StringComparison.Ordinal))
                 throw new InvalidDataException("Original ESO mesh did not bind natively (81/81)");
+            string nativeGooBinding=RunHelper("--inspect-native-external-binding",
+                Granny,GooId,SkeletonId,Manifest,Oodle);
+            if(!nativeGooBinding.Contains(
+                "total=59, exact=59, name-differing=0, index-unmapped=0",
+                StringComparison.Ordinal)||
+                !nativeGooBinding.Contains("COMPATIBLE_SOURCE_RIG:",StringComparison.Ordinal))
+                throw new InvalidDataException("Original ESO goo did not bind natively (59/59)");
             var source=EsoSourceRig.ReadExternal(SourceMeshRig,SourceSkeleton);
+            var gooSource=EsoSourceRig.ReadExternal(SourceGooRig,SourceSkeleton);
+            if(gooSource.MeshName!="Voriplastic_Goo"||
+               gooSource.VertexCount!=GooVertexCount||
+               gooSource.BindingNames.Length!=GooSkinBindCount||
+               gooSource.Bones.Count!=BoneCount)
+                throw new InvalidDataException("Original ESO goo mesh/rig identity mismatch");
+            // Both originals bind to the SAME GrannyRootBone rest matrices.
+            // The skin uses native binding indices; no copied/guessed weights.
+            Skin gooSkin=gooSource.BindToIdenticalSourceRest(source);
+            ArrayMesh gooMesh=EsoHumanoidVisualLayer.LoadMesh(
+                SourceGooGeo,"Voriplastic_Goo",gooSource);
+            if(gooMesh.GetSurfaceCount()!=1||
+               gooMesh.SurfaceGetArrayLen(0)!=GooVertexCount||
+               gooSkin.GetBindCount()!=GooSkinBindCount)
+                throw new InvalidDataException("Original source goo geometry/skin incomplete");
             if(source.MeshName!="VoriplasticCorpse"||
                source.VertexCount!=VertexCount||
                source.Bones.Count!=BoneCount||
@@ -132,6 +157,24 @@ public partial class EsoOriginalBodyWalkComparisonLab:Node3D
                     }
                 };
                 skeleton.AddChild(body);
+                var goo=new MeshInstance3D
+                {
+                    Name="OriginalVoriplasticGoo",
+                    Mesh=gooMesh,
+                    Skin=gooSkin,
+                    Skeleton=new NodePath(".."),
+                    Visible=_showGoo,
+                    // A translucent diagnostic layer, NOT a claim about
+                    // the game's unknown original goo shader/material.
+                    MaterialOverride=new StandardMaterial3D
+                    {
+                        AlbedoColor=new Color(0.77f,0.88f,0.87f,0.42f),
+                        Transparency=BaseMaterial3D.TransparencyEnum.Alpha,
+                        Roughness=0.38f,
+                        CullMode=BaseMaterial3D.CullModeEnum.Disabled
+                    }
+                };
+                skeleton.AddChild(goo);
                 var caption=new Label3D
                 {
                     Name="OriginalAnimationLabel",
@@ -145,7 +188,7 @@ public partial class EsoOriginalBodyWalkComparisonLab:Node3D
                 _figures.Add(new AnimatedFigure
                 {
                     Id=id,Name=name,Container=container,
-                    Skeleton=skeleton,Body=body,Poses=poses,
+                    Skeleton=skeleton,Body=body,Goo=goo,Poses=poses,
                     Duration=duration
                 });
                 ApplyPose(_figures[^1],0);
@@ -158,7 +201,7 @@ public partial class EsoOriginalBodyWalkComparisonLab:Node3D
                 GD.Print($"PASS six original ESO Voriplasmic Corpse walks: "+
                     $"{_figures.Count} separate source-skinned figures, "+
                     $"{VertexCount} original vertices per figure, "+
-                    $"{SkinBindCount}/81 Granny exact bindings each, "+
+                    $"{SkinBindCount}/81 body + {GooSkinBindCount}/59 goo Granny exact bindings each, "+
                     $"{BoneCount} native bones each, "+
                     $"max Granny/Godot source joint position error {_greatestSourceDeviation:F7}m.");
                 GetTree().Quit(0);
@@ -214,6 +257,11 @@ public partial class EsoOriginalBodyWalkComparisonLab:Node3D
         if(!File.Exists(SourceMeshRig))
             File.WriteAllText(SourceMeshRig,RunHelper(
                 "--inspect-rig",Granny,MeshId,Manifest,Oodle));
+        if(!File.Exists(SourceGooRig))
+            File.WriteAllText(SourceGooRig,RunHelper(
+                "--inspect-rig",Granny,GooId,Manifest,Oodle));
+        if(!File.Exists(SourceGooGeo))
+            RunHelper(Granny,GooId,SourceGooGeo,Manifest,Oodle);
         if(!File.Exists(SourceMeshGeo))
             RunHelper(Granny,MeshId,SourceMeshGeo,Manifest,Oodle);
         if(!File.Exists(SourceSkeleton))
@@ -390,12 +438,13 @@ public partial class EsoOriginalBodyWalkComparisonLab:Node3D
         if(_hud!=null)
             _hud.Text="ESO SOURCE WALK LAB\n"+
                 "Voriplasmic Corpse\n"+
-                "8,109 original vertices\n"+
-                "81/81 native bindings\n"+
+                "8,109 body + 2,195 goo vertices\n"+
+                "81/81 body + 59/59 goo bindings\n"+
                 "Six ESO animation clips\n"+
                 (_playing?"PLAYING":"PAUSED")+"\n"+
                 "1-6 focus one\n"+
                 "0 compare all\n"+
+                "G toggle source goo ("+(_showGoo?"ON":"OFF")+")\n"+
                 "Space pause\n"+
                 "Left / Right step\n"+
                 "Drag to orbit\n"+
@@ -445,6 +494,11 @@ public partial class EsoOriginalBodyWalkComparisonLab:Node3D
         if(evt is not InputEventKey key||!key.Pressed||key.Echo)return;
         switch(key.Keycode)
         {
+            case Key.G:
+                _showGoo=!_showGoo;
+                foreach(var figure in _figures)figure.Goo.Visible=_showGoo;
+                UpdatePoses();
+                break;
             case Key.Space:
                 _playing=!_playing;
                 UpdatePoses();

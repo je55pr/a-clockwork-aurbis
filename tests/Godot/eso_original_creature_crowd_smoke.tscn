@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://tests/Godot/EsoOriginalCreatureWalkGallery.cs" id="1_crowd"]
+
+[node name="ESOOriginalCreatureCrowdSmoke" type="Node3D"]
+script = ExtResource("1_crowd")
+SelfTest = true
+CopiesPerSpecies = 100
+MaxAnimatedCopies = 72

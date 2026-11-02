@@ -185,7 +185,7 @@ public partial class EsoHumanoidVisualLayer : Node3D
         throw new InvalidDataException($"Unknown source body-part ID 0x{id:X8}");
     }
 
-    internal static ArrayMesh LoadMesh(string path,string expectedPrefix,EsoSourceRig? rig=null)
+    internal static ArrayMesh LoadMesh(string path,string expectedPrefix,EsoSourceRig? rig=null,bool enforceHumanoidBounds=true)
     {
         if (new FileInfo(path).Length is < 64 or > 72_000_000)
             throw new InvalidDataException("Invalid character mesh cache size");
@@ -256,11 +256,14 @@ public partial class EsoHumanoidVisualLayer : Node3D
         if (reader.BaseStream.Position != reader.BaseStream.Length)
             throw new InvalidDataException("Trailing character geometry data");
         var bounds = model.GetAabb();
-        // The seven classes share original ESO humanoid authoring coordinates.
+        // Ordinary humanoid customization pieces share one strict bind-space.
+        // Fully skinned creatures have their own valid native sizes and origins.
         if (!bounds.Position.IsFinite() || !bounds.Size.IsFinite() ||
-            bounds.Size.Y > 2.7f || bounds.End.Y > 2.6f ||
-            bounds.Position.Y < -0.2f)
-            throw new InvalidDataException("Humanoid source bounds outside shared bind pose");
+            (enforceHumanoidBounds && (bounds.Size.Y > 2.7f ||
+                bounds.End.Y > 2.6f || bounds.Position.Y < -0.2f)) ||
+            (!enforceHumanoidBounds && (bounds.Size.Length() > 40f ||
+                bounds.Position.Length() > 40f)))
+            throw new InvalidDataException("Original source mesh bounds outside expected range");
         return model;
     }
 

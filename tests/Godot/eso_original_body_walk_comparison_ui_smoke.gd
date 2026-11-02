@@ -43,6 +43,15 @@ func _run() -> void:
             push_error("Original ESO mesh/skin data mutated")
             quit(1)
             return
+        var goo: MeshInstance3D = rig.get_node_or_null("OriginalVoriplasticGoo")
+        if goo == null or goo.mesh == null or goo.skin == null or not goo.visible:
+            push_error("Original ESO goo overlay missing from shared animated skeleton")
+            quit(1)
+            return
+        if goo.mesh.surface_get_array_len(0) != 2195 or goo.skin.get_bind_count() != 59:
+            push_error("Original ESO goo vertices or 59 native bindings changed")
+            quit(1)
+            return
         var label: Label3D = fig.get_node_or_null("OriginalAnimationLabel")
         if label == null or labels[i] not in label.text:
             push_error("Original animation identification missing")
@@ -65,6 +74,26 @@ func _run() -> void:
     for figure in figures:
         if not figure.visible:
             push_error("All-six original source comparison failed to restore a figure")
+            quit(1)
+            return
+    send_key(scene, KEY_G)
+    if scene.OriginalGooVisible:
+        push_error("G should hide the original goo layer")
+        quit(1)
+        return
+    for figure in figures:
+        if figure.get_node("Original202BoneRig/OriginalVoriplasticGoo").visible:
+            push_error("Goo overlay did not hide across all six source rigs")
+            quit(1)
+            return
+    send_key(scene, KEY_G)
+    if not scene.OriginalGooVisible:
+        push_error("G should restore the original goo layer")
+        quit(1)
+        return
+    for figure in figures:
+        if not figure.get_node("Original202BoneRig/OriginalVoriplasticGoo").visible:
+            push_error("Goo overlay did not reappear across all six source rigs")
             quit(1)
             return
 

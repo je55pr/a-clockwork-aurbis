@@ -5,6 +5,12 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using EsoTest;
 
+if(args.Length>0 && args[0]=="--find-original-creature-clips")
+    return CreatureClipSurvey.Run(args.Skip(1).ToArray());
+
+if(args.Length>0 && args[0]=="--find-original-creature-rigs")
+    return CreatureRigSurvey.Run(args.Skip(1).ToArray());
+
 if(args.Length>0 && args[0]=="--extract-original-dds")
     return EsoLocalDdsCandidate.Run(args.Skip(1).ToArray());
 
