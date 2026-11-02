@@ -11,7 +11,7 @@ namespace EsoTest;
 /// </summary>
 public partial class EsoOriginalCreatureTextureCoverageSmoke:Node
 {
-    private const int ExpectedMappings=60;
+    private const int ExpectedMappings=59;
     private static readonly uint[] Samples={
         0x00082EABu, // Giant Spider
         0x0008739Bu, // Werewolf

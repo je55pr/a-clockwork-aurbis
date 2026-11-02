@@ -53,7 +53,7 @@ func _check() -> void:
         return
     if FileAccess.file_exists("res://data/eso_creature_texture_candidates.tsv"):
         if scene.CandidateMaterialCount != 9 or scene.CandidateSpecularCount != 7 \
-            or scene.CandidateIndexEntries != 60:
+            or scene.CandidateIndexEntries != 59:
             push_error("Nine original DDS candidate assignments were not loaded")
             quit(1)
             return

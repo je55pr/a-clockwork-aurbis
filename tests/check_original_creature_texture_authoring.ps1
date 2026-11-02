@@ -28,11 +28,12 @@ try{
             }
         }
     }
-    if($entries.Count -ne 51){throw "Unexpected native-authoring source count $($entries.Count)"}
+    if($entries.Count -ne 50){throw "Unexpected native-authoring source count $($entries.Count)"}
     $run=(& dotnet $tool --survey-original-creature-texture-triplets $manifest $oodle $names $report 24 20000 2>&1|Out-String)
     if($LASTEXITCODE -ne 0){throw "Original source triplet survey failed: $run"}
     $survey=@(Import-Csv -LiteralPath $report -Delimiter ([char]9)|Where-Object {$_.'mesh-id' -match '^[0-9A-F]{8}$'})
     $passed=0
+    $artistDiffuseForDds=@{}
     foreach($row in $entries){
         $matches=@($survey|Where-Object {$_.'mesh-id' -eq $row.meshId})
         if($matches.Count -ne 1){throw "Ambiguous original material candidate for mesh $($row.meshId)"}
@@ -46,6 +47,7 @@ try{
         }
         $details=(& dotnet $tool --audit-character-material $granny $row.meshId $manifest $oodle 2>&1|Out-String)
         if($LASTEXITCODE -ne 0){throw "Original Granny material cannot be inspected: $($row.meshId)"}
+        $artistDiffuse=''
         foreach($channel in @('diffuse','normal','specular')){
             $pattern="(?m)^\s+$($channel)Path \[[^\r\n]+?\] value=(.+)$"
             $match=[regex]::Match($details,$pattern,[Text.RegularExpressions.RegexOptions]::IgnoreCase)
@@ -53,10 +55,19 @@ try{
                $match.Groups[1].Value.Trim() -notmatch '(?i)\.(tga|dds)$'){
                 throw "Original Granny material authoring $channel not found for $($row.meshId)"
             }
+            if($channel -eq 'diffuse')
+            {
+                $artistDiffuse=$match.Groups[1].Value.Trim().Replace('/','\').ToLowerInvariant()
+            }
         }
+        if($artistDiffuseForDds.ContainsKey($row.diffuseId) -and
+           $artistDiffuseForDds[$row.diffuseId] -cne $artistDiffuse){
+            throw "Conflicting native artwork paths share source DDS $($row.diffuseId): $($row.meshId)"
+        }
+        $artistDiffuseForDds[$row.diffuseId]=$artistDiffuse
         $passed++
     }
-    Write-Output "PASS 51 new original creature DDS candidates: independent archive triplets, packed-normal channels, <=6 ID distance, unique source mesh association and three native Granny authored texture paths."
-    Write-Output 'All 51 archive DDS ID assignments explicitly remain PROVISIONAL.'
+    Write-Output "PASS 50 new original creature DDS candidates: independent archive triplets, packed-normal channels, <=6 ID distance, unique source mesh association and three native Granny authored texture paths."
+    Write-Output 'All 50 archive DDS ID assignments explicitly remain PROVISIONAL, with source-art collision checks.'
 }
 finally{Pop-Location}

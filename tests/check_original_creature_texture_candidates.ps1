@@ -16,7 +16,7 @@ Push-Location -LiteralPath $root
 try{
     $result=(& dotnet $tool --audit-original-creature-texture-index $manifest $oodle $index 2>&1|Out-String)
     if($LASTEXITCODE -ne 0){throw "Original ESO DDS batch audit failed: $result"}
-    $expected='60 source mesh links \(51 authoring\+structural provisional\), 58 source normal maps, 58 specular candidates, 146 distinct genuine archived DDS files, 0 flagged weak-neighbour mismatches'
+    $expected='59 source mesh links \(50 authoring\+structural provisional\), 57 source normal maps, 57 specular candidates, 146 distinct genuine archived DDS files, 0 flagged weak-neighbour mismatches'
     if($result -notmatch $expected){
         throw "Original DDS index provenance or source resources changed: $result"
     }
