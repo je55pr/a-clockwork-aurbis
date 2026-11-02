@@ -35,16 +35,16 @@ public static class CommodityRecipes
         _ => 56 // One bread restores the same hunger as the old full meal.
     };
     public static readonly string[] HouseholdGoods =
-        ["firewood","iron_tools","leather_goods","furnishings"];
-    public static readonly string[] Crops = ["wheat","potato","onion","lettuce"];
+        ["firewood","iron_tools","leather_goods","furnishings","clothing"];
+    public static readonly string[] Crops = ["wheat","potato","onion","lettuce","flax"];
     public static readonly string[] FinishedGoods =
         ["firewood","pickaxe","felling_axe","horseshoes","iron_tools","iron_sword",
-         "leather_goods","furnishings","harness"];
+         "leather_goods","furnishings","harness","clothing"];
     public static readonly IReadOnlyDictionary<string,int> Prices =
         new Dictionary<string,int>(StringComparer.Ordinal)
         {
             ["provisions"]=6, ["foraged_greens"]=2, ["wheat"]=4,
-            ["potato"]=4, ["onion"]=4, ["lettuce"]=4,
+            ["potato"]=4, ["onion"]=4, ["lettuce"]=4, ["flax"]=4,
             ["fish"]=3, ["game_meat"]=3, ["raw_hide"]=3,
             ["iron_ore"]=3, ["logs"]=3, ["lumber"]=5,
             ["firewood"]=3, ["iron_ingot"]=8, ["leather"]=6,
@@ -52,7 +52,7 @@ public static class CommodityRecipes
             ["fish_meal"]=4, ["roast_meat"]=4, ["chef_game_pie"]=7,
             ["pickaxe"]=16, ["felling_axe"]=16, ["horseshoes"]=9,
             ["iron_tools"]=7, ["iron_sword"]=20, ["leather_goods"]=7, ["furnishings"]=9,
-            ["harness"]=15
+            ["harness"]=15, ["cloth"]=7, ["clothing"]=14, ["ale"]=4
         };
 
     private static Dictionary<string,int> Stock(params (string Id,int Count)[] items) =>
@@ -60,6 +60,14 @@ public static class CommodityRecipes
 
     public static readonly IReadOnlyList<CommodityRecipe> All =
     [
+        // Both industries are ordinary, repeatable paid production, not NPC
+        // profession scripts. Prices and yields are simulation assumptions.
+        new("brew_ale",BusinessKinds.Brewery,
+            Stock(("wheat",2),("firewood",1)),Stock(("ale",8))),
+        new("weave_cloth",BusinessKinds.Tailor,
+            Stock(("flax",2)),Stock(("cloth",3))),
+        new("sew_clothing",BusinessKinds.Tailor,
+            Stock(("cloth",2),("leather",1)),Stock(("clothing",2))),
         new("saw_logs",BusinessKinds.Sawmill,
             Stock(("logs",2)),Stock(("lumber",2),("firewood",3))),
         // A stocked lumber yard must still be able to split logs for fuel.

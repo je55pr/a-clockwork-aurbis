@@ -94,11 +94,14 @@ public static class BusinessKinds
     public const string GoodsRetail = "goods_retail";
     public const string Workshop = "workshop";
     public const string ImportHub = "import_hub";
+    public const string Haulier = "haulier";
     public const string Institution = "institution";
     public const string Smeltery = "smeltery";
     public const string Sawmill = "sawmill";
     public const string Tannery = "tannery";
     public const string Bakery = "bakery";
+    public const string Brewery = "brewery";
+    public const string Tailor = "tailor";
     public const string Hunter = "hunter";
     public const string Fishery = "fishery";
     public const string Leatherworker = "leatherworker";
@@ -108,8 +111,8 @@ public static class BusinessKinds
     public static readonly IReadOnlySet<string> Valid =
         new HashSet<string>(StringComparer.Ordinal)
         { FoodRetail, FoodProducer, ResourceProducer, GoodsRetail, Workshop,
-          ImportHub, Institution, Smeltery, Sawmill, Tannery,
-          Bakery, Hunter, Fishery, Leatherworker,
+          ImportHub, Haulier, Institution, Smeltery, Sawmill, Tannery,
+          Bakery, Brewery, Tailor, Hunter, Fishery, Leatherworker,
           GuardPost, CleaningService, DomesticService };
 }
 
@@ -138,7 +141,7 @@ public enum SettlementAction : byte
 {
     Idle, Travel, Work, Eat, Sleep, BuyFood, BuyGoods, HarvestFood,
     BuyGroceries, CookAtHome, CasualWork, PersonalGather, PersonalCraft,
-    PersonalBuy, PersonalSell
+    PersonalBuy, PersonalSell, VisitTavern
 }
 
 public enum EconomyMode { Prototype, RegionalProduction, CommodityProduction }
@@ -185,6 +188,14 @@ public sealed class ResidentState
     public long ActionStart { get; internal set; }
     public long LastUpdate { get; internal set; }
     public int WorkStart { get; }
+    // Stable per-person inclination; 0 chooses the best scored option.
+    public int RiskTolerance { get; internal set; }
+    public long FoodChoiceCount { get; internal set; }
+    public int? CourierShipmentId { get; internal set; }
+    public long CourierDeliveries { get; internal set; }
+    public decimal CourierWageIncome { get; internal set; }
+    internal string? PlannedMealShopId { get; set; }
+    internal string? PlannedMealSku { get; set; }
     public decimal Gold { get; internal set; }
     public int Food { get; internal set; }
     public int Goods { get; internal set; }
@@ -207,6 +218,14 @@ public sealed class ResidentState
     public int CasualHoursToday { get; internal set; }
     public int RegularHoursToday { get; internal set; }
     public string? PersonalTask { get; internal set; }
+    public string? AutonomousGoal { get; internal set; }
+    public string? AutonomousLastReason { get; internal set; }
+    public long AutonomousChoices { get; internal set; }
+    public long AutonomousCompleted { get; internal set; }
+    public long AutonomousFailed { get; internal set; }
+    internal int AutonomousDay { get; set; } = -1;
+    internal int AutonomousActionsToday { get; set; }
+    internal long LastAutonomousConsideredMinute { get; set; } = -10000;
     public string? EquippedWeaponSku { get; internal set; }
     public long PersonalGathered { get; internal set; }
     public long PersonalCrafts { get; internal set; }
@@ -219,6 +238,8 @@ public sealed class ResidentState
     public long SleepMinutes { get; internal set; }
     public long JourneyMinutes { get; internal set; }
     internal long LastGoodsShoppingDay { get; set; } = -10;
+    internal long LastTavernDay { get; set; } = -10;
+    public int TavernVisits { get; internal set; }
 }
 
 public sealed class BusinessState
@@ -260,6 +281,15 @@ public sealed class BusinessState
     public int PlannedHours { get; internal set; } = 8;
     internal int PlannedHoursWorked { get; set; }
     internal int LastPlannedDay { get; set; } = -1;
+    internal long LastFurloughDay { get; set; } = -100000;
+    internal decimal LastObservedSalesMargin { get; set; }
+    internal Queue<decimal> PrivateRecentMargin { get; } = new();
+    internal decimal PrivateRecentMarginTotal { get; set; }
+    internal int PublicHoursBudgetToday { get; set; }
+    internal int PublicHoursWorkedToday { get; set; }
+    internal int PublicHoursReservedToday { get; set; }
+    internal int ConsecutiveUnfundedPublicDays { get; set; }
+    public decimal PublicPayrollGrantsReceived { get; internal set; }
     public int CapitalLevel { get; internal set; } = 1;
     public long CapitalInvestedMilli { get; internal set; }
     internal int CapitalWorkCredit { get; set; }
@@ -272,6 +302,7 @@ public sealed class BusinessState
     public long RetailCostOfGoodsMilli { get; internal set; }
     internal long LastRetailCostOfGoodsMilliAtDay { get; set; }
     public decimal WholesaleRevenue { get; internal set; }
+    public long WholesaleCostOfGoodsMilli { get; internal set; }
     public decimal WholesaleSpending { get; internal set; }
     // Includes paid delivery charges. Used to quote bread relative to its
     // actual acquisition cost rather than an arbitrary universal price.
@@ -287,6 +318,7 @@ public sealed class BusinessState
     internal int ServiceHoursWorkedToday { get; set; }
     internal int ServiceHoursReservedToday { get; set; }
     public int WorkHours { get; internal set; }
+    public int CasualHoursWorked { get; internal set; }
     public int ItemsCrafted { get; internal set; }
     public int FoodProduced { get; internal set; }
     public int MaterialsExtracted { get; internal set; }
@@ -296,6 +328,13 @@ public sealed class BusinessState
     public int WorkerCount { get; internal set; }
     public int CargoCapacity { get; internal set; }
     public long CargoHandled { get; internal set; }
+    internal int CargoHoursReservedToday { get; set; }
+    internal long LastCargoHandledAtDay { get; set; }
+    internal Queue<int> RecentCargoHandled { get; } = new();
+    internal int RecentCargoHandledTotal { get; set; }
+    public decimal FreightRevenue { get; internal set; }
+    public long FreightShipments { get; internal set; }
+    public long FreightUnitsTransported { get; internal set; }
 }
 
 public sealed record SettlementSettings
@@ -325,6 +364,14 @@ public sealed record SettlementSettings
     public decimal DetailedFoodTaxRate { get; init; } = 0.05m;
     public decimal DetailedGoodsTaxRate { get; init; } = 0.10m;
     public int DailyAssistanceLimit { get; init; } = 8;
+    public bool EnableBudgetedPublicEmployment { get; init; } = true;
+    public int PublicPayrollHorizonDays { get; init; } = 14;
+    public int PublicMinimumPaidHoursPerWorker { get; init; } = 1;
+    public int PublicTargetPaidHoursPerWorker { get; init; } = 2;
+    public int PublicUnfundedLeaveDays { get; init; } = 14;
+    public bool EnableSustainableHiring { get; init; } = true;
+    public int PrivateHireRunwayDays { get; init; } = 14;
+    public int PrivateRehireCooldownDays { get; init; } = 30;
     // Paid casual work never replaces priority permanent farm/mine shifts.
     public int RegularGuaranteedHoursPerDay { get; init; } = 2;
     public int CasualHourlyWage { get; init; } = 2;
@@ -338,6 +385,17 @@ public sealed record SettlementSettings
     public int OpenFishPerResidentPerDay { get; init; } = 1;
     public int OpenGamePerResidentPerDay { get; init; } = 1;
     public int MaxPersonalCommodityStock { get; init; } = 100;
+    // Personal economic initiative is enabled by default and deterministic
+    // per resident. Scenarios may disable it or set participation to zero;
+    // all actions still use the same finite resource/transaction mechanics.
+    public bool EnableAutonomousPersonalEconomy { get; init; } = true;
+    // The former bare-world scenario remains available for regression tests.
+    public bool EnableEstablishedOpeningEconomy { get; init; } = false;
+    public bool EnableRiskAwareChoices { get; init; } = true;
+    public int AutonomousParticipationPercent { get; init; } = 22;
+    public int AutonomousDailyActionLimit { get; init; } = 2;
+    public int AutonomousMaxTravelMinutes { get; init; } = 130;
+    public decimal AutonomousToolPurchaseGoldReserve { get; init; } = 20m;
     public bool EnableLocalProduction { get; init; } = true;
     public bool EnableExternalTrade { get; init; } = true;
     public bool EnablePublicAssistance { get; init; } = true;
@@ -347,7 +405,13 @@ public sealed record SettlementSettings
     // evicted for lack of gold; beds and household stock remain physical.
     public int RentGoldReserve { get; init; } = 20;
     public int PortCargoUnitsPerWorkHour { get; init; } = 50;
+    public bool EnablePaidCarriers { get; init; } = true;
+    // Courier travel shares the ordinary NPC clock, and freight cannot arrive
+    // before its assigned person completes pickup and destination journeys.
+    public bool EnableNpcCourierJourneys { get; init; } = true;
+    public int HaulierCargoUnitsPerWorkHour { get; init; } = 50;
     public int MaxPortCargoCapacity { get; init; } = 2000;
+    public int MaxHaulierCargoCapacity { get; init; } = 500;
     public int MaxFreightLoad { get; init; } = 40;
     public int ToolWorkHoursPerWear { get; init; } = 24;
     public int FirewoodDaysPerHousehold { get; init; } = 5;
@@ -381,7 +445,10 @@ public sealed record BusinessSnapshot(
     decimal DividendsPaid,
     int CargoCapacity = 0, long CargoHandled = 0,
     IReadOnlyDictionary<string,int>? CommodityInventory = null,
-    int CapitalLevel=1,long CapitalInvestedMilli=0);
+    int CapitalLevel=1,long CapitalInvestedMilli=0,
+    decimal PublicPayrollGrants=0m,int PublicHoursBudgetToday=0,
+    int CasualHoursWorked=0,decimal FreightRevenue=0m,
+    long FreightShipments=0,long FreightUnitsTransported=0);
 
 public sealed record CapitalDecisionSnapshot(
     int Day,string BusinessId,string BusinessName,string Decision,
@@ -391,6 +458,9 @@ public sealed record CapitalProjectSnapshot(
     string InvestorId,string InvestorName,string BuilderName,
     int CompletedHours,int RequiredHours,long MaterialCostMilli,
     decimal LabourPayment);
+
+public sealed record AutonomousActivitySnapshot(
+    string Activity,long Chosen,long Completed,long Failed);
 
 public sealed record BusinessPlanSnapshot(
     string BusinessId,string BusinessName,int Day,string? Product,
@@ -406,6 +476,15 @@ public sealed record BreadMarketSnapshot(
     int BreadInStock,decimal PricePerLoaf,bool TwoForOneAvailable,
     long PurchasedLoaves,decimal LandedCostGold,
     long LoavesSold,decimal BreadRevenueGold);
+
+public sealed record CourierJourneySnapshot(
+    int ShipmentId,string CourierId,string CourierName,string CarrierId,
+    string FromId,string FromName,string ToId,string ToName,
+    string Commodity,int Quantity,decimal CourierWageGold,string Stage,
+    long AssignedMinute,long? PickupMinute,long? ExpectedDeliveryMinute,
+    long? DeliveredMinute,
+    double? FromMapX,double? FromMapY,
+    double? ToMapX,double? ToMapY);
 
 public sealed record FreightRouteSnapshot(
     string FromId, string From, string ToId, string To, string Commodity, long Units);
@@ -471,6 +550,11 @@ public sealed record SettlementReport
     public long PersonalTrades { get; init; }
     public decimal PersonalSaleIncome { get; init; }
     public int OpenResourceSites { get; init; }
+    public int AutonomousParticipants { get; init; }
+    public long AutonomousChoices { get; init; }
+    public long AutonomousCompleted { get; init; }
+    public long AutonomousFailed { get; init; }
+    public AutonomousActivitySnapshot[] AutonomousActivities { get; init; } = [];
     public long RawMaterialsExtracted { get; init; }
     public long FoodExported { get; init; }
     public long GoodsExported { get; init; }
@@ -482,6 +566,10 @@ public sealed record SettlementReport
     public decimal AssistanceGoldPaid { get; init; }
     public int AssistedResidents { get; init; }
     public decimal RevenueTaxed { get; init; }
+    public long TavernVisits { get; init; }
+    public decimal TavernGoldSpent { get; init; }
+    public long ClothingWornOut { get; init; }
+    public long ClothingPurchased { get; init; }
     public decimal RetailSalesTaxRevenue { get; init; }
     public decimal CooperativeDistributions { get; init; }
     public decimal PublicGold { get; init; }
@@ -497,6 +585,10 @@ public sealed record SettlementReport
     public int ResidentsFurloughed { get; init; }
     public double PersonHoursAtZeroSatiation { get; init; }
     public double PersonHoursBelow20Satiation { get; init; }
+    public decimal PublicPayrollGrants { get; init; }
+    public long FundedPublicWorkHours { get; init; }
+    public int ActivePublicEmployees { get; init; }
+    public int UnfundedPublicInstitutions { get; init; }
     public long WorkersFurloughedCumulative { get; init; }
     public long JobsReassigned { get; init; }
     public int HousingUnits { get; init; }
@@ -515,6 +607,16 @@ public sealed record SettlementReport
     public int MaterialsInTransit { get; init; }
     public int GoodsInTransit { get; init; }
     public decimal FreightFees { get; init; }
+    public decimal CarrierRevenue { get; init; }
+    public long PaidFreightShipments { get; init; }
+    public long CarrierCapacityHours { get; init; }
+    public long UnfulfilledFreightRequests { get; init; }
+    public long CourierAssignments { get; init; }
+    public long CourierDeliveries { get; init; }
+    public decimal CourierWages { get; init; }
+    public decimal CourierWagesInEscrow { get; init; }
+    public int ActiveCourierJourneys { get; init; }
+    public CourierJourneySnapshot[] CourierJourneys { get; init; } = [];
     public FreightRouteSnapshot[] FreightRoutes { get; init; } = [];
     public CommoditySnapshot[] CommodityDetails { get; init; } = [];
     public long RecipesCompleted { get; init; }

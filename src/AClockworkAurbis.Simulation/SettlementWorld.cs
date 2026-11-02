@@ -63,6 +63,8 @@ public sealed partial class SettlementWorld
            _settings.DailyImportCapPerTenResidents<0 ||
            _settings.DailySharedRent<0 || _settings.RentGoldReserve<0 ||
            _settings.PortCargoUnitsPerWorkHour<0 ||
+           _settings.HaulierCargoUnitsPerWorkHour<0 ||
+           _settings.MaxHaulierCargoCapacity<0 ||
            _settings.MaxPortCargoCapacity<0 ||
            _settings.MaxFreightLoad<1 || _settings.BaseFreightFee<0 ||
            _settings.ToolWorkHoursPerWear<1 || _settings.FirewoodDaysPerHousehold<1 ||
@@ -78,7 +80,18 @@ public sealed partial class SettlementWorld
            _settings.OpenLogsPerResidentPerDay is <0 or >1000 ||
            _settings.OpenFishPerResidentPerDay is <0 or >1000 ||
            _settings.OpenGamePerResidentPerDay is <0 or >1000 ||
-           _settings.MaxPersonalCommodityStock is <1 or >10000)
+           _settings.MaxPersonalCommodityStock is <1 or >10000 ||
+           _settings.AutonomousParticipationPercent is <0 or >100 ||
+           _settings.AutonomousDailyActionLimit is <0 or >8 ||
+           _settings.AutonomousMaxTravelMinutes is <1 or >1440 ||
+           _settings.AutonomousToolPurchaseGoldReserve is <0m or >1000000m ||
+           _settings.PublicPayrollHorizonDays is <1 or >90 ||
+           _settings.PublicMinimumPaidHoursPerWorker is <0 or >8 ||
+           _settings.PublicTargetPaidHoursPerWorker is <0 or >8 ||
+           _settings.PublicMinimumPaidHoursPerWorker>_settings.PublicTargetPaidHoursPerWorker ||
+           _settings.PublicUnfundedLeaveDays is <1 or >365 ||
+           _settings.PrivateHireRunwayDays is <1 or >90 ||
+           _settings.PrivateRehireCooldownDays is <0 or >365)
             throw new ArgumentOutOfRangeException(nameof(settings));
 
         _sourcePlaces=catalog.Places.ToDictionary(p=>p.Id,StringComparer.Ordinal);
@@ -117,7 +130,10 @@ public sealed partial class SettlementWorld
             double satiation=55+StableRandom.Between(person.Id,_settings.Seed,25,40);
             double energy=55+StableRandom.Between(person.Id,_settings.Seed,26,40);
             string home=person.HomePlaceId ?? "sim:unmapped-home:"+person.Id;
-            var state=new ResidentState(person,home,cash,food,satiation,energy,start);
+            var state=new ResidentState(person,home,cash,food,satiation,energy,start)
+            {
+                RiskTolerance=StableRandom.Between(person.Id,_settings.Seed,31,101)
+            };
             int idx=_residents.Count;
             _residents.Add(state);
             _residentById.Add(person.Id,state);
@@ -132,7 +148,8 @@ public sealed partial class SettlementWorld
             Detailed && b.Kind==BusinessKinds.Bakery).ToArray();
         _goodsShops=_businesses.Where(b=>b.Kind is BusinessKinds.GoodsRetail or
             BusinessKinds.Workshop || Detailed && b.Kind is
-            BusinessKinds.Sawmill or BusinessKinds.Leatherworker).ToArray();
+            BusinessKinds.Sawmill or BusinessKinds.Leatherworker or
+            BusinessKinds.Tailor).ToArray();
         foreach(var business in _businesses)
         {
             if(business.OwnerId is not null)
@@ -310,6 +327,9 @@ public sealed partial class SettlementWorld
                 break;
             case SettlementAction.PersonalSell:
                 CompletePersonalTask(actor,PersonalTaskKind.Sell);
+                break;
+            case SettlementAction.VisitTavern:
+                CompleteTavernVisit(actor);
                 break;
         }
     }

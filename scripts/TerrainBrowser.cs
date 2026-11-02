@@ -11,6 +11,9 @@ namespace EsoTest;
 /// </summary>
 public partial class TerrainBrowser : Node3D
 {
+    public bool FirstPersonLab { get; set; }
+    private Vector3? _firstPersonSpawn;
+    private CharacterBody3D? _firstPersonPlayer;
     private EsoArchive _archive = null!;
     private OodleDecoder _decoder = null!;
     private IReadOnlyList<TerrainBundle> _bundles = null!;
@@ -575,6 +578,8 @@ public partial class TerrainBrowser : Node3D
             InspectPaintMask(mx,mz,mc);
         if (System.Environment.GetEnvironmentVariable("ESO_COMPARE_AURIDON") == "1")
             OpenAuridonComparison();
+        if (FirstPersonLab)
+            StartFirstPersonWalk();
         if (System.Environment.GetEnvironmentVariable("ESO_CAPTURE_SCREENSHOT") == "1")
             CaptureDebugFrame();
     }
@@ -902,7 +907,9 @@ void fragment() {
         _sceneLabel.AddThemeFontSizeOverride("font_size",12);
         content.AddChild(_sceneLabel);
         var help=new Label{
-            Text="WASD move | Right mouse look | E/Q up/down | Shift sprint | Wheel speed | Hover NPC: details | Click NPC: pin | N: NPCs | J: density | P: crowd | G: guilds | K: docks | M: Auridon map",
+            Text=FirstPersonLab
+                ? "FIRST PERSON | WASD walk | Mouse look | Shift sprint | Space jump | Esc release cursor | Left-click recapture"
+                : "WASD move | Right mouse look | E/Q up/down | Shift sprint | Wheel speed | Hover NPC: details | Click NPC: pin | N: NPCs | J: density | P: crowd | G: guilds | K: docks | M: Auridon map",
             AutowrapMode=TextServer.AutowrapMode.WordSmart
         };
         help.AddThemeFontSizeOverride("font_size",11);
@@ -945,6 +952,33 @@ void fragment() {
         GD.Print($"SOURCE GROUND CAMERA: ({worldX:F2},{worldZ:F2}) "+
             $"heightfield={h:F2}, eyeHeight=2.15, section={bundle.DescriptorId}");
     }
+    private void StartFirstPersonWalk()
+    {
+        if (_terrainRoot == null || _firstPersonSpawn is not Vector3 spawn ||
+            _terrainRoot.GetNodeOrNull<StaticBody3D>("SourceTerrainCollision") == null)
+        {
+            _briefStatus.Text = "Cannot start walk: source terrain collision or valid ground height is missing.";
+            GD.PushError(_briefStatus.Text);
+            return;
+        }
+        var scene = GD.Load<PackedScene>("res://scenes/first_person_player.tscn");
+        var player = scene.Instantiate<CharacterBody3D>();
+        // Start above source terrain with the capsule's feet clear of the ground.
+        player.Position = spawn;
+        player.Rotation = new Vector3(0f, _yaw, 0f);
+        AddChild(player);
+        _terrainRoot.GetNodeOrNull<SourcePropLayer>("SourcePlacedProps")?
+            .TrackPlayerCollision(player);
+        _firstPersonPlayer = player;
+        if (_camera != null)
+            _camera.Current = false;
+        player.GetNode<Camera3D>("Head/Camera3D").Current = true;
+        if (_simpleHud != null) _simpleHud.Visible = true;
+        if (_terrainUiLayer != null) _terrainUiLayer.Visible = false;
+        GD.Print($"FIRST PERSON WALK: original Auridon section {_activeDetailSectionId}, " +
+            $"source terrain + props/NPCs, spawn={spawn}");
+    }
+
     private void ShowBestAvailableScene()
     {
         _bestView=true;
@@ -1091,6 +1125,18 @@ void fragment() {
             {
                 Name = $"FullSection_{id}", Mesh = mesh, MaterialOverride = selectedMaterial
             });
+            // Only the walking sandbox needs a physics mesh. The original
+            // render mesh remains untouched, preserving source geometry.
+            if (FirstPersonLab && closeUp)
+            {
+                var floor = new StaticBody3D { Name = "SourceTerrainCollision" };
+                var ground = mesh.CreateTrimeshShape();
+                // ESO terrain is rendered two-sided; physics must also see both
+                // orientations of its source triangles.
+                ground.BackfaceCollision = true;
+                floor.AddChild(new CollisionShape3D { Shape = ground });
+                root.AddChild(floor);
+            }
             if (_currentLodMaterial != null)
             {
                 root.AddChild(new DirectionalLight3D {
@@ -1128,7 +1174,9 @@ void fragment() {
             _pitch = System.Environment.GetEnvironmentVariable("ESO_CAPTURE_TOPDOWN") == "1" ? 1.56f : (closeUp ? 0.68f : 1.13f);
             UpdateCamera();
             if(closeUp)
+            {
                 PlaceFreeCameraNearTerrain(bundle,tileX,tileZ,result.LowestHeight);
+            }
             _status.Text =
                 $"{(closeUp ? "FULL 65x65 CLOSE-UP" : "Complete source")} section {id} | {result.CellsRendered:N0} original tiles\n" +
                 $"Bounds: ({bundle.OriginX},{bundle.OriginY}) to ({bundle.MaximumX},{bundle.MaximumY})\n" +
@@ -1142,7 +1190,8 @@ void fragment() {
             GD.Print("FULL SECTION " + _status.Text);
             if(vegetationTest && closeUp)
             {
-                var props=new SourcePropLayer{Name="SourcePlacedProps"};
+                var props=new SourcePropLayer{Name="SourcePlacedProps",
+                    EnableFirstPersonPhysics=FirstPersonLab};
                 props.Setup(_archive,_decoder,bundle,result.LowestHeight,tileX,tileZ);
                 string waterNote="No source-linked harbour-water elevation found.";
                 if(props.HarbourWaterCandidate is float boatHeight)
@@ -1167,6 +1216,8 @@ void fragment() {
                 {
                     var population=new PopulationPlaceholderLayer {Name="AuridonNpcPlaceholders"};
                     population.Setup(_archive,_decoder,bundle,props,result.LowestHeight,tileX,tileZ);
+                    population.ConfigureFirstPersonAim(FirstPersonLab);
+                    population.EnableSourceHumanoids(FirstPersonLab);
                     population.SetDensity(_populationDensity);
                     population.SetShown(_showPopulation);
                     population.SetHoverGate(()=>_bestView&&_simpleHud?.Visible==true&&
@@ -1596,6 +1647,8 @@ void fragment() {
             _yaw=0.5f;
             _pitch=0.10f;
             _flySpeed=18f;
+            if(FirstPersonLab)
+                _firstPersonSpawn=_flyPosition-Vector3.Up*2.30f;
             _camera.Position=_flyPosition;
             _camera.Rotation=new Vector3(-_pitch,_yaw,0f);
             GD.Print($"FREE CAMERA starting at original tile {tileX},{tileZ} " +
@@ -1611,6 +1664,7 @@ void fragment() {
     // Release even when the pointer passes over the tools UI.
     public override void _Input(InputEvent @event)
     {
+        if(FirstPersonLab)return;
         if(!_mouseLooking)return;
         if(@event is InputEventMouseButton button &&
             button.ButtonIndex==MouseButton.Right && !button.Pressed)
@@ -1636,6 +1690,7 @@ void fragment() {
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        if(FirstPersonLab)return;
         if(@event is InputEventKey populationKey && populationKey.Pressed &&
             !populationKey.Echo && (_simpleHud?.Visible==true || _terrainUiLayer?.Visible==true))
         {
@@ -1722,7 +1777,7 @@ void fragment() {
 
     public override void _Process(double delta)
     {
-        if (_camera==null) return;
+        if (FirstPersonLab || _camera==null) return;
         Control? focused=GetViewport().GuiGetFocusOwner();
         if(!_mouseLooking && focused is LineEdit or TextEdit or SpinBox)
             return;

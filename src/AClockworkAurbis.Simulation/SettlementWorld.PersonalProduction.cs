@@ -49,9 +49,21 @@ public sealed partial class SettlementWorld
 {
     private enum PersonalTaskKind { Gather,Craft,Buy,Sell }
     private sealed record PersonalTask(
-        PersonalTaskKind Kind,string Destination,string Sku,int Quantity);
+        PersonalTaskKind Kind,string Destination,string Sku,int Quantity,
+        bool Autonomous=false);
     private readonly Dictionary<string,PersonalTask> _personalTasks=new(StringComparer.Ordinal);
     private readonly Dictionary<string,OpenResourceSite> _openResourceSites=new(StringComparer.Ordinal);
+
+    private int ReservedPersonalUnits(string destination,string sku,PersonalTaskKind kind) =>
+        _personalTasks.Values.Where(t=>t.Kind==kind &&
+            t.Destination==destination && t.Sku==sku)
+        .Sum(t=>kind==PersonalTaskKind.Gather &&
+            (sku is "iron_ore" or "logs") ? _settings.RawMaterialPerWorkHour : t.Quantity);
+
+    private decimal ReservedPersonalBuyerGold(string destination) =>
+        _personalTasks.Values.Where(t=>t.Kind==PersonalTaskKind.Sell &&
+            t.Destination==destination)
+        .Sum(t=>IndividualBuyback(t.Sku)*t.Quantity);
     private long _personalGatherHours,_personalCraftBatches,_personalTrades;
     private decimal _personalSaleIncome;
 
@@ -123,7 +135,9 @@ public sealed partial class SettlementWorld
            Quantity(resident.Stock,sku)>=_settings.MaxPersonalCommodityStock ||
            sku=="game_meat" && Quantity(resident.Stock,"raw_hide")>=
                _settings.MaxPersonalCommodityStock)return false;
-        var site=_openResourceSites.Values.Where(s=>s.Remaining(sku)>0)
+        var site=_openResourceSites.Values.Where(s=>
+                s.Remaining(sku)>ReservedPersonalUnits(s.Place.Id,sku,
+                    PersonalTaskKind.Gather))
             .OrderBy(s=>JourneyDuration(resident,s.Place.Id))
             .ThenBy(s=>s.Place.Id,StringComparer.Ordinal).FirstOrDefault();
         return site is not null && EnqueuePersonal(resident,
@@ -156,7 +170,8 @@ public sealed partial class SettlementWorld
         var resident=RequireResident(residentId);
         if(quantity is <1 or >12 || !_byBusiness.TryGetValue(sellerId,out var seller) ||
            !CommodityRecipes.Prices.ContainsKey(sku) || !SellsToIndividuals(seller,sku) ||
-           Quantity(seller.Stock,sku)<quantity ||
+           Quantity(seller.Stock,sku)-ReservedPersonalUnits(sellerId,sku,
+               PersonalTaskKind.Buy)<quantity ||
            Quantity(resident.Stock,sku)>_settings.MaxPersonalCommodityStock-quantity ||
            resident.Gold<checked(MarketRetailQuote(seller,sku)*quantity))return false;
         return EnqueuePersonal(resident,
@@ -192,8 +207,10 @@ public sealed partial class SettlementWorld
            Quantity(resident.Stock,sku)<quantity ||
            resident.EquippedWeaponSku==sku &&
                Quantity(resident.Stock,sku)<=quantity ||
-           Quantity(buyer.Stock,sku)>_settings.MaxCommodityStockPerSite-quantity ||
-           buyer.Gold<checked(IndividualBuyback(sku)*quantity))return false;
+           Quantity(buyer.Stock,sku)+ReservedPersonalUnits(buyerId,sku,
+               PersonalTaskKind.Sell)>_settings.MaxCommodityStockPerSite-quantity ||
+           buyer.Gold-ReservedPersonalBuyerGold(buyerId)<
+               checked(IndividualBuyback(sku)*quantity))return false;
         return EnqueuePersonal(resident,
             new PersonalTask(PersonalTaskKind.Sell,buyer.Id,sku,quantity));
     }
@@ -218,6 +235,12 @@ public sealed partial class SettlementWorld
     {
         var resident=RequireResident(residentId);
         resident.PersonalTask=null;
+        if(_personalTasks.TryGetValue(residentId,out var task) && task.Autonomous)
+        {
+            resident.AutonomousFailed++;
+            _autonomousFailed++;
+            _autonomousFailedKinds[(int)task.Kind]++;
+        }
         return _personalTasks.Remove(residentId);
     }
 
@@ -250,6 +273,12 @@ public sealed partial class SettlementWorld
         resident.PersonalTask=null;
         if(resident.CurrentPlaceId!=task.Destination)
         {
+            if(task.Autonomous)
+            {
+                resident.AutonomousFailed++;
+                _autonomousFailed++;
+                _autonomousFailedKinds[(int)task.Kind]++;
+            }
             Observe(resident,"personal_failed",task.Kind+":"+task.Sku+
                 " destination changed before completion");
             return;
@@ -262,6 +291,21 @@ public sealed partial class SettlementWorld
             PersonalTaskKind.Sell=>CompletePersonalSell(resident,task),
             _=>false
         };
+        if(task.Autonomous)
+        {
+            if(succeeded)
+            {
+                resident.AutonomousCompleted++;
+                _autonomousCompleted++;
+                _autonomousCompletedKinds[(int)kind]++;
+            }
+            else
+            {
+                resident.AutonomousFailed++;
+                _autonomousFailed++;
+                _autonomousFailedKinds[(int)kind]++;
+            }
+        }
         if(!succeeded)
             Observe(resident,"personal_failed",task.Kind+":"+task.Sku+
                 " no longer has the required funds, resources or capacity");

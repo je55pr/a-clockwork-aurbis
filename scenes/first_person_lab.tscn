@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_environment"]
+[ext_resource type="Script" path="res://scripts/ArchiveWorld.cs" id="2_archive"]
+
+[node name="AuridonFirstPerson" type="Node3D"]
+script = ExtResource("1_environment")
+
+[node name="ArchiveWorld" type="Node3D" parent="."]
+script = ExtResource("2_archive")
+FirstPersonLab = true

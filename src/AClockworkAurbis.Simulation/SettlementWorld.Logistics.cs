@@ -2,11 +2,14 @@ namespace AClockworkAurbis.Simulation;
 
 // A shipment is physical stock in transit, not simultaneous inventory at
 // its source and destination. Routes are estimated from source map markers.
-// Carrier ownership, roads and vessel simulation are not modelled yet.
+// Paid carriers own handling capacity and earn delivery fees when enabled.
+// Individual NPC travel with cargo and detailed roads are not modelled.
 internal sealed record FreightShipment(
     BusinessState From, BusinessState To, string Commodity, int Quantity,
     long DepartMinute, long ArriveMinute,
-    long LandedValueMilli = 0);
+    long LandedValueMilli = 0,BusinessState? Carrier = null,
+    string? CourierId = null,decimal CourierWage = 0m,
+    long? PickupMinute = null,long? ExpectedDeliveryMinute = null);
 
 public sealed partial class SettlementWorld
 {
@@ -108,6 +111,8 @@ public sealed partial class SettlementWorld
         int id = -2 - eventIndex;
         var shipment = _freight[id];
         _freight.Remove(id);
+        if(shipment.CourierId is not null)
+            CompleteCourierPayment(id,shipment);
         if(Detailed)
         {
             StockAdd(shipment.To.Stock,shipment.Commodity,shipment.Quantity);
@@ -130,6 +135,12 @@ public sealed partial class SettlementWorld
         }
         _shipmentsDelivered++;
         _freightUnitsDelivered += shipment.Quantity;
+        if(shipment.Carrier is not null)
+        {
+            shipment.Carrier.FreightUnitsTransported+=shipment.Quantity;
+            shipment.Carrier.CargoHandled+=shipment.Quantity;
+            _paidFreightUnitsDelivered+=shipment.Quantity;
+        }
         var key = (shipment.From.Id, shipment.To.Id, shipment.Commodity);
         _deliveredByRoute[key] = _deliveredByRoute.GetValueOrDefault(key) + shipment.Quantity;
     }

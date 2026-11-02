@@ -25,6 +25,8 @@ public sealed partial class SettlementWorld
     private BusinessState[] _workshops = [];
     private int _simulatedContracts;
     private long _furloughs, _rehired;
+    private decimal _publicPayrollGrants;
+    private long _fundedPublicWorkHours;
 
     private bool Regional => _settings.Economy is EconomyMode.RegionalProduction
         or EconomyMode.CommodityProduction;
@@ -141,10 +143,12 @@ public sealed partial class SettlementWorld
                 or BusinessKinds.Bakery or BusinessKinds.Hunter or BusinessKinds.Fishery
                 or BusinessKinds.Leatherworker => 5,
             BusinessKinds.ResourceProducer => 4,
-            BusinessKinds.Workshop => 5,
+            BusinessKinds.Workshop or BusinessKinds.Brewery or
+                BusinessKinds.Tailor => 5,
             BusinessKinds.FoodRetail => 3,
             BusinessKinds.GoodsRetail => 3,
             BusinessKinds.ImportHub => 3,
+            BusinessKinds.Haulier => 4,
             BusinessKinds.Institution => 2,
             BusinessKinds.GuardPost or BusinessKinds.CleaningService or
                 BusinessKinds.DomesticService => 3,
@@ -290,10 +294,14 @@ public sealed partial class SettlementWorld
                 if (person.Goods > 0) { person.Goods--; _goodsUsed++; }
 
         DistributeRegionalSurplus();
-        FundPublicServices();
+        if (Detailed && _settings.EnableBudgetedPublicEmployment)
+            FundBudgetedPublicServices();
+        else FundPublicServices();
         // Aid must reach the resident before rent becomes due, otherwise
         // a solvent public treasury can evict an eligible tenant needlessly.
         ProvideFundedAssistance();
+        if (Detailed && _settings.EnableSustainableHiring)
+            ObservePrivateMarginDay();
         ReassignSolventEmployment();
         RunHousingDay();
         if(Detailed)RunCommodityDay();
@@ -301,7 +309,8 @@ public sealed partial class SettlementWorld
     }
 
     private bool IsDetailedProcessor(BusinessState business) =>
-        Detailed && business.Kind is BusinessKinds.Bakery or BusinessKinds.Sawmill
+        Detailed && business.Kind is BusinessKinds.Bakery or BusinessKinds.Brewery or
+            BusinessKinds.Tailor or BusinessKinds.Sawmill
             or BusinessKinds.Smeltery or BusinessKinds.Tannery
             or BusinessKinds.Workshop or BusinessKinds.Leatherworker;
 
@@ -327,7 +336,7 @@ public sealed partial class SettlementWorld
                     _cooperativeDistributions += perWorker;
                 }
             }
-            else if (business.Kind is BusinessKinds.ImportHub or
+            else if (business.Kind is BusinessKinds.Haulier or BusinessKinds.ImportHub or
                 BusinessKinds.GoodsRetail or BusinessKinds.FoodRetail ||
                 IsDetailedProcessor(business))
             {
@@ -355,8 +364,7 @@ public sealed partial class SettlementWorld
             long score=long.MaxValue;
             foreach(var employer in _businesses)
             {
-                if(employer.Gold < Math.Max(12, _settings.HourlyWage * 8) ||
-                   _staff[employer.Id].Count >= ContractCapacity(employer))continue;
+                if(!CanOfferPermanentContract(employer.Id))continue;
                 // Employment viability is based on home-to-work commuting,
                 // not where somebody happens to be standing at 6 AM.
                 int route=HomeCommuteMinutes(person,employer);
@@ -395,6 +403,7 @@ public sealed partial class SettlementWorld
     {
         if(!Regional)return;
         person.OnUnpaidLeave=true;
+        employer.LastFurloughDay=Minute/DayMinutes;
         person.AssignedWorkPlaceId=null;
         person.EmploymentEvidence="simulated_unpaid_leave";
         person.InsolvencyJobChanges++;
