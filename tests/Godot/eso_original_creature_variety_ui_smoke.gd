@@ -51,8 +51,34 @@ func _check() -> void:
         push_error("Curated creature variant did not share original geometry and skin")
         quit(1)
         return
-    if FileAccess.file_exists("res://.research/npc-rigs/creature-texture-candidates.tsv"):
-        if scene.CandidateMaterialCount != 3 or not scene.HasCandidateMaterial(3):
+    if FileAccess.file_exists("res://data/eso_creature_texture_candidates.tsv"):
+        if scene.CandidateMaterialCount != 9:
+            push_error("Nine original DDS candidate assignments were not loaded")
+            quit(1)
+            return
+        for mapped in [1,2,3,6,8,9,10,11,12]:
+            if not scene.HasCandidateMaterial(mapped):
+                push_error("Missing original DDS material candidate at catalogue index " + str(mapped))
+                quit(1)
+                return
+            var candidate: MeshInstance3D = scene.get_node(
+                "SourceCreature_" + types[mapped] +
+                "/NativeCreatureSkeleton/OriginalCreatureMesh")
+            var actual: StandardMaterial3D = candidate.material_override
+            if actual == null or actual.albedo_texture == null:
+                push_error("Mapped creature diffuse DDS missing: " + str(mapped))
+                quit(1)
+                return
+            var expects_normal: bool = mapped != 1 and mapped != 8
+            if actual.normal_enabled != expects_normal:
+                push_error("Wrong packed-normal classification for creature " + str(mapped))
+                quit(1)
+                return
+            if expects_normal and actual.normal_texture == null:
+                push_error("Original packed-normal DDS did not load: " + str(mapped))
+                quit(1)
+                return
+        if not scene.HasCandidateMaterial(3):
             push_error("Original Clannfear armoured DDS candidate was not loaded")
             quit(1)
             return

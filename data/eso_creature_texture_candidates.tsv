@@ -1,0 +1,11 @@
+# Source archive DDS IDs only, no proprietary image bytes. NEVER treat these pairs as verified ESO runtime materials.
+# meshId diffuseId normalId specularId evidence
+000A0A61	000A0A63	00000000	000A0A67	archive-neighbor-provisional
+0029B14F	0029B14D	0029B151	0029B153	archive-neighbor-provisional
+000A0A3F	000A0A4D	000A0A4F	000A0A51	archive-neighbor-provisional
+00023B09	00023B03	00023B05	00023B07	archive-triplet-provisional
+00023B3D	00023B37	00023B39	00023B3B	archive-triplet-provisional
+00023C73	00023C6B	00023C6D	00023C6F	archive-triplet-provisional
+00123257	00123251	00123253	00123255	archive-triplet-provisional
+0031A83B	0031A833	0031A835	00000000	archive-neighbor-provisional
+000AA37D	000AA377	00000000	000AA37B	archive-neighbor-provisional

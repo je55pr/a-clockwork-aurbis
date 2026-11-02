@@ -308,8 +308,13 @@ public partial class EsoOriginalCreatureWalkGallery:Node3D
                 ?OriginalSources.Concat(ReadCuratedVariants()).ToArray()
                 :OriginalSources;
             string localTextures=Path.Combine(Cache,"creature-texture-candidates.tsv");
-            if(File.Exists(localTextures))
-                _textureLibrary=new EsoOriginalCreatureTextures(Manifest,Oodle,localTextures);
+            string sourceCandidateIndex=Path.Combine(Root,"data",
+                "eso_creature_texture_candidates.tsv");
+            string selectedTextureIndex=File.Exists(localTextures)
+                ?localTextures:sourceCandidateIndex;
+            if(File.Exists(selectedTextureIndex))
+                _textureLibrary=new EsoOriginalCreatureTextures(
+                    Manifest,Oodle,selectedTextureIndex);
             foreach(var source in _sources)
             {
                 EnsureSources(source);
@@ -518,8 +523,8 @@ public partial class EsoOriginalCreatureWalkGallery:Node3D
                 "1-3 focus first three | PageUp/Down next species | 0 all\n"+
                 "Space pause | Left/Right frame step\n"+
                 "Drag orbit | Wheel zoom | Esc exit\n"+
-                $"DDS candidates: {CandidateMaterialCount}/{_creatures.Count} (UV PROVISIONAL)\n"+
-                "T toggle source DDS candidates | no verified ESO runtime material link";
+                $"DDS candidates: {CandidateMaterialCount}/{_creatures.Count} (UNVERIFIED ASSOCIATIONS)\n"+
+                "T toggle original DDS candidates | assignments NOT game-verified";
     }
     public override void _Process(double delta)
     {

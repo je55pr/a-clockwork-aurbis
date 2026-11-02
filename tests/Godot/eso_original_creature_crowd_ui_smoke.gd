@@ -60,7 +60,7 @@ func _check() -> void:
         push_error("Crowd all-species focus failed")
         quit(1)
         return
-    if FileAccess.file_exists("res://.research/npc-rigs/creature-texture-candidates.tsv"):
+    if FileAccess.file_exists("res://data/eso_creature_texture_candidates.tsv"):
         var copy: MeshInstance3D = scene.get_node("OriginalCrowd_Guar_001/NativeCreatureSkeleton/OriginalCreatureMesh")
         var source_mat: Material = copy.material_override
         if source_mat == null or source_mat != primary[2].material_override:

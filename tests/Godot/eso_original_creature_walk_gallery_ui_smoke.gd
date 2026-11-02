@@ -49,7 +49,7 @@ func _run() -> void:
     # Optional local provenance manifest is deliberately ignored by Git.
     # When present, the UI must actually decode source DDS for the mapped
     # species and let us compare it with the neutral diagnostic material.
-    if FileAccess.file_exists("res://.research/npc-rigs/creature-texture-candidates.tsv"):
+    if FileAccess.file_exists("res://data/eso_creature_texture_candidates.tsv"):
         if scene.CandidateMaterialCount != 2 or scene.HasCandidateMaterial(0) \
             or not scene.HasCandidateMaterial(1) or not scene.HasCandidateMaterial(2):
             push_error("Local original creature DDS mapping was not loaded correctly")

@@ -17,7 +17,7 @@ namespace EsoTest;
 /// </summary>
 internal sealed class EsoOriginalCreatureTextures : IDisposable
 {
-    internal sealed record Mapping(uint MeshId,uint Diffuse,uint Normal,string Evidence);
+    internal sealed record Mapping(uint MeshId,uint Diffuse,uint Normal,uint Specular,string Evidence);
     private readonly EsoArchive _archive;
     private readonly OodleDecoder _oodle;
     private readonly Dictionary<uint,Texture2D?> _diffuse=new();
@@ -38,14 +38,22 @@ internal sealed class EsoOriginalCreatureTextures : IDisposable
             string text=line.Trim();
             if(text.Length==0||text.StartsWith('#'))continue;
             var fields=text.Split('\t');
-            if(fields.Length!=4 ||
+            if(fields.Length is not (4 or 5) ||
                !uint.TryParse(fields[0],NumberStyles.HexNumber,CultureInfo.InvariantCulture,out uint mesh)||
                !uint.TryParse(fields[1],NumberStyles.HexNumber,CultureInfo.InvariantCulture,out uint diffuse)||
                !uint.TryParse(fields[2],NumberStyles.HexNumber,CultureInfo.InvariantCulture,out uint normal)||
-               (diffuse==0&&normal==0)||
-               fields[3] is not ("uv-provisional" or "source-verified"))
-                throw new InvalidDataException("Bad local original ESO material association: "+text);
-            if(_mappings.Count>=5000||!_mappings.TryAdd(mesh,new Mapping(mesh,diffuse,normal,fields[3])))
+               (diffuse==0&&normal==0))
+                throw new InvalidDataException("Bad original ESO texture-candidate fields: "+text);
+            uint specular=0;
+            if(fields.Length==5 &&
+               !uint.TryParse(fields[3],NumberStyles.HexNumber,CultureInfo.InvariantCulture,out specular))
+                throw new InvalidDataException("Bad original ESO specular texture candidate: "+text);
+            string evidence=fields[^1];
+            if(evidence is not ("uv-provisional" or "source-verified" or
+                 "archive-neighbor-provisional" or "archive-triplet-provisional"))
+                throw new InvalidDataException("Unknown texture candidate evidence classification");
+            if(_mappings.Count>=5000||!_mappings.TryAdd(mesh,
+                new Mapping(mesh,diffuse,normal,specular,evidence)))
                 throw new InvalidDataException("Duplicate or excessive original material mapping");
         }
     }
@@ -92,6 +100,24 @@ internal sealed class EsoOriginalCreatureTextures : IDisposable
             byte[] source=img.GetData();
             int size=checked(width*height*4);
             if(source.Length<size)throw new InvalidDataException("Original DDS normal stream truncated");
+            // ESO creature normal textures use X in alpha and Y in green.
+            // Reject dark specular maps that happen to sit next to a model.
+            long green=0,alpha=0;
+            int count=0;
+            int stride=Math.Max(1,(width*height)/4096);
+            for(int pixel=0;pixel<width*height;pixel+=stride)
+            {
+                int offset=pixel*4;
+                green+=source[offset+1];
+                alpha+=source[offset+3];
+                count++;
+            }
+            float meanGreen=green/(255f*count);
+            float meanAlpha=alpha/(255f*count);
+            if(meanGreen is <0.28f or >0.73f ||
+               meanAlpha is <0.28f or >0.73f)
+                throw new InvalidDataException(
+                    $"Expected ESO packed-normal G/A channels; measured G={meanGreen:F2}, A={meanAlpha:F2}");
             byte[] converted=new byte[size];
             // Original ESO ZoCommon.fxh: normal X in alpha, Y in green.
             // Reconstruct positive tangent-space Z for Godot's normal map.

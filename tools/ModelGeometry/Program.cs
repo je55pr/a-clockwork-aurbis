@@ -5,6 +5,9 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using EsoTest;
 
+if(args.Length>0 && args[0]=="--probe-embedded-granny-textures")
+    return EsoGrannyEmbeddedTextureProbe.Run(args.Skip(1).ToArray());
+
 if(args.Length>0 && args[0]=="--find-original-creature-clips")
     return CreatureClipSurvey.Run(args.Skip(1).ToArray());
 
