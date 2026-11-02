@@ -74,7 +74,7 @@ public sealed partial class SettlementWorld
         _unfulfilledFreightRequests++;
     }
 
-    private BusinessState? ChoosePaidCarrier(BusinessState seller,BusinessState buyer)
+    private IEnumerable<BusinessState> RankedPaidCarriers(BusinessState seller,BusinessState buyer)
     {
         int routeMinutes=PlaceTravelMinutes(seller.Place,buyer.Place);
         return _businesses
@@ -89,8 +89,33 @@ public sealed partial class SettlementWorld
                 (b.Kind==BusinessKinds.ImportHub?50:
                     Math.Max(0,routeMinutes-30)))
             .ThenBy(b=>b.Kind==BusinessKinds.Haulier?0:1)
-            .ThenBy(b=>b.Id,StringComparer.Ordinal)
-            .FirstOrDefault();
+            .ThenBy(b=>b.Id,StringComparer.Ordinal);
+    }
+
+    // Try the full ranked list. A closer carrier may lack money or a free
+    // courier while a slightly farther firm can actually move the goods.
+    internal (BusinessState? Carrier,ResidentState? Courier,int Units,
+        bool HadCapacity,bool HadFundedCourier) ChooseFundedShipmentCarrier(
+        BusinessState seller,BusinessState buyer,int requestedUnits,
+        decimal unitPrice,decimal fee)
+    {
+        bool hadCapacity=false,hadFundedCourier=false;
+        foreach(var candidate in RankedPaidCarriers(seller,buyer))
+        {
+            hadCapacity=true;
+            int load=Math.Min(requestedUnits,candidate.CargoCapacity);
+            if(load==0)continue;
+            if(!UsesNpcCourierJourneys)
+                return(candidate,null,load,true,false);
+            decimal payment=checked(load*unitPrice);
+            if(!CanFundCourierAfterTrade(candidate,buyer,seller,payment,fee))
+                continue;
+            hadFundedCourier=true;
+            var courier=ChooseCourierFor(candidate,seller);
+            if(courier is not null)
+                return(candidate,courier,load,true,true);
+        }
+        return(null,null,0,hadCapacity,hadFundedCourier);
     }
 
     // Evaluate the same cash transfers as freight settlement, including

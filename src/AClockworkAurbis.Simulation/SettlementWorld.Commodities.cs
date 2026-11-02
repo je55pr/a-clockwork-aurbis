@@ -598,13 +598,6 @@ public sealed partial class SettlementWorld
             {
                 if(need==0)break;
                 int available=Quantity(seller.Stock,sku);
-                BusinessState? carrier=UsesPaidCarriers?
-                    ChoosePaidCarrier(seller,buyer):null;
-                if(UsesPaidCarriers && carrier is null)
-                {
-                    CarrierShortage(need);
-                    continue;
-                }
                 decimal unitPrice=ToSeptims(
                     QuoteCommodityWholesalePriceMilli(seller,sku));
                 int minutes=PlaceTravelMinutes(seller.Place,buyer.Place);
@@ -618,28 +611,25 @@ public sealed partial class SettlementWorld
                     decimal.Floor(availableGold/unitPrice));
                 int units=Math.Min(need,Math.Min(available,
                     Math.Min(_settings.MaxFreightLoad,affordable)));
-                if(carrier is not null)
-                    units=Math.Min(units,carrier.CargoCapacity);
                 if(units==0)continue;
-                decimal payment=checked(units*unitPrice);
+                BusinessState? carrier=null;
                 ResidentState? courier=null;
-                if(carrier is not null && _settings.EnableNpcCourierJourneys)
+                if(UsesPaidCarriers)
                 {
-                    // Only attempt an expensive NPC search after checking
-                    // the buyer can fund a nonzero, capacity-limited load.
-                    // The carrier may also be the buyer (an import hub).
-                    // Check its balance after goods settlement and fee receipt,
-                    // before reserving the courier's one-gold wage.
-                    if(!CanFundCourierAfterTrade(carrier,buyer,seller,payment,charge))
-                        continue;
-                    courier=ChooseCourierFor(carrier,seller);
-                    if(courier is null)
+                    var choice=ChooseFundedShipmentCarrier(
+                        seller,buyer,units,unitPrice,charge);
+                    if(choice.Carrier is null)
                     {
-                        CourierStaffShortage();
+                        if(!choice.HadCapacity)CarrierShortage(need);
+                        else if(choice.HadFundedCourier)CourierStaffShortage();
                         continue;
                     }
+                    carrier=choice.Carrier;
+                    courier=choice.Courier;
+                    units=choice.Units;
                 }
 
+                decimal payment=checked(units*unitPrice);
                 buyer.Gold-=payment+charge;
                 seller.Gold+=payment;
                 SettleFreightFee(charge,units,carrier);

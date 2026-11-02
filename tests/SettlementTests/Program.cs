@@ -46,6 +46,7 @@ var tests=new (string Name,Action Run)[]
     ("Unfunded processors may offer real casual manufacturing shifts", CasualProcessorWork),
     ("Casual manufacturing uses paid wage cost and worker-specific preflight", CasualManufacturingCosts),
     ("Couriers cannot bankrupt self-carrying import hubs", CourierBalanceAfterTrade),
+    ("Freight tries funded alternative carriers with eligible couriers", FreightCarrierFallback),
     ("Brewing, tavern leisure and clothing form conserved economic activities", BrewingClothingAndTaverns),
     ("Paid hauliers deliver only with real work and finite shipping capacity", PaidFreightCarriers),
     ("Named couriers actually carry freight and settle wage escrow on delivery", NpcCourierJourneys),
@@ -2244,4 +2245,65 @@ static void CourierBalanceAfterTrade()
     seller.Gold=0m;
     Expect(SettlementWorld.CanFundCourierAfterTrade(seller,buyer,seller,2m,0m),
         "a carrier that sells the cargo can fund wages from the incoming payment");
+}
+
+static void FreightCarrierFallback()
+{
+    var original=CommodityFixture();
+    var anchor=original.Places.Single(p=>p.Id=="b:market");
+    const string firstId="sim:test:aa-courier-company";
+    const string secondId="sim:test:zz-courier-company";
+    var places=original.Places.ToList();
+    var businesses=original.Businesses.ToList();
+    foreach(var id in new[]{firstId,secondId})
+    {
+        places.Add(new PlaceDefinition(id,0,id,
+            "simulation_inferred_haulier",anchor.Settlement,anchor.Zone,
+            BusinessKinds.Haulier,"",anchor.MapX,anchor.MapY,
+            "simulation_at_source_anchor",anchor.District));
+        businesses.Add(new BusinessDefinition(id,BusinessKinds.Haulier,null,[],
+            "SIMULATION HYPOTHESIS for courier company fallback test"));
+    }
+    var catalog=original with
+    {
+        Places=places.ToArray(),Businesses=businesses.ToArray(),
+        Residents=original.Residents.Select((r,i)=>
+            i==0?r with{Race="Altmer"}:r).ToArray()
+    };
+    var world=new SettlementWorld(catalog,new SettlementSettings
+    {
+        Economy=EconomyMode.CommodityProduction,
+        EnableExternalTrade=false,AutonomousParticipationPercent=0
+    });
+    var first=world.Businesses.Single(b=>b.Id==firstId);
+    var second=world.Businesses.Single(b=>b.Id==secondId);
+    var seller=world.Businesses.Single(b=>b.Id=="sim:sawmill");
+    var buyer=world.Businesses.Single(b=>b.Id=="b:market");
+    first.CargoCapacity=second.CargoCapacity=12;
+    first.Gold=0m;
+    second.Gold=100m;
+    foreach(var person in world.Residents)person.CourierShipmentId=999;
+    var courier=world.Residents.Single(r=>r.Source.Id==catalog.Residents[0].Id);
+    courier.CourierShipmentId=null;
+    courier.AssignedWorkPlaceId=second.Id;
+    courier.OnUnpaidLeave=false;
+    courier.Food=10;
+    courier.Satiation=100;
+    courier.Energy=100;
+    courier.CurrentPlaceId=seller.Id;
+
+    var funded=world.ChooseFundedShipmentCarrier(seller,buyer,5,2m,0);
+    Expect(funded.Carrier==second && funded.Courier==courier &&
+        funded.Units==5 && funded.HadCapacity,
+        "an unfunded nearest haulier does not block a funded alternative");
+    first.Gold=100m;
+    var unavailable=world.ChooseFundedShipmentCarrier(seller,buyer,5,2m,0);
+    Expect(unavailable.Carrier==second && unavailable.Courier==courier &&
+        unavailable.HadFundedCourier,
+        "a carrier without an eligible driver does not block a staffed alternative");
+    courier.CourierShipmentId=999;
+    var blocked=world.ChooseFundedShipmentCarrier(seller,buyer,5,2m,0);
+    Expect(blocked.Carrier is null && blocked.HadCapacity &&
+        blocked.HadFundedCourier,
+        "when every otherwise funded carrier lacks a driver, freight remains unassigned");
 }
