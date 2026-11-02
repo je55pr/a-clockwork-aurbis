@@ -1,0 +1,5 @@
+# Original ESO hairstyle source DDS candidates only; never an authoritative runtime material link.
+# HAR_F_HU_0343 GR2 0029A87F has matching authored D/N/S paths and neighboring 576x256 DXT5 DDS.
+# A fourth nearby original RGBA texture 0029A87D is a possible tint mask, not yet interpreted.
+# mesh-id diffuse-id packed-normal-id specular-id evidence
+0029A87F	0029A877	0029A879	0029A87B	archive-neighbor-provisional

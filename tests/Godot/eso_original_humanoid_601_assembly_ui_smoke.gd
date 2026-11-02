@@ -70,6 +70,34 @@ func _check() -> void:
             push_error("Authentic hairstyle-to-head inverse rest became incompatible")
             quit(1)
             return
+    if not scene.HasOriginalHairDdsCandidate or not scene.OriginalHairDdsVisible:
+        push_error("Original source hairstyle candidate DDS material missing")
+        quit(1)
+        return
+    var original_material: ShaderMaterial = hair.material_override as ShaderMaterial
+    if original_material == null or original_material.shader == null \
+        or original_material.shader.code.find("ALPHA_SCISSOR_THRESHOLD") < 0:
+        push_error("Original ESO hairstyle alpha-cutout shader not active")
+        quit(1)
+        return
+    for channel in ["original_diffuse","original_normal","original_specular"]:
+        if not (original_material.get_shader_parameter(channel) is Texture2D):
+            push_error("Original ESO hairstyle DDS missing: " + channel)
+            quit(1)
+            return
+    var neutral_key := InputEventKey.new()
+    neutral_key.keycode = KEY_T
+    neutral_key.pressed = true
+    scene._Input(neutral_key)
+    if scene.OriginalHairDdsVisible or hair.material_override == original_material:
+        push_error("Provisional original hair candidate did not toggle off")
+        quit(1)
+        return
+    scene._Input(neutral_key)
+    if not scene.OriginalHairDdsVisible or hair.material_override != original_material:
+        push_error("Provisional original hair candidate did not restore")
+        quit(1)
+        return
     var camera: Camera3D = scene.get_node_or_null("Original601Camera")
     if camera == null or not camera.current:
         push_error("Original 601 native body camera missing")

@@ -24,6 +24,7 @@ internal sealed class EsoOriginalCreatureTextures : IDisposable
     private readonly Dictionary<uint,Texture2D?> _normal=new();
     private readonly Dictionary<uint,Texture2D?> _specular=new();
     private Shader? _diagnosticSpecularShader;
+    private Shader? _diagnosticHairCutoutShader;
     internal int LoadedSpecularCount=>_specular.Count;
     private readonly Dictionary<uint,Mapping> _mappings=new();
     internal int MappingCount=>_mappings.Count;
@@ -105,6 +106,57 @@ internal sealed class EsoOriginalCreatureTextures : IDisposable
                 vec3(0.2126, 0.7152, 0.0722)), 0.04, 1.0);
         }
         """;
+
+    // ESO source hair uses a diffuse alpha cutout plus a packed AG normal.
+    // This is a Godot diagnostic approximation: ESO's real tint-mask,
+    // anisotropy and lighting are not reproduced or invented.
+    private const string SourceHairCutoutShader = """
+        shader_type spatial;
+        render_mode cull_disabled, depth_draw_opaque;
+        uniform sampler2D original_diffuse : source_color, filter_linear_mipmap, repeat_enable;
+        uniform sampler2D original_normal : hint_normal, filter_linear_mipmap, repeat_enable;
+        uniform sampler2D original_specular : source_color, filter_linear_mipmap, repeat_enable;
+        void fragment()
+        {
+            vec4 d=texture(original_diffuse,UV);
+            ALBEDO=d.rgb;
+            ALPHA=d.a;
+            ALPHA_SCISSOR_THRESHOLD=0.42;
+            NORMAL_MAP=texture(original_normal,UV).rgb;
+            NORMAL_MAP_DEPTH=1.0;
+            ROUGHNESS=0.8;
+            vec3 s=texture(original_specular,UV).rgb;
+            SPECULAR=clamp(dot(s,vec3(0.2126,0.7152,0.0722)),0.04,1.0);
+        }
+        """;
+
+    /// <summary>
+    /// Source-only hair-material candidate. Requires real original diffuse,
+    /// AG packed normal and specular images with matching dimensions.
+    /// This does not certify ESO's runtime image assignment/tint.
+    /// </summary>
+    internal ShaderMaterial? LoadAlphaCutoutMaterial(uint meshId)
+    {
+        var mapping=SourceMapping(meshId);
+        if(mapping==null||mapping.Diffuse==0||mapping.Normal==0||
+           mapping.Specular==0)
+            return null;
+        Texture2D? diffuse=GetTexture(mapping.Diffuse,_diffuse,false);
+        Texture2D? normal=GetTexture(mapping.Normal,_normal,true);
+        Texture2D? specular=GetTexture(mapping.Specular,_specular,false);
+        if(diffuse==null||normal==null||specular==null ||
+           diffuse.GetWidth()!=normal.GetWidth()||
+           diffuse.GetHeight()!=normal.GetHeight()||
+           diffuse.GetWidth()!=specular.GetWidth()||
+           diffuse.GetHeight()!=specular.GetHeight())
+            return null;
+        _diagnosticHairCutoutShader??=new Shader{Code=SourceHairCutoutShader};
+        var material=new ShaderMaterial{Shader=_diagnosticHairCutoutShader};
+        material.SetShaderParameter("original_diffuse",diffuse);
+        material.SetShaderParameter("original_normal",normal);
+        material.SetShaderParameter("original_specular",specular);
+        return material;
+    }
 
     internal Material? LoadMaterial(uint meshId)
     {

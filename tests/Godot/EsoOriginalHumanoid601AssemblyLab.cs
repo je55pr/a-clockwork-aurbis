@@ -35,6 +35,11 @@ public partial class EsoOriginalHumanoid601AssemblyLab:Node3D
     [Export]public bool SelfTest{get;set;}
     public int OriginalHairVertexCount{get;private set;}
     public int OriginalHairBindCount{get;private set;}
+    public bool HasOriginalHairDdsCandidate=>_hairCandidateMaterial!=null;
+    public bool OriginalHairDdsVisible{get;private set;}=true;
+    private MeshInstance3D? _hairInstance;
+    private Material? _hairCandidateMaterial;
+    private Material? _hairNeutralMaterial;
     public int SourcePartCount{get;private set;}
     public int SourceVertexCount{get;private set;}
     public int MergedBoneCount{get;private set;}
@@ -180,17 +185,37 @@ public partial class EsoOriginalHumanoid601AssemblyLab:Node3D
             if(hairMesh.SurfaceGetArrayLen(0)!=OriginalHair.Vertices ||
                hairSkin.GetBindCount()!=OriginalHair.BindingCount)
                 throw new InvalidDataException("Original ESO hair source skin changed");
-            skeleton.AddChild(new MeshInstance3D
+            string hairTextureIds=Path.Combine(Root,"data",
+                "eso_humanoid_hair_texture_candidates.tsv");
+            using(var textures=new EsoOriginalCreatureTextures(
+                Manifest,Oodle,hairTextureIds))
+            {
+                var mapping=textures.SourceMapping(OriginalHair.Id);
+                if(textures.MappingCount!=1||mapping==null||
+                   mapping.Evidence!="archive-neighbor-provisional"||
+                   mapping.Diffuse!=0x0029A877u||
+                   mapping.Normal!=0x0029A879u||
+                   mapping.Specular!=0x0029A87Bu)
+                    throw new InvalidDataException(
+                        "Original hairstyle DDS candidate ID provenance changed");
+                _hairCandidateMaterial=textures.LoadAlphaCutoutMaterial(
+                    OriginalHair.Id)??
+                    throw new InvalidDataException(
+                        "Original female hair DXT5 diffuse/AG normal/specular could not be decoded");
+            }
+            _hairNeutralMaterial=new StandardMaterial3D
+            {
+                AlbedoColor=new Color("#8b919a"),
+                Roughness=0.88f,
+                CullMode=BaseMaterial3D.CullModeEnum.Disabled
+            };
+            _hairInstance=new MeshInstance3D
             {
                 Name="OriginalHair_0029A87F",
                 Mesh=hairMesh,Skin=hairSkin,Skeleton=new NodePath(".."),
-                MaterialOverride=new StandardMaterial3D
-                {
-                    AlbedoColor=new Color("#8b919a"),
-                    Roughness=0.88f,
-                    CullMode=BaseMaterial3D.CullModeEnum.Disabled
-                }
-            });
+                MaterialOverride=_hairCandidateMaterial
+            };
+            skeleton.AddChild(_hairInstance);
             OriginalHairVertexCount=OriginalHair.Vertices;
             OriginalHairBindCount=hairSkin.GetBindCount();
             IsOriginalCustomizationRest=true;
@@ -270,14 +295,12 @@ public partial class EsoOriginalHumanoid601AssemblyLab:Node3D
         {
             Name="Original601Info",
             Position=new Vector2(15,15),
-            Text="ORIGINAL ESO HUMANOID 601\n"+
-                "8 body meshes / 6,751 original vertices\n"+
-                "Original hairstyle / 2,491 vertices / 10 native binds\n"+
-                "110 source customization joints\n"+
-                "98 exact shared source bone references\n"+
-                "SOURCE REST POSE ONLY\n"+
-                "Animation conversion / real skin textures unresolved\n"+
-                "Drag: orbit / Wheel: zoom / Esc: exit"
+            Text="ORIGINAL ESO 601 / SOURCE REST\n"+
+                "8 body parts / 110 source joints\n"+
+                "Hair: 2,491 vertices / 10 native binds\n"+
+                "Hair DDS candidate D/N/S (unverified)\n"+
+                "Skin & animation still unresolved\n"+
+                "T: neutral hair / Drag: orbit / Wheel: zoom"
         };
         label.AddThemeFontSizeOverride("font_size",17);
         canvas.AddChild(label);
@@ -312,7 +335,15 @@ public partial class EsoOriginalHumanoid601AssemblyLab:Node3D
             _pitch=Mathf.Clamp(_pitch-move.Relative.Y*0.004f,-1.1f,1.1f);
             UpdateCamera();
         }
-        else if(evt is InputEventKey key&&key.Pressed&&!key.Echo&&key.Keycode==Key.Escape)
-            GetTree().Quit();
+        else if(evt is InputEventKey key&&key.Pressed&&!key.Echo)
+        {
+            if(key.Keycode==Key.Escape)GetTree().Quit();
+            else if(key.Keycode==Key.T && _hairInstance!=null)
+            {
+                OriginalHairDdsVisible=!OriginalHairDdsVisible;
+                _hairInstance.MaterialOverride=OriginalHairDdsVisible
+                    ?_hairCandidateMaterial:_hairNeutralMaterial;
+            }
+        }
     }
 }

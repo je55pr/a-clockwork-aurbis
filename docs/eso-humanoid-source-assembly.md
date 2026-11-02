@@ -200,14 +200,55 @@ pass native binding against `Head_601`. The selected
 **10/10 exact bone-name bindings** with Granny's native
 `GrannyNewMeshBinding` API against `Head_601`, as well as 10
 rest-matrix checks against the merged 110-bone rig. Its original
-2,491-vertex mesh is shown in the neutral diagnostic viewer.
+2,491-vertex mesh is shown with a switchable provisional source-DDS
+hair material and a neutral diagnostic comparison.
 
 The rest scene has been GPU-rendered locally and shows a complete
 source-authored character silhouette, pointed shoulders and long
-skirt, with attached original hairstyle. Its grey colour is
-**diagnostic only**, not ESO skin, hair, fabric or armour materials.
+skirt, with attached original hairstyle. The **body's grey colour is
+diagnostic only**, not an authentic ESO skin, garment or armour shader.
 The source part family itself is stylised; no ordinary playable-race
 identity or named NPC has been established for it.
+
+### Original hair colour, normals and specular research
+
+The installed archive holds a contiguous four-image DDS group
+immediately before the original `HAR_F_HU_0343` GR2 mesh. The original
+hair's `ZosMaterial` authoring data independently names diffuse,
+normal, specular **and tint-mask** artwork with the matching
+`HAR_F_HU_0343` basename.
+
+| DDS ID | Candidate channel | Native image |
+| --- | --- | --- |
+| `0029A877` | Diffuse plus cutout alpha | 576 × 256 DXT5 |
+| `0029A879` | ESO AG-packed normal | 576 × 256 DXT5 |
+| `0029A87B` | Specular | 576 × 256 DXT5 |
+| `0029A87D` | Possible tint mask, **not yet applied** | 576 × 256 uncompressed DDS |
+
+The source diffuse visibly contains hair strands with alpha ranging
+from 0–255. The original normal image has red near zero, green/alpha
+near 0.5 and blue near 0.84, consistent with ESO's native packed
+tangent-space normal convention. These are **strong archive-neighbour
+candidates**, **not verified runtime material-table links**.
+
+The renderer loads the first three genuine original DDS files directly
+from the installed depot using the small tracked resource-ID index
+`data/eso_humanoid_hair_texture_candidates.tsv`. An isolated
+Godot alpha-cutout shader samples the actual diffuse alpha, converts
+the AG packed normal to XYZ and samples specular luminance. It is a
+**diagnostic shader**, not ESO's precise hair translucency, tinting,
+anisotropic lighting or hairstyle material. In the native-rest scene,
+press `T` to compare the source DDS candidate with neutral hair.
+The original body remains neutrally shaded; authentic skin, eyes and
+garment materials are still unresolved.
+
+The independent source test
+`tests/check_original_humanoid_hair_material.ps1` verifies the
+four real DDS archive resources, all four original authoring-path
+names and the **10/10 native head/hair binding**. The Godot UI
+test verifies the diffuse/normal/specular shader textures, alpha
+cutout and `T` comparison. All extracted DDS files and local GPU
+captures remain ignored under `.research/`.
 
 Important negative checks:
 
