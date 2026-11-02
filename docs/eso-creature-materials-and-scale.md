@@ -48,6 +48,10 @@ The independent source-only `--survey-original-creature-texture-triplets` survey
 
 The batch source index audit (`--audit-original-creature-texture-index`) validates **all 59 candidate associations and all 146 distinct DDS resources** in one native source reader, including dimensions and packed normals. It found a mismatched proposed specular DDS for the older armoured Clannfear (`000A0A51`); that assignment has been disabled rather than falsely presented as original. A new Godot runtime smoke test (`tests/Godot/eso_original_creature_texture_coverage_smoke.tscn`) successfully **decodes and shader-binds all three original DDS channels for 12 newly mapped creature families**: giant spider, werewolf, troll, Mantikora, Fell Sentry, thorn gecko, spider daedra, Dreugh, giant wasp, senche, Guar mount and bear cub. No game graphics were committed and no runtime mesh-to-texture association has been proven from an authoritative actor material table. These additional 50 models are **texture-mapped candidates for future general rendering**, not yet newly animated models in the 13-mesh gallery.
 
+## Static original creature UV/material preview
+
+The noninteractive Godot test scene `tests/Godot/eso_original_creature_static_texture_preview.tscn` loads **four further original ESO creature meshes** from the installed local archive (not approximated mannequins) and applies the source DDS candidate diffuse, packed normal, and specular maps to their original vertex UVs: Giant Spider (2,790 native vertices), Werewolf (3,958), Troll (7,815), and Mantikora (6,030). The source-native rest geometry is shown **without invented skeletal animation**. A local OpenGL hardware render confirmed coherent surface UVs on all four; this is a visual plausibility check, **not proof of ESO's authoritative runtime material mapping**. The matching fail-closed test scene `tests/Godot/eso_original_creature_static_texture_preview_smoke.tscn` checks source identity, original mesh bounds, genuine DDS decoding and all required shader channels. Captured reference images stay in ignored `.research/npc-rigs/`, never Git.
+
 ## What broad texture searches actually established
 
 The read-only `--count-original-dds-atlases` probe counted 1,291,975 manifest records and 99,226 records with common DDS atlas sizes. The narrower `--search-original-dds-atlases` scan examined 10,455 likely BC1 diffuse atlases by decoded mipmap structure against original Clannfear boss art `00023B03`. The source correctly matched itself (score 1.0), but subsequent hits scored at most roughly 0.32. **No distinct runtime match was established, and no new texture ID was invented.** The rankings are stored only in ignored local `.research` files.
@@ -80,6 +84,8 @@ dotnet build EsoTest.csproj
 ./tests/check_original_creature_texture_triplet_survey.ps1
 ./tests/check_original_creature_texture_authoring.ps1
 ./tests/check_original_clannfear_material_family.ps1
+$godot=(Get-Content .research/godot-exe.txt -TotalCount 1).Trim().Replace('.exe','_console.exe')
+& $godot --headless --path . res://tests/Godot/eso_original_creature_static_texture_preview_smoke.tscn --quit-after 450
 ./Launch-ESOTest.ps1 -OriginalCreatureVarietyLab
 ```
 
