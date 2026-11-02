@@ -5,6 +5,14 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using EsoTest;
 
+if(args.Length>0 && args[0]=="--audit-original-resource-hashes")
+    return EsoResourceHashProvenance.Run(args.Skip(1).ToArray());
+
+if(args.Length>0 && args[0]=="--count-original-dds-atlases")
+    return EsoDdsAtlasSearch.Run(args.Skip(1).ToArray(),countOnly:true);
+if(args.Length>0 && args[0]=="--search-original-dds-atlases")
+    return EsoDdsAtlasSearch.Run(args.Skip(1).ToArray(),countOnly:false);
+
 if(args.Length>0 && args[0]=="--probe-embedded-granny-textures")
     return EsoGrannyEmbeddedTextureProbe.Run(args.Skip(1).ToArray());
 

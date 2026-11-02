@@ -52,7 +52,7 @@ func _check() -> void:
         quit(1)
         return
     if FileAccess.file_exists("res://data/eso_creature_texture_candidates.tsv"):
-        if scene.CandidateMaterialCount != 9:
+        if scene.CandidateMaterialCount != 9 or scene.CandidateSpecularCount != 8:
             push_error("Nine original DDS candidate assignments were not loaded")
             quit(1)
             return
@@ -64,20 +64,35 @@ func _check() -> void:
             var candidate: MeshInstance3D = scene.get_node(
                 "SourceCreature_" + types[mapped] +
                 "/NativeCreatureSkeleton/OriginalCreatureMesh")
-            var actual: StandardMaterial3D = candidate.material_override
-            if actual == null or actual.albedo_texture == null:
-                push_error("Mapped creature diffuse DDS missing: " + str(mapped))
-                quit(1)
-                return
+            var actual: Material = candidate.material_override
             var expects_normal: bool = mapped != 1 and mapped != 8
-            if actual.normal_enabled != expects_normal:
-                push_error("Wrong packed-normal classification for creature " + str(mapped))
-                quit(1)
-                return
-            if expects_normal and actual.normal_texture == null:
-                push_error("Original packed-normal DDS did not load: " + str(mapped))
-                quit(1)
-                return
+            var expects_specular: bool = mapped != 12
+            if expects_specular:
+                var source_shader: ShaderMaterial = actual as ShaderMaterial
+                if source_shader == null or source_shader.shader == null:
+                    push_error("Original specular DDS shader missing at index " + str(mapped))
+                    quit(1)
+                    return
+                if not (source_shader.get_shader_parameter("original_diffuse") is Texture2D) \
+                    or not (source_shader.get_shader_parameter("original_specular") is Texture2D):
+                    push_error("Original source diffuse/specular DDS not bound " + str(mapped))
+                    quit(1)
+                    return
+                if source_shader.get_shader_parameter("has_original_normal") != expects_normal:
+                    push_error("Packed-normal classification wrong for " + str(mapped))
+                    quit(1)
+                    return
+                if expects_normal and not (source_shader.get_shader_parameter("original_normal") is Texture2D):
+                    push_error("Source packed-normal DDS absent " + str(mapped))
+                    quit(1)
+                    return
+            else:
+                var standard: StandardMaterial3D = actual as StandardMaterial3D
+                if standard == null or standard.albedo_texture == null or \
+                    standard.normal_enabled != expects_normal:
+                    push_error("Original source diffuse/normal material missing " + str(mapped))
+                    quit(1)
+                    return
         if not scene.HasCandidateMaterial(3):
             push_error("Original Clannfear armoured DDS candidate was not loaded")
             quit(1)

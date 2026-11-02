@@ -93,6 +93,7 @@ public partial class EsoOriginalCreatureWalkGallery:Node3D
     private EsoOriginalCreatureTextures? _textureLibrary;
     private bool _showTextureCandidates=true;
     public int CandidateMaterialCount=>_creatures.Count(c=>c.CandidateMaterial!=null);
+    public int CandidateSpecularCount=>_creatures.Count(c=>c.CandidateMaterial is ShaderMaterial);
     public bool TextureCandidatesVisible=>_showTextureCandidates;
     public bool HasCandidateMaterial(int index)=>_creatures[index].CandidateMaterial!=null;
     private Camera3D? _camera;

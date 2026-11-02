@@ -22,6 +22,9 @@ internal sealed class EsoOriginalCreatureTextures : IDisposable
     private readonly OodleDecoder _oodle;
     private readonly Dictionary<uint,Texture2D?> _diffuse=new();
     private readonly Dictionary<uint,Texture2D?> _normal=new();
+    private readonly Dictionary<uint,Texture2D?> _specular=new();
+    private Shader? _diagnosticSpecularShader;
+    internal int LoadedSpecularCount=>_specular.Count;
     private readonly Dictionary<uint,Mapping> _mappings=new();
     internal int MappingCount=>_mappings.Count;
     internal int LoadedDiffuseCount=>_diffuse.Count;
@@ -61,13 +64,49 @@ internal sealed class EsoOriginalCreatureTextures : IDisposable
     internal Mapping? SourceMapping(uint meshId)=>
         _mappings.TryGetValue(meshId,out var source)?source:null;
 
+    // Diagnostic Godot approximation: the authentic ESO DDS RGB specular
+    // is sampled as varying dielectric reflectivity. This is NOT ESO's
+    // original ZOS standard shader, glossiness, or lighting equations.
+    private const string SourceSpecularShader = """
+        shader_type spatial;
+        render_mode cull_disabled, depth_draw_opaque;
+        uniform sampler2D original_diffuse : source_color, filter_linear_mipmap, repeat_enable;
+        uniform sampler2D original_normal : hint_normal, filter_linear_mipmap, repeat_enable;
+        uniform sampler2D original_specular : source_color, filter_linear_mipmap, repeat_enable;
+        uniform bool has_original_normal = false;
+        void fragment()
+        {
+            ALBEDO = texture(original_diffuse, UV).rgb;
+            ROUGHNESS = 0.78;
+            if (has_original_normal)
+            {
+                NORMAL_MAP = texture(original_normal, UV).rgb;
+                NORMAL_MAP_DEPTH = 1.0;
+            }
+            vec3 source_specular = texture(original_specular, UV).rgb;
+            SPECULAR = clamp(dot(source_specular,
+                vec3(0.2126, 0.7152, 0.0722)), 0.04, 1.0);
+        }
+        """;
+
     internal Material? LoadMaterial(uint meshId)
     {
         var mapping=SourceMapping(meshId);
         if(mapping==null)return null;
         Texture2D? diffuse=mapping.Diffuse!=0?GetTexture(mapping.Diffuse,_diffuse,false):null;
         Texture2D? normal=mapping.Normal!=0?GetTexture(mapping.Normal,_normal,true):null;
+        Texture2D? specular=mapping.Specular!=0?GetTexture(mapping.Specular,_specular,false):null;
         if(diffuse==null)return null;
+        if(specular!=null)
+        {
+            _diagnosticSpecularShader??=new Shader{Code=SourceSpecularShader};
+            var shaderMaterial=new ShaderMaterial{Shader=_diagnosticSpecularShader};
+            shaderMaterial.SetShaderParameter("original_diffuse",diffuse);
+            shaderMaterial.SetShaderParameter("original_normal",normal??diffuse);
+            shaderMaterial.SetShaderParameter("original_specular",specular);
+            shaderMaterial.SetShaderParameter("has_original_normal",normal!=null);
+            return shaderMaterial;
+        }
         var material=new StandardMaterial3D
         {
             AlbedoColor=Colors.White,AlbedoTexture=diffuse,

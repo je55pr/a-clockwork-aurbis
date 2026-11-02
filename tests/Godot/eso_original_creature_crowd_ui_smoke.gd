@@ -61,6 +61,10 @@ func _check() -> void:
         quit(1)
         return
     if FileAccess.file_exists("res://data/eso_creature_texture_candidates.tsv"):
+        if scene.CandidateSpecularCount != 2:
+            push_error("Two original ESO crowd species lost their source specular shaders")
+            quit(1)
+            return
         var copy: MeshInstance3D = scene.get_node("OriginalCrowd_Guar_001/NativeCreatureSkeleton/OriginalCreatureMesh")
         var source_mat: Material = copy.material_override
         if source_mat == null or source_mat != primary[2].material_override:

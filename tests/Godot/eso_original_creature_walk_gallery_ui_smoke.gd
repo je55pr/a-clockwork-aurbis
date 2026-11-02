@@ -50,16 +50,20 @@ func _run() -> void:
     # When present, the UI must actually decode source DDS for the mapped
     # species and let us compare it with the neutral diagnostic material.
     if FileAccess.file_exists("res://data/eso_creature_texture_candidates.tsv"):
-        if scene.CandidateMaterialCount != 2 or scene.HasCandidateMaterial(0) \
+        if scene.CandidateMaterialCount != 2 or scene.CandidateSpecularCount != 2 \
+            or scene.HasCandidateMaterial(0) \
             or not scene.HasCandidateMaterial(1) or not scene.HasCandidateMaterial(2):
             push_error("Local original creature DDS mapping was not loaded correctly")
             quit(1)
             return
         var guar_mesh: MeshInstance3D = creatures[2].get_node("NativeCreatureSkeleton/OriginalCreatureMesh")
-        var source_material: StandardMaterial3D = guar_mesh.material_override
-        if source_material.albedo_texture == null or not source_material.normal_enabled \
-            or source_material.normal_texture == null:
-            push_error("Original source Guar DDS diffuse/packed normal did not load")
+        var source_material: ShaderMaterial = guar_mesh.material_override as ShaderMaterial
+        if source_material == null \
+            or not (source_material.get_shader_parameter("original_diffuse") is Texture2D) \
+            or not (source_material.get_shader_parameter("original_specular") is Texture2D) \
+            or not source_material.get_shader_parameter("has_original_normal") \
+            or not (source_material.get_shader_parameter("original_normal") is Texture2D):
+            push_error("Original source Guar DDS diffuse/normal/specular did not load")
             quit(1)
             return
         key(scene, KEY_T)
