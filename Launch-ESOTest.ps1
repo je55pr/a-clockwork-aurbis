@@ -6,6 +6,7 @@ param(
     [switch]$RigLab,
     [switch]$WalkComparisonLab,
     [switch]$HybridHeadLab,
+    [switch]$OriginalHybridArmsLab,
     [switch]$OriginalSkinnedBodyLab,
     [switch]$OriginalBodyWalkComparisonLab,
     [switch]$OriginalFaceGallery,
@@ -159,6 +160,7 @@ try {
     if ($RigLab) { $arguments += ' "res://scenes/eso_native_animation_lab.tscn"' }
     if ($WalkComparisonLab) { $arguments += ' "res://scenes/eso_walk_comparison_lab.tscn"' }
     if ($HybridHeadLab) { $arguments += ' "res://scenes/eso_hybrid_head_lab.tscn"' }
+    if ($OriginalHybridArmsLab) { $arguments += ' "res://scenes/eso_original_hybrid_arms_lab.tscn"' }
     if ($OriginalSkinnedBodyLab) { $arguments += ' "res://scenes/eso_original_skinned_body_lab.tscn"' }
     if ($OriginalBodyWalkComparisonLab) { $arguments += ' "res://scenes/eso_original_body_walk_comparison.tscn"' }
     if ($OriginalFaceGallery) { $arguments += ' "res://scenes/eso_original_face_gallery.tscn"' }

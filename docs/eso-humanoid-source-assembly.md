@@ -276,6 +276,67 @@ Reproduce the source-built complete humanoid with:
 - All derived mesh data, screenshots and decoder libraries stay
   under ignored `.research/`, not Git.
 
+## Original hybrid-body animation audit (2026-11-02)
+
+The original `CustomizationSkeleton` source catalogue now has a bounded,
+explicit `--scan-character-assemblies ... CustomizationSkeleton` mode
+in addition to the existing `Bip01` mode. An offline local scan of
+**13,060** archive sources found **24** actual skeletons containing both
+`defBn_*` and `mshBn_*` branches, and **28** original mesh sources
+with `mshBn_*` bindings. The full catalogue, native source metadata,
+and comparison CSV stay in ignored `.research/`.
+
+Comparing **all 24** hybrid skeletons against ESO's separate original
+202-bone `GrannyRootBone` humanoid animation rig `000020A2` yields
+only **three** fully compatible *animation-branch skeleton subsets*
+at a 0.0005 inverse-rest tolerance. Crucially, that alone **does not**
+mean three meshes are directly attachable to the runtime animation rig.
+The source includes different customization skin bindings; most of the
+other hybrid models have incompatible animation rest matrices.
+
+Two independently identified original lower-arm models are especially
+useful:
+
+| ESO original mesh | GR2 ID | Vertices / triangles | Hybrid skeleton | Source skin |
+| --- | --- | --- | --- | --- |
+| `ArmsLower_062` | `000E35AF` | 528 / 876 | 30 bones, 13 exact animated branch matches | 8 native animation + 4 customization bindings |
+| `ArmsLower_061` | `000E3851` | 740 / 936 | 30 bones, 13 exact animated branch matches | 8 native animation + 4 customization bindings |
+
+Their `mshCtrl_body` and 12 `mshBn_*` joints agree with the original
+202-bone animation rig by **name, parent, and inverse-world rest
+matrix** (max matrix-component delta 0.0000524). Importantly, a native
+`GrannyNewMeshBinding` attempt against the **whole 202-bone rig**
+reports **8/12 exact** bindings and **4/12 rejected fallback
+mismatches**, because `arm_4_L`, `arm_4_R`, `arm_5_L` and
+`arm_5_R` are genuine, different customization joints.
+**We do not silently collapse them onto the runtime root or retarget
+their skin weights.**
+
+The standalone original-arm scene
+`./Launch-ESOTest.ps1 -OriginalHybridArmsLab` shows both source
+meshes with their original vertex weights and separate original 30-bone
+hybrid hierarchies. Only the 13 independently verified original
+animation joints receive ESO's **actual `GEN_Walk`** clip
+`0004C319`, sampled by the installed native Granny engine on
+`000020A2` at 60 Hz (**70 frames**). The original customization
+joints remain at their unmodified rest transforms.
+
+The source smoke test independently compares animated Godot joint
+origins against Granny native world-pose samples at five frames. Across
+both models the maximum deviation observed is **0.0000005 metres**.
+The UI test checks the two real meshes, their binding counts,
+unchanged customization poses, frame stepping, pause and orbit zoom.
+The script `tests/check_original_hybrid_arm_animation.ps1`
+independently asserts Granny's **8 exact / 4 rejected** source
+binding verdict for both assets.
+
+These are **isolated lower-arm animation diagnostics**, not complete
+NPCs, not an approved `defBn_ -> mshBn_` retarget, and not real
+garment materials. The unrelated full-body `601` rest assembly above
+still has **zero exact common bone names** with the 202-bone animation
+rig. Recovering the original customization/deformation bridge and
+runtime skin/material asset assignments remains the primary blocker.
+
 ## Six original walking styles on the complete source-skinned creature
 
 The `VoriplasticCorpse` source mesh (`0x0015D6CD`) is shown by UESP

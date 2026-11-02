@@ -45,9 +45,9 @@ internal static class CharacterAssemblyCatalogue
         string? Error);
     public static unsafe int Run(string[] args)
     {
-        if(args.Length<5)
+        if(args.Length is <5 or >6)
         {
-            Console.Error.WriteLine("Usage: --scan-character-assemblies <granny.dll> <manifest> <oodle> <model-index.tsv> <out.json>");
+            Console.Error.WriteLine("Usage: --scan-character-assemblies <granny.dll> <manifest> <oodle> <model-index.tsv> <out.json> [Bip01|CustomizationSkeleton]");
             return 2;
         }
         string GetB64(string b)
@@ -55,13 +55,16 @@ internal static class CharacterAssemblyCatalogue
             try{return Encoding.UTF8.GetString(Convert.FromBase64String(b));}
             catch(FormatException){return "";}
         }
+        string rootFilter=args.Length==6?args[5]:"Bip01";
+        if(rootFilter is not ("Bip01" or "CustomizationSkeleton"))
+            throw new ArgumentException("Only original humanoid root hierarchies are supported");
         var candidates=new List<ModelIndex>();
         foreach(string row in File.ReadLines(args[3]).Skip(1))
         {
             var cols=row.Split('\t');
             if(cols.Length<12||cols[5]!="OK")continue;
             string model=GetB64(cols[7]);
-            if(model!="Bip01")continue;
+            if(model!=rootFilter)continue;
             if(!uint.TryParse(cols[0],NumberStyles.HexNumber,
                 CultureInfo.InvariantCulture,out uint id))continue;
             candidates.Add(new ModelIndex(id,model,GetB64(cols[8])));
@@ -199,7 +202,7 @@ internal static class CharacterAssemblyCatalogue
                 new JsonSerializerOptions{WriteIndented=true}));
             File.Move(output+".tmp",output,true);
             Console.WriteLine($"Native ESO GR2 character assembly catalog: " +
-                $"{candidates.Count} BIP01 model sources, {result.Count-errors} inspected, " +
+                $"{candidates.Count} {rootFilter} model sources, {result.Count-errors} inspected, " +
                 $"{hybrid} hybrid skeletons, {mshMesh} mesh sources referencing mshBn, " +
                 $"{errors} failures. Metadata-only output: {output}");
             // Only report the actual combined animation/customization rigs
