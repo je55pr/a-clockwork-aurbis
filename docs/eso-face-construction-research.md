@@ -122,3 +122,52 @@ Tests:
 
 The currently shipped Auridon visual layer remains untouched by
 this isolated research prototype.
+
+## Original material metadata and archive texture tracing (2026-11-02)
+
+The experimental read-only `--audit-character-material` command inspects
+**native Granny material bindings and typed ZosMaterial extended data**, rather
+than assuming that a zero embedded texture count means no material metadata.
+Results below were checked against the installed ESO archive.
+
+- `0x0029B2AF` (`HAR_M_HU_0343`): one native `ZosMaterial`. Its source
+  paths refer to `Characters\\Dynamic\\Hairs\\HAR_F_HU_0343` and include
+  `HAR_F_HU_0343_D.tga` (diffuse), `har_f_hu_0343_n.tga` (normal),
+  `har_f_hu_0343_s.tga` (specular) and `har_f_hu_0343_t.tga` (tint).
+  Source path spelling and male/female filename mismatch are reported
+  verbatim, not corrected.
+- `0x00129B5D` (`Head_008`): **zero native material bindings**.
+  This GR2 gives no direct face-skin texture link.
+- `0x000E2CFF` (`Head_004`): refers to original
+  `Characters\\Skins\\Mannequin\\Textures\\MannequinM_D.tga`
+  and other mannequin artwork, **not** an elven skin material.
+- `0x001076DD` (`Head_600`), `0x000DEE57` (`Head_502`)
+  and `0x000DEE59` (`Head_503`) have native material metadata typed
+  `Standard`, not a resolved skin assignment. `Head_601`
+  (`0x001230E1`) has no native material bindings.
+
+The local ZOSFT filename index has 95,798 resource path rows in
+`.research/asset-paths.tsv`, but no indexed path for these
+character hair or skin texture names. Source-art TGA paths cannot yet
+be directly resolved to in-game DDS resource IDs through this table.
+
+`--audit-resource-neighbors` found nearby DDS records, while
+`--extract-original-dds` can inspect selected original DDS files
+only under ignored local `.research/`. **Numeric proximity is not
+a texture link:** resources adjacent to the hairstyle include
+`SYS_INC_Books*` and `CAV_JUN_RockSmallGlo002` models.
+No candidate DDS has been assigned to a head or hair material.
+
+Reproduce locally using installed ESO assets:
+
+```powershell
+dotnet build tools/ModelGeometry/ModelGeometry.csproj
+./tests/check_original_character_material_sources.ps1
+dotnet tools/ModelGeometry/bin/Debug/net8.0/ModelGeometry.dll --audit-character-material "C:/ESO/The Elder Scrolls Online/game/client/granny2_x64.dll" 0029B2AF "C:/ESO/The Elder Scrolls Online/depot/eso.mnf" .research/ooz.dll
+```
+
+**Next unresolved link:** determine ESO's authoritative runtime
+appearance/material assignments and the actual DDS IDs before applying
+any original skin, eyes or hair tint in Godot. The original-face gallery
+remains correctly neutral for now. No original texture or proprietary
+game library is tracked in Git.

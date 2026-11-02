@@ -5,6 +5,15 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using EsoTest;
 
+if(args.Length>0 && args[0]=="--extract-original-dds")
+    return EsoLocalDdsCandidate.Run(args.Skip(1).ToArray());
+
+if(args.Length>0 && args[0]=="--audit-resource-neighbors")
+    return EsoResourceNeighbors.Run(args.Skip(1).ToArray());
+
+if(args.Length>0 && args[0]=="--audit-character-material")
+    return EsoCharacterMaterialAudit.Run(args.Skip(1).ToArray());
+
 if(args.Length>0 && args[0]=="--inspect-face-colors")
     return FaceVertexColorInspector.Run(args.Skip(1).ToArray());
 
