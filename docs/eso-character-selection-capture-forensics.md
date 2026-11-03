@@ -118,8 +118,13 @@ alpha range of 0–255. The second's decoded mean RGB is approximately
 `(0, 0.503, 1)` with mean alpha `0.498`, consistent with the
 original ESO AG packed-normal convention. The third is predominantly
 greyscale and the fourth is predominantly a red-channel mask.
-This reproduces the same source layout previously seen near other
-original ESO hairstyles.
+The original 32-bit BGRA tint candidate `0002E5E1` has almost
+exclusively black-or-white red values, near-zero green/blue,
+and **constant zero alpha**, unlike the related original
+`0029A87D` tint candidate, whose alpha is **constant 255**.
+Neither alpha value can safely be assumed to represent actual dye
+intensity. This reproduces the same source layout previously seen
+near other original ESO hairstyles.
 
 **Evidence classification: strong structural + original-art-path
 association, still provisional.** No captured draw call or native
@@ -141,10 +146,12 @@ paths are real, but they are **not validated plug-in replacements**.
 
 1. **Model a four-channel material bundle.** Character hair, body
    equipment and adornments expose D/N/S/T artwork references.
-   The current isolated diagnostic hair shader uses D/N/S but leaves
-   tint masks unresolved; the recovered mostly red-channel tint
-   resource reinforces the need to investigate per-character colour
-   parameters instead of assuming the source grey hair is final.
+   The existing source hair shader now accepts all four actual
+   candidate DDS textures, including strict decoding of original
+   **uncompressed BGRA8** tint masks. **`Y` toggles a red-channel
+   grayscale diagnostic** on genuinely skin-compatible source hair,
+   but does not guess the original game dye or substitute alpha
+   for the red mask. `T` still compares source and neutral hair.
 2. **Resolve material filenames to shipped DDS IDs separately.**
    Granny authoring paths, model file IDs, neighbouring DDS
    quartets and compressed-channel inspection give strong
@@ -178,6 +185,17 @@ dotnet $tool --audit-resource-neighbors $manifest .research\ooz.dll 0002E5E3 30
 dotnet $tool --inspect-native-external-binding $granny 0002E5E3 001076DD $manifest .research\ooz.dll
 ```
 
-The original candidate DDS bytes, debug contact sheet and original
-selection screenshots remain under ignored
-`.research/live-eso-selection/` only.
+The new source-only `data/eso_captured_hair_material_candidates.tsv`
+tracks the provisional `0002E5E3` to four-DDS relationship.
+`tests/check_original_captured_hair_quartet.ps1` checks all
+four of the original GR2 authoring file paths, the three DXT5 images,
+the original BGRA8 tint image and the deliberately incompatible
+12/13 Granny binding to `Head_600`. The Godot headless test
+`res://tests/Godot/eso_original_captured_hair_tint_smoke.tscn`
+checks all three mapped original hair models, mask-channel ranges,
+source image dimensions and shader diagnostic mode. The captured
+`3210` hairstyle is **not** silently attached to a head.
+
+The original candidate DDS bytes, debug contact sheet, derived
+local GPU tint-mode captures and original selection screenshots
+remain under ignored `.research/live-eso-selection/` only.

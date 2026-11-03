@@ -1,0 +1,5 @@
+# Captured hair artwork path HAR_M_HU_3210 D/N/S/T is confirmed in original mesh
+# 0002E5E3. The archive quartet immediately preceding the mesh is source data,
+# NOT a verified live GPU draw-call or authoritative material-ID binding.
+# mesh-id diffuse packed-normal specular tint-mask evidence
+0002E5E3	0002E5DB	0002E5DD	0002E5DF	0002E5E1	archive-triplet-authoring-provisional

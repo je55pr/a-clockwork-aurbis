@@ -9,7 +9,7 @@ using Godot;
 namespace EsoTest;
 
 /// <summary>
-/// Source-only DDS loader for experimental ESO creature materials.
+/// Source-only DDS loader for experimental ESO creature and hair materials.
 /// The optional mesh-to-DDS assignments come ONLY from a local research
 /// manifest, never from unverified numeric proximity or inferred colors.
 /// The genuine bytes are read on demand from the installed game archives.
@@ -17,12 +17,14 @@ namespace EsoTest;
 /// </summary>
 internal sealed class EsoOriginalCreatureTextures : IDisposable
 {
-    internal sealed record Mapping(uint MeshId,uint Diffuse,uint Normal,uint Specular,string Evidence);
+    internal sealed record Mapping(uint MeshId,uint Diffuse,uint Normal,uint Specular,uint Tint,string Evidence);
     private readonly EsoArchive _archive;
     private readonly OodleDecoder _oodle;
     private readonly Dictionary<uint,Texture2D?> _diffuse=new();
     private readonly Dictionary<uint,Texture2D?> _normal=new();
     private readonly Dictionary<uint,Texture2D?> _specular=new();
+    private readonly Dictionary<uint,Texture2D?> _tint=new();
+    internal int LoadedTintCount=>_tint.Count;
     private Shader? _diagnosticSpecularShader;
     private Shader? _diagnosticHairCutoutShader;
     internal int LoadedSpecularCount=>_specular.Count;
@@ -53,16 +55,20 @@ internal sealed class EsoOriginalCreatureTextures : IDisposable
             string text=line.Trim();
             if(text.Length==0||text.StartsWith('#'))continue;
             var fields=text.Split('\t');
-            if(fields.Length is not (4 or 5) ||
+            if(fields.Length is not (4 or 5 or 6) ||
                !uint.TryParse(fields[0],NumberStyles.HexNumber,CultureInfo.InvariantCulture,out uint mesh)||
                !uint.TryParse(fields[1],NumberStyles.HexNumber,CultureInfo.InvariantCulture,out uint diffuse)||
                !uint.TryParse(fields[2],NumberStyles.HexNumber,CultureInfo.InvariantCulture,out uint normal)||
                (diffuse==0&&normal==0))
                 throw new InvalidDataException("Bad original ESO texture-candidate fields: "+text);
             uint specular=0;
-            if(fields.Length==5 &&
+            if(fields.Length>=5 &&
                !uint.TryParse(fields[3],NumberStyles.HexNumber,CultureInfo.InvariantCulture,out specular))
                 throw new InvalidDataException("Bad original ESO specular texture candidate: "+text);
+            uint tint=0;
+            if(fields.Length==6 &&
+               !uint.TryParse(fields[4],NumberStyles.HexNumber,CultureInfo.InvariantCulture,out tint))
+                throw new InvalidDataException("Bad original ESO tint-mask texture candidate: "+text);
             string evidence=fields[^1];
             if(evidence is not ("uv-provisional" or "source-verified" or
                  "archive-neighbor-provisional" or "archive-triplet-provisional" or
@@ -71,7 +77,7 @@ internal sealed class EsoOriginalCreatureTextures : IDisposable
             if(!seenInThisFile.Add(mesh) ||
                (_mappings.Count>=5000 && !_mappings.ContainsKey(mesh)))
                 throw new InvalidDataException("Duplicate or excessive original material mapping");
-            var entry=new Mapping(mesh,diffuse,normal,specular,evidence);
+            var entry=new Mapping(mesh,diffuse,normal,specular,tint,evidence);
             if(allowLocalOverrides)
                 _mappings[mesh]=entry;
             else if(!_mappings.TryAdd(mesh,entry))
@@ -116,6 +122,10 @@ internal sealed class EsoOriginalCreatureTextures : IDisposable
         uniform sampler2D original_diffuse : source_color, filter_linear_mipmap, repeat_enable;
         uniform sampler2D original_normal : hint_normal, filter_linear_mipmap, repeat_enable;
         uniform sampler2D original_specular : source_color, filter_linear_mipmap, repeat_enable;
+        // Source data only. No invented dye, tint weighting or skin shader.
+        uniform sampler2D original_tint_mask : filter_linear_mipmap, repeat_enable;
+        uniform bool has_original_tint = false;
+        uniform int tint_debug_view = 0;
         void fragment()
         {
             vec4 d=texture(original_diffuse,UV);
@@ -127,12 +137,20 @@ internal sealed class EsoOriginalCreatureTextures : IDisposable
             ROUGHNESS=0.8;
             vec3 s=texture(original_specular,UV).rgb;
             SPECULAR=clamp(dot(s,vec3(0.2126,0.7152,0.0722)),0.04,1.0);
+            // Diagnostic mode: display the ACTUAL source tint mask's red
+            // channel as grayscale. Do not modify the source cutout alpha.
+            if (has_original_tint && tint_debug_view == 1)
+            {
+                ALBEDO = vec3(texture(original_tint_mask, UV).r);
+                SPECULAR = 0.04;
+            }
         }
         """;
 
     /// <summary>
     /// Source-only hair-material candidate. Requires real original diffuse,
-    /// AG packed normal and specular images with matching dimensions.
+    /// AG packed normal, specular and, when declared, strict BGRA tint-mask
+    /// images with matching dimensions. Tinting remains diagnostic only.
     /// This does not certify ESO's runtime image assignment/tint.
     /// </summary>
     internal ShaderMaterial? LoadAlphaCutoutMaterial(uint meshId)
@@ -144,17 +162,24 @@ internal sealed class EsoOriginalCreatureTextures : IDisposable
         Texture2D? diffuse=GetTexture(mapping.Diffuse,_diffuse,false);
         Texture2D? normal=GetTexture(mapping.Normal,_normal,true);
         Texture2D? specular=GetTexture(mapping.Specular,_specular,false);
+        Texture2D? tint=mapping.Tint!=0?GetTexture(mapping.Tint,_tint,false):null;
         if(diffuse==null||normal==null||specular==null ||
+           (mapping.Tint!=0&&tint==null) ||
            diffuse.GetWidth()!=normal.GetWidth()||
            diffuse.GetHeight()!=normal.GetHeight()||
            diffuse.GetWidth()!=specular.GetWidth()||
-           diffuse.GetHeight()!=specular.GetHeight())
+           diffuse.GetHeight()!=specular.GetHeight()||
+           (tint!=null&&(diffuse.GetWidth()!=tint.GetWidth()||
+                          diffuse.GetHeight()!=tint.GetHeight())))
             return null;
         _diagnosticHairCutoutShader??=new Shader{Code=SourceHairCutoutShader};
         var material=new ShaderMaterial{Shader=_diagnosticHairCutoutShader};
         material.SetShaderParameter("original_diffuse",diffuse);
         material.SetShaderParameter("original_normal",normal);
         material.SetShaderParameter("original_specular",specular);
+        material.SetShaderParameter("has_original_tint",tint!=null);
+        material.SetShaderParameter("tint_debug_view",0);
+        if(tint!=null)material.SetShaderParameter("original_tint_mask",tint);
         return material;
     }
 
@@ -288,16 +313,31 @@ internal sealed class EsoOriginalCreatureTextures : IDisposable
             0x35545844u=>16, // BC3 / DXT5
             _=>0
         };
-        if(block==0||width is <4 or >4096||height is <4 or >4096)
+        if(width is <4 or >4096||height is <4 or >4096)
             return null;
-        uint linearSize=checked(((width+3u)/4u)*((height+3u)/4u)*(uint)block);
+        // The original hair tint masks are uncompressed 32-bit BGRA DDS.
+        // Permit only that well-specified source pixel format, not arbitrary
+        // DDS data mislabeled as an uncompressed image.
+        if(block==0 && (codec!=0||
+           BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(80,4))!=0x41u||
+           BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(88,4))!=32u||
+           BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(92,4))!=0x00FF0000u||
+           BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(96,4))!=0x0000FF00u||
+           BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(100,4))!=0x000000FFu||
+           BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(104,4))!=0xFF000000u))
+            return null;
+        uint linearSize=block==0?checked(width*height*4u):
+            checked(((width+3u)/4u)*((height+3u)/4u)*(uint)block);
         if(bytes.Length<128+linearSize)return null;
         uint flags=BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(8,4));
         // ESO sometimes stores nonstandard pitch/linear-size fields. Patch
         // only a private in-memory copy, preserving the installed source.
-        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(8,4),
-            (flags|0x80000u)&~0x8u);
-        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(20,4),linearSize);
+        if(block!=0)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(8,4),
+                (flags|0x80000u)&~0x8u);
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(20,4),linearSize);
+        }
         var image=new Image();
         if(image.LoadDdsFromBuffer(bytes)!=Error.Ok||image.IsEmpty())
         {image.Dispose();return null;}

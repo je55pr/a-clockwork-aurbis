@@ -20,7 +20,7 @@ Push-Location -LiteralPath $root
 try{
     $rows=@([IO.File]::ReadAllLines($mapping)|Where-Object {$_ -match '^[0-9A-F]{8}\t'})
     if($rows.Count -ne 1 -or ($rows[0].Split([char]9) -join '|') -cne
-        '0029B2AF|0029A877|0029A879|0029A87B|archive-triplet-authoring-provisional'){
+        '0029B2AF|0029A877|0029A879|0029A87B|0029A87D|archive-triplet-authoring-provisional'){
         throw 'Original male hairstyle candidate source identity changed'
     }
     $materials=@{}

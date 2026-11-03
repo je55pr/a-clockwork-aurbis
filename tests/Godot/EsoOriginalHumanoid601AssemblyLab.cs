@@ -37,8 +37,9 @@ public partial class EsoOriginalHumanoid601AssemblyLab:Node3D
     public int OriginalHairBindCount{get;private set;}
     public bool HasOriginalHairDdsCandidate=>_hairCandidateMaterial!=null;
     public bool OriginalHairDdsVisible{get;private set;}=true;
+    public bool OriginalHairTintMaskVisible{get;private set;}
     private MeshInstance3D? _hairInstance;
-    private Material? _hairCandidateMaterial;
+    private ShaderMaterial? _hairCandidateMaterial;
     private Material? _hairNeutralMaterial;
     public int SourcePartCount{get;private set;}
     public int SourceVertexCount{get;private set;}
@@ -195,7 +196,8 @@ public partial class EsoOriginalHumanoid601AssemblyLab:Node3D
                    mapping.Evidence!="archive-neighbor-provisional"||
                    mapping.Diffuse!=0x0029A877u||
                    mapping.Normal!=0x0029A879u||
-                   mapping.Specular!=0x0029A87Bu)
+                   mapping.Specular!=0x0029A87Bu||
+                   mapping.Tint!=0x0029A87Du)
                     throw new InvalidDataException(
                         "Original hairstyle DDS candidate ID provenance changed");
                 _hairCandidateMaterial=textures.LoadAlphaCutoutMaterial(
@@ -298,9 +300,10 @@ public partial class EsoOriginalHumanoid601AssemblyLab:Node3D
             Text="ORIGINAL ESO 601 / SOURCE REST\n"+
                 "8 body parts / 110 source joints\n"+
                 "Hair: 2,491 vertices / 10 native binds\n"+
-                "Hair DDS candidate D/N/S (unverified)\n"+
+                "Hair DDS candidate D/N/S/T (unverified)\n"+
                 "Skin & animation still unresolved\n"+
-                "T: neutral hair / Drag: orbit / Wheel: zoom"
+                "T: neutral hair / Y: source tint-mask R (diagnostic)\n"+
+                "Drag: orbit / Wheel: zoom"
         };
         label.AddThemeFontSizeOverride("font_size",17);
         canvas.AddChild(label);
@@ -338,6 +341,12 @@ public partial class EsoOriginalHumanoid601AssemblyLab:Node3D
         else if(evt is InputEventKey key&&key.Pressed&&!key.Echo)
         {
             if(key.Keycode==Key.Escape)GetTree().Quit();
+            else if(key.Keycode==Key.Y && _hairCandidateMaterial!=null)
+            {
+                OriginalHairTintMaskVisible=!OriginalHairTintMaskVisible;
+                _hairCandidateMaterial.SetShaderParameter("tint_debug_view",
+                    OriginalHairTintMaskVisible?1:0);
+            }
             else if(key.Keycode==Key.T && _hairInstance!=null)
             {
                 OriginalHairDdsVisible=!OriginalHairDdsVisible;

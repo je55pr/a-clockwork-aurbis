@@ -85,6 +85,27 @@ func _check() -> void:
             push_error("Original ESO hairstyle DDS missing: " + channel)
             quit(1)
             return
+    var source_mask: Texture2D = original_material.get_shader_parameter("original_tint_mask")
+    if source_mask == null or not original_material.get_shader_parameter("has_original_tint") \
+        or source_mask.get_width() != 576 or source_mask.get_height() != 256:
+        push_error("Original 601 hair fourth tint DDS missing or mismatched")
+        quit(1)
+        return
+    var mask_key := InputEventKey.new()
+    mask_key.keycode = KEY_Y
+    mask_key.pressed = true
+    scene._Input(mask_key)
+    if not scene.OriginalHairTintMaskVisible \
+        or original_material.get_shader_parameter("tint_debug_view") != 1:
+        push_error("Original 601 source red-tint-mask diagnostic failed")
+        quit(1)
+        return
+    scene._Input(mask_key)
+    if scene.OriginalHairTintMaskVisible \
+        or original_material.get_shader_parameter("tint_debug_view") != 0:
+        push_error("Original 601 source hair diagnostic not reset")
+        quit(1)
+        return
     var neutral_key := InputEventKey.new()
     neutral_key.keycode = KEY_T
     neutral_key.pressed = true
@@ -112,5 +133,5 @@ func _check() -> void:
         push_error("Original humanoid 601 rest inspection zoom broken")
         quit(1)
         return
-    print("PASS original ESO 601 full humanoid: 8 real body parts / 6751 vertices / original 2491-vertex hair (10/10 binds) / 110 merged customization bones / 98 identical source rests and parents; native skins; zoom; no guessed animation")
+    print("PASS original ESO 601 full humanoid: 8 real body parts / 6751 vertices / original 2491-vertex hair (10/10 binds) / 110 merged customization bones / 98 identical source rests and parents; native skins; four source DDS channels; red-mask Y toggle; zoom; no guessed animation")
     quit(0)

@@ -79,6 +79,24 @@ func _run() -> void:
     var original_hair: MeshInstance3D = figures[1].get_node(
         "OriginalCustomizationSkeleton/OriginalSourceHair_0029B2AF")
     var initial_material: Material = original_hair.material_override
+    var diagnostic: ShaderMaterial = initial_material as ShaderMaterial
+    if diagnostic == null or not diagnostic.get_shader_parameter("has_original_tint") \
+        or not (diagnostic.get_shader_parameter("original_tint_mask") is Texture2D):
+        push_error("Original high-detail hair tint-mask DDS is absent")
+        quit(1)
+        return
+    press(scene, KEY_Y)
+    if not scene.SourceHairTintMaskVisible \
+        or diagnostic.get_shader_parameter("tint_debug_view") != 1:
+        push_error("Original hair red-tint-mask diagnostic failed")
+        quit(1)
+        return
+    press(scene, KEY_Y)
+    if scene.SourceHairTintMaskVisible \
+        or diagnostic.get_shader_parameter("tint_debug_view") != 0:
+        push_error("Original hair diagnostic mode did not restore")
+        quit(1)
+        return
     press(scene, KEY_T)
     if scene.SourceDdsHairVisible or original_hair.material_override == initial_material:
         push_error("Neutral original head hair comparison not enabled")
@@ -115,5 +133,5 @@ func _run() -> void:
         push_error("Face gallery orbit camera zoom control failed")
         quit(1)
         return
-    print("PASS original ESO face construction UI: 6 true head assets, 6530-vertex high-detail face, 2 source-exact 2841-vertex hair skins with 12/12 binds, shared-authoring provisional original D/N/S hair textures, T toggle, focus and zoom")
+    print("PASS original ESO face construction UI: 6 true head assets, 6530-vertex high-detail face, 2 source-exact 2841-vertex hair skins with 12/12 binds, shared-authoring provisional original D/N/S/T hair textures, T/Y diagnostics, focus and zoom")
     quit(0)

@@ -18,8 +18,8 @@ try{
     $rows=@([IO.File]::ReadAllLines($index)|Where-Object {$_ -match '^[0-9A-F]{8}\t'})
     if($rows.Count -ne 1){throw 'Expected exactly one original humanoid hair source candidate'}
     $f=$rows[0].Split([char]9)
-    if($f.Length -ne 5 -or
-       ($f -join '|') -cne '0029A87F|0029A877|0029A879|0029A87B|archive-neighbor-provisional'){
+    if($f.Length -ne 6 -or
+       ($f -join '|') -cne '0029A87F|0029A877|0029A879|0029A87B|0029A87D|archive-neighbor-provisional'){
         throw 'Original ESO hair DDS candidate evidence changed'
     }
     $native=(& dotnet $tool --inspect-native-binding $granny 0029A87F 001230E1 $manifest $oodle 2>&1|Out-String)

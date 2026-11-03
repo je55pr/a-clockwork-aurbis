@@ -215,7 +215,7 @@ diagnostic only**, not an authentic ESO skin, garment or armour shader.
 The source part family itself is stylised; no ordinary playable-race
 identity or named NPC has been established for it.
 
-### Original hair colour, normals and specular research
+### Original hair colour, normals, specular and tint-mask research
 
 The installed archive holds a contiguous four-image DDS group
 immediately before the original `HAR_F_HU_0343` GR2 mesh. The original
@@ -228,7 +228,7 @@ normal, specular **and tint-mask** artwork with the matching
 | `0029A877` | Diffuse plus cutout alpha | 576 × 256 DXT5 |
 | `0029A879` | ESO AG-packed normal | 576 × 256 DXT5 |
 | `0029A87B` | Specular | 576 × 256 DXT5 |
-| `0029A87D` | Possible tint mask, **not yet applied** | 576 × 256 uncompressed DDS |
+| `0029A87D` | Provisional tint mask; **red-channel diagnostic only** | 576 × 256 uncompressed DDS |
 
 The source diffuse visibly contains hair strands with alpha ranging
 from 0–255. The original normal image has red near zero, green/alpha
@@ -236,24 +236,39 @@ near 0.5 and blue near 0.84, consistent with ESO's native packed
 tangent-space normal convention. These are **strong archive-neighbour
 candidates**, **not verified runtime material-table links**.
 
-The renderer loads the first three genuine original DDS files directly
-from the installed depot using the small tracked resource-ID index
-`data/eso_humanoid_hair_texture_candidates.tsv`. An isolated
-Godot alpha-cutout shader samples the actual diffuse alpha, converts
-the AG packed normal to XYZ and samples specular luminance. It is a
-**diagnostic shader**, not ESO's precise hair translucency, tinting,
-anisotropic lighting or hairstyle material. In the native-rest scene,
-press `T` to compare the source DDS candidate with neutral hair.
-The original body remains neutrally shaded; authentic skin, eyes and
-garment materials are still unresolved.
+The renderer now decodes **all four** genuine original DDS candidates
+directly from the installed depot using the small tracked resource-ID
+index `data/eso_humanoid_hair_texture_candidates.tsv`. The first
+three continue to drive the diagnostic diffuse, packed normal and
+specular shader. The fourth is a strict BGRA8 original texture
+checked for native dimensions and pixel-channel masks, *not* mixed
+into an invented hair colour. In the rest scene, press `T` to compare
+the source hair material with neutral hair, and press **`Y` to
+visualize its genuine tint-mask red channel as grayscale**.
+
+Offline source-mask histograms reveal that the original `0029A87D`
+red channel is almost entirely 0 or 255, while its green/blue channels
+are near zero and its original alpha channel is constant 255. The
+independently recovered `0002E5E1` candidate also has a largely
+binary red channel but an all-zero alpha channel. This is strong
+evidence that blindly using the DDS alpha as a tint intensity would
+be incorrect. Neither the true ESO hair tint equation nor the
+per-character dye parameters have been recovered. The original body
+remains neutrally shaded; authentic skin, eyes and garment materials
+are still unresolved.
 
 The independent source test
 `tests/check_original_humanoid_hair_material.ps1` verifies the
 four real DDS archive resources, all four original authoring-path
 names and the **10/10 native head/hair binding**. The Godot UI
-test verifies the diffuse/normal/specular shader textures, alpha
-cutout and `T` comparison. All extracted DDS files and local GPU
-captures remain ignored under `.research/`.
+test verifies all **four** source DDS channels, alpha cutout, source
+red tint-mask `Y` visualization and `T` comparison. The separate
+`res://tests/Godot/eso_original_captured_hair_tint_smoke.tscn`
+checks both `0343` source mappings and the capture-derived
+`3210` mapping. A real Godot hardware render of the original
+`601` mesh visibly changed its hair pixels in tint diagnostic
+mode, leaving the neutral body unchanged. All extracted DDS files
+and local GPU captures remain ignored under `.research/`.
 
 Important negative checks:
 

@@ -35,6 +35,7 @@ public partial class EsoOriginalFaceGallery:Node3D
     private ShaderMaterial? _candidateHairMaterial;
     private Material? _neutralHairMaterial;
     private bool _candidateHairVisible=true;
+    private bool _hairTintMaskVisible;
     private Camera3D? _camera;
     private Label? _hud;
     private int _focus=-1,_shotCount;
@@ -53,6 +54,7 @@ public partial class EsoOriginalFaceGallery:Node3D
     public int OriginalHeadCount=>_figures.Count;
     public int SourceDdsHairCount=>_originalHairs.Count;
     public bool SourceDdsHairVisible=>_candidateHairVisible;
+    public bool SourceHairTintMaskVisible=>_hairTintMaskVisible;
 
     public override void _Ready()
     {
@@ -197,7 +199,8 @@ public partial class EsoOriginalFaceGallery:Node3D
                mapping.Evidence!="archive-triplet-authoring-provisional"||
                mapping.Diffuse!=0x0029A877u||
                mapping.Normal!=0x0029A879u||
-               mapping.Specular!=0x0029A87Bu)
+               mapping.Specular!=0x0029A87Bu||
+               mapping.Tint!=0x0029A87Du)
                 throw new InvalidDataException(
                     "Original male hair authoring-shared DDS candidate IDs changed");
             _candidateHairMaterial=sourceTextures.LoadAlphaCutoutMaterial(hairId)??
@@ -298,6 +301,7 @@ public partial class EsoOriginalFaceGallery:Node3D
                 "Original skin materials still missing\n"+
                 "Hair: original DDS candidate (unverified)\n"+
                 "T: compare textured/neutral hair\n"+
+                "Y: original tint mask R (diagnostic)\n"+
                 "1-6 focus on one\n"+
                 "0 compare all\n"+
                 "Drag to orbit\n"+
@@ -346,6 +350,11 @@ public partial class EsoOriginalFaceGallery:Node3D
             case Key.Key1 or Key.Key2 or Key.Key3 or Key.Key4 or Key.Key5 or Key.Key6:
                 _focus=(int)key.Keycode-(int)Key.Key1;
                 UpdateView();break;
+            case Key.Y:
+                _hairTintMaskVisible=!_hairTintMaskVisible;
+                _candidateHairMaterial?.SetShaderParameter("tint_debug_view",
+                    _hairTintMaskVisible?1:0);
+                break;
             case Key.T:
                 _candidateHairVisible=!_candidateHairVisible;
                 foreach(var hair in _originalHairs)
