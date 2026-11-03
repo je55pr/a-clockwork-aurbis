@@ -5,6 +5,11 @@ our renderer reproduces the complete ESO appearance system. Source GR2
 assets and native game libraries remain in the ignored `.research/` folder
 and the locally installed ESO depot, not in Git.
 
+The separate [character-selection capture forensics](eso-character-selection-capture-forensics.md)
+report cross-checks two read-only live ESO material-path inventories
+against original Granny meshes and recovered hair DDS quartets. It does
+**not** establish authoritative selected-character draw-call bindings.
+
 ## Confirmed archive relationships
 
 - Animation skeleton `0x000020A2`: original 202-bone
