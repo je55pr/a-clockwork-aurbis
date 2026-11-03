@@ -142,6 +142,17 @@ hairstyles also fail full native compatibility with the tested
 `Head_600` and `Head_601` skeletons. Their source artwork
 paths are real, but they are **not validated plug-in replacements**.
 
+## Controlled A/B/A/C/D selection study (2026-11-03)
+
+A later [four-character same-process memory experiment](eso-live-four-character-state-analysis.md)
+recorded startup-to-selection asset paths, five ESO-only screenshots,
+and 562-page read-only metadata-region fingerprints. The 76 original
+source-art paths and their memory addresses stayed unchanged through
+30 consecutive non-empty scans. After filtering natural within-character
+changes, **no tested page uniquely identified all four selected
+characters**. Material-string neighborhoods must not be mistaken for
+active runtime actor/material references.
+
 ## Follow-up: source Telvanni Light armour atlases (2026-11-03)
 
 The captured `TelvanniLight_A_U_D/N/S/T` paths now lead to a
