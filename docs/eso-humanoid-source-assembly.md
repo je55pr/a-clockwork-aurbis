@@ -339,6 +339,18 @@ The existing source face UI smoke verifies shader textures, original
 skin bindings, and the `T` comparison. All extracted texture bytes,
 game DLLs and screenshots stay locally ignored under `.research/`.
 
+## Original equipment material evidence (2026-11-03)
+
+The [Telvanni Light clothing material experiment](eso-original-telvanni-materials.md)
+now loads four original source equipment meshes with **two provisional
+D/N/S/T DDS quartets**, reads ESO's real three `ZosMaterial` dye
+colours, and provides RGB/alpha tint-mask inspection. This does not
+supply authentic high-detail face or skin textures. Native inverse-rest
+matrix comparison rejects attaching that armour to the current
+`004` or `601` body. The tassets atlas mapping is separately
+rejected after failed GPU original-UV/alpha tests. No source cloth
+resource bytes or character captures are committed.
+
 ## Original hybrid-body animation audit (2026-11-02)
 
 The original `CustomizationSkeleton` source catalogue now has a bounded,

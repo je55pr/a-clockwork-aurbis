@@ -10,6 +10,7 @@ param(
     [switch]$OriginalSkinnedBodyLab,
     [switch]$OriginalBodyWalkComparisonLab,
     [switch]$OriginalFaceGallery,
+    [switch]$OriginalTelvanniMaterialLab,
     [switch]$OriginalHumanoid601AssemblyLab,
     [switch]$OriginalCreatureWalkGallery,
     [switch]$OriginalCreatureCrowdLab,
@@ -164,6 +165,7 @@ try {
     if ($OriginalSkinnedBodyLab) { $arguments += ' "res://scenes/eso_original_skinned_body_lab.tscn"' }
     if ($OriginalBodyWalkComparisonLab) { $arguments += ' "res://scenes/eso_original_body_walk_comparison.tscn"' }
     if ($OriginalFaceGallery) { $arguments += ' "res://scenes/eso_original_face_gallery.tscn"' }
+    if ($OriginalTelvanniMaterialLab) { $arguments += ' "res://scenes/eso_original_telvanni_material_lab.tscn"' }
     if ($OriginalHumanoid601AssemblyLab) { $arguments += ' "res://scenes/eso_original_humanoid_601_assembly.tscn"' }
     if ($OriginalCreatureWalkGallery) { $arguments += ' "res://scenes/eso_original_creature_walk_gallery.tscn"' }
     if ($OriginalCreatureCrowdLab) { $arguments += ' "res://scenes/eso_original_creature_crowd_lab.tscn"' }

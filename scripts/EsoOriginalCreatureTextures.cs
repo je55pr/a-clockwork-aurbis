@@ -27,6 +27,7 @@ internal sealed class EsoOriginalCreatureTextures : IDisposable
     internal int LoadedTintCount=>_tint.Count;
     private Shader? _diagnosticSpecularShader;
     private Shader? _diagnosticHairCutoutShader;
+    private Shader? _diagnosticClothingTintShader;
     internal int LoadedSpecularCount=>_specular.Count;
     private readonly Dictionary<uint,Mapping> _mappings=new();
     internal int MappingCount=>_mappings.Count;
@@ -180,6 +181,76 @@ internal sealed class EsoOriginalCreatureTextures : IDisposable
         material.SetShaderParameter("has_original_tint",tint!=null);
         material.SetShaderParameter("tint_debug_view",0);
         if(tint!=null)material.SetShaderParameter("original_tint_mask",tint);
+        return material;
+    }
+
+    // Original source clothing data, not a reproduction of ESO's final
+    // character shader. Render only the archived D/N/S material channels;
+    // the original RGBA tint mask can be examined one channel at a time.
+    // The three authoring tint colours are preserved by the source audit,
+    // not multiplied with source textures using an invented dye equation.
+    private const string SourceClothingTintShader = """
+        shader_type spatial;
+        render_mode cull_disabled, depth_draw_opaque;
+        uniform sampler2D original_diffuse : source_color, filter_linear_mipmap, repeat_enable;
+        uniform sampler2D original_normal : hint_normal, filter_linear_mipmap, repeat_enable;
+        uniform sampler2D original_specular : source_color, filter_linear_mipmap, repeat_enable;
+        uniform sampler2D original_tint_mask : filter_linear_mipmap, repeat_enable;
+        uniform int source_tint_debug_channel = -1;
+        void fragment()
+        {
+            vec4 diffuse=texture(original_diffuse,UV);
+            vec3 source_specular=texture(original_specular,UV).rgb;
+            ALBEDO=diffuse.rgb;
+            // Use the genuine source DDS alpha to distinguish fabric cutouts
+            // from empty atlas space. Cutout threshold is diagnostic, not
+            // confirmed to reproduce the original ESO material shader.
+            ALPHA=diffuse.a;
+            ALPHA_SCISSOR_THRESHOLD=0.42;
+            ROUGHNESS=0.78;
+            NORMAL_MAP=texture(original_normal,UV).rgb;
+            NORMAL_MAP_DEPTH=1.0;
+            SPECULAR=clamp(dot(source_specular,vec3(0.2126,0.7152,0.0722)),0.04,1.0);
+            if(source_tint_debug_channel>=0)
+            {
+                vec4 tint=texture(original_tint_mask,UV);
+                float value=source_tint_debug_channel==0?tint.r:
+                    source_tint_debug_channel==1?tint.g:
+                    source_tint_debug_channel==2?tint.b:tint.a;
+                ALBEDO=vec3(value);
+                SPECULAR=0.04;
+            }
+        }
+        """;
+
+    /// <summary>
+    /// Read four genuine archived ESO colour/normal/specular/tint textures
+    /// for clothing inspection. Mapping must explicitly list all four IDs.
+    /// No inferred wearer, authored dye blend or material-ID proof.
+    /// </summary>
+    internal ShaderMaterial? LoadOriginalClothingDiagnostic(uint meshId)
+    {
+        var mapping=SourceMapping(meshId);
+        if(mapping==null||mapping.Diffuse==0||mapping.Normal==0||
+           mapping.Specular==0||mapping.Tint==0)return null;
+        Texture2D? diffuse=GetTexture(mapping.Diffuse,_diffuse,false);
+        Texture2D? normal=GetTexture(mapping.Normal,_normal,true);
+        Texture2D? specular=GetTexture(mapping.Specular,_specular,false);
+        Texture2D? tint=GetTexture(mapping.Tint,_tint,false);
+        if(diffuse==null||normal==null||specular==null||tint==null||
+           diffuse.GetWidth()!=normal.GetWidth()||
+           diffuse.GetHeight()!=normal.GetHeight()||
+           diffuse.GetWidth()!=specular.GetWidth()||
+           diffuse.GetHeight()!=specular.GetHeight()||
+           diffuse.GetWidth()!=tint.GetWidth()||
+           diffuse.GetHeight()!=tint.GetHeight())return null;
+        _diagnosticClothingTintShader??=new Shader{Code=SourceClothingTintShader};
+        var material=new ShaderMaterial{Shader=_diagnosticClothingTintShader};
+        material.SetShaderParameter("original_diffuse",diffuse);
+        material.SetShaderParameter("original_normal",normal);
+        material.SetShaderParameter("original_specular",specular);
+        material.SetShaderParameter("original_tint_mask",tint);
+        material.SetShaderParameter("source_tint_debug_channel",-1);
         return material;
     }
 

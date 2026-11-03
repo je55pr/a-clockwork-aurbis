@@ -1,0 +1,10 @@
+# Provisional original ESO Telvanni Light armour DDS sets from installed GR2
+# source authoring names and two neighbouring 576x256 D/N/S/T quartets.
+# A and B gallery assignments are hypotheses, NOT verified runtime links.
+# mesh-id diffuse-id packed-normal-id specular-id tintmask-id evidence
+001086BD	001086C5	001086C7	001086C9	001086CB	archive-triplet-authoring-provisional
+001086D9	001086CD	001086CF	001086D1	001086D3	archive-triplet-authoring-provisional
+001086B5	001086CD	001086CF	001086D1	001086D3	archive-triplet-authoring-provisional
+00108795	001086CD	001086CF	001086D1	001086D3	archive-triplet-authoring-provisional
+# TelvanniLight_Tassets_A 001086B1 deliberately excluded: both archive quartets
+# sample transparent/empty atlas areas with its source UV0; mapping rejected.

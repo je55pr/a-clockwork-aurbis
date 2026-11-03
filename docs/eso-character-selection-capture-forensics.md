@@ -142,6 +142,19 @@ hairstyles also fail full native compatibility with the tested
 `Head_600` and `Head_601` skeletons. Their source artwork
 paths are real, but they are **not validated plug-in replacements**.
 
+## Follow-up: source Telvanni Light armour atlases (2026-11-03)
+
+The captured `TelvanniLight_A_U_D/N/S/T` paths now lead to a
+[source-backed four-channel Telvanni material lab](eso-original-telvanni-materials.md).
+Granny verifies these original artwork paths and actual primary, secondary,
+and accent dye colours on four genuine equipment meshes. Two 576×256
+D/N/S/T archive quartets produce coherent original UV material placement
+on helmets, belt and shoulders, but **runtime material-ID links remain
+provisional**. The `TelvanniLight_Tassets_A` mapping was explicitly
+**rejected** after both candidate atlases sampled transparent/empty
+source UV areas. No equipment has been attached to the existing
+incompatible humanoid body skeletons.
+
 ## Practical consequences
 
 1. **Model a four-channel material bundle.** Character hair, body
