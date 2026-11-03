@@ -119,10 +119,68 @@ The 280 chunk addresses are preserved at
 `.research/live-eso-selection/startup/second-run/D-B-D-reversible-16k-addresses.txt`,
 outside version control.
 
+## Narrow structural inspection of the two persistent B/D candidates
+
+While D was selected in the same live ESO process, a new bounded
+read-only probe inspected only the two most temporally reliable
+16 KiB regions, `0x18E4ACCC000` and `0x18E91E90000`. It records
+SHA-256 prefixes for 64-byte slices and the addresses/protection types
+of plausible pointers, but never saves underlying process bytes.
+
+Both 16 KiB regions remained **identical in all 512 64-byte slices**
+over repeated D captures, including another later capture.
+
+| Region | Validated pointer-like words | Nonzero bytes | Private targets | Executable-image targets |
+| --- | ---: | ---: | ---: | ---: |
+| `18E4ACCC000` | 790 | 8,021/16,384 | 562 | 228 |
+| `18E91E90000` | 354 | 6,614/16,384 | 212 | 142 |
+
+The repeated executable-image pointers resolve to the loaded
+`eso64.exe` module (base `0x7FF62E330000`):
+
+- `0x7FF6314DAFE0` occurs **222** times in the first region;
+  offsets recur at 32-, 64- and 96-byte gaps.
+- `0x7FF631745E48` and `0x7FF6316C7FE8` each occur **71** times
+  in the second region, separated by 32 bytes inside each apparent
+  record. The dominant distance between successive occurrences is
+  **224 bytes** (68 gaps), with two double-length gaps each.
+- For all three repeated addresses, the first three entries lead
+  back into `eso64.exe` image memory, supporting an interpretation
+  as **C++ virtual-function tables**. A bounded check for the
+  conventional MSVC x64 RTTI locator preceding these tables did
+  not validate, so **no class name was recovered**.
+
+This suggests regular engine-owned object layouts, potentially arrays
+or pools. It does **not** identify a skeleton, material, bone,
+rendering component, or active actor class.
+
+A second bounded probe read at most 256 bytes from 705 distinct
+private-memory pointer targets reached from those two regions,
+then compared only pointer-valued fields with 69 current-process
+original source-art texture-path addresses. It found **zero direct
+or near-string matches**. Twelve weak, *same-4-KiB-page-only*
+coincidences all came from one reached object header and a set of
+Breton sword strings. Those coincidences are insufficient to claim
+an original material-to-mesh link.
+
+The ignored research files are:
+`D-structure-first-64byte.tsv`,
+`D-structure-with-targets-pointer-pages.tsv`,
+`D-live-art-paths.tsv` and `D-structure-art-join.tsv`,
+under `.research/live-eso-selection/startup/second-run/`.
+The probes and their output remain uncommitted.
+
+**Next discriminatory test:** take the same 64-byte structural
+fingerprints while B is selected, and again on returning to D,
+without restarting ESO. Identify the minimal reversible fields
+inside these two proven pointer-rich regions. Only then trace
+selected fields to material/skeleton structures, checking the
+underlying record type independently.
+
 ## Interpretation and next experiment
 
 Exact reversible hashes are substantially stronger than changes inferred from two snapshots or file-name strings, yet they prove only that **some state reversibly tracks a character switch**. Neither structural pointers nor material bindings have been decoded. Character render state, shared pet/mount data, selection UI state, loaded data caches and other dependencies remain possible.
 
-The D -> B -> D controlled experiment is complete. The next step is a **narrowly scoped, read-only structural inspection** of the two long-term-stable 16 KiB candidate regions. Look for plausible pointers, object layout, and relationships to original skeleton/material resources without collecting credentials, chat, account data or unrelated process memory. Confirm any interpretation with a repeated switch before reporting it as fact. If the client allows a single trait (pet, mount, outfit or adornment) to change independently, that would be an even more discriminating test than switching entire characters.
+The D -> B -> D controlled experiment and initial read-only structural inspection are complete. The next test should compare the two pointer-rich 16 KiB regions at **64-byte resolution** across D -> B -> D, with repeated same-character controls and no process restart. Even if a specific field reverses, confirm what the object represents before calling it a skeleton or material binding. If the client permits changing just one pet, mount, outfit or adornment, that is a more discriminating long-term test than switching entire characters.
 
 All research fingerprint TSVs, local image captures and internal process addresses are kept outside version control. No game assets are distributed by this report.
