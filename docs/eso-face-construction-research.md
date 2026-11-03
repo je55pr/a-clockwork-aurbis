@@ -123,6 +123,52 @@ Tests:
 The currently shipped Auridon visual layer remains untouched by
 this isolated research prototype.
 
+
+
+## Offline follow-up after controlled character-selection captures (2026-11-03)
+
+The companion [capture forensics report](eso-character-selection-capture-forensics.md)
+recovers and cross-checks original D/N/S/T artwork paths from two
+read-only ESO character-selection sessions. The captured hairstyle
+`HAR_M_HU_3210` (`0002E5E3`) has four coherent original
+576 × 256 archived DDS candidates, including an uncompressed red
+tint mask; the candidate pairing is still **provisional**, not a
+proved runtime material-ID link.
+
+The captured hairstyle was checked via the **native installed Granny
+binding API** against **all twelve** locally indexed
+`CustomizationSkeleton` head GR2 models, including variants
+of `Head_004`, `Head_008`, `Head_010`, `Head_011`,
+`Head_012`, `Head_502`, `Head_503`, `Head_600` and
+`Head_601`. **None are source-exact compatible.** The nearest
+subsets resolve only **12 of 13** source skin binding names;
+some other heads resolve only 5 or 6. A single mismatched binding
+is still a failed, not a partial, head attachment. Avoid replacing
+original skin weights with guessed aliases.
+
+The original face-source material audit also explains the grey
+rendering gap:
+
+- High-detail `Head_600` (`001076DD`) declares only a generic
+  Granny `default` material and **no embedded texture source paths**.
+- The assembled `Head_601` (`001230E1`) and `Head_008`
+  (`00129B5D`) declare **zero embedded Granny materials**.
+- The low-detail mannequin-like `Head_004` (`000E2CFF`)
+  does name real `MannequinM_D/N/S` skin-art paths and explicit
+  `f4DiffuseTintPrimary/Secondary/Accent` values of
+  `(1,1,1,1)`; these do **not** provide the runtime source
+  resource IDs or prove the general race/sex skin shader.
+- A nearby three-image original 2048 × 1024 DXT5 group
+  `000E2CEF/000E2CF1/000E2CF3` was decoded and examined.
+  It resembles a brown material atlas, but its actual material
+  association cannot be established from numeric proximity.
+  **It was not assigned to `Head_004`.**
+
+The accepted next step remains recovering ESO's actual material
+resource linkage and customization/animation assembly mechanism,
+not promoting visually plausible neighboring images to confirmed
+character skin.
+
 ## Original material metadata and archive texture tracing (2026-11-02)
 
 The experimental read-only `--audit-character-material` command inspects
